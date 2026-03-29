@@ -284,7 +284,10 @@ inline void PushImageDescriptors(TextureCache& texture_cache,
             const VideoCommon::ImageViewId image_view_id{(views++)->id};
             const VideoCommon::SamplerId sampler_id{*(samplers++)};
             ImageView& image_view{texture_cache.GetImageView(image_view_id)};
-            VkImageView vk_image_view{image_view.Handle(desc.type)};
+            const Sampler& sampler{texture_cache.GetSampler(sampler_id)};
+            VkImageView vk_image_view{!sampler.IsSrgbConversion()
+                                          ? image_view.HandleNonSrgb(desc.type)
+                                          : image_view.Handle(desc.type)};
             if (vk_image_view == VK_NULL_HANDLE) {
                 const VkImageView null_image_view{
                     texture_cache.GetImageView(VideoCommon::NULL_IMAGE_VIEW_ID).Handle(desc.type)};
@@ -292,7 +295,6 @@ inline void PushImageDescriptors(TextureCache& texture_cache,
                     vk_image_view = null_image_view;
                 }
             }
-            const Sampler& sampler{texture_cache.GetSampler(sampler_id)};
             const bool use_fallback_sampler{sampler.HasAddedAnisotropy() &&
                                             !image_view.SupportsAnisotropy()};
             VkSampler vk_sampler{use_fallback_sampler ? sampler.HandleWithDefaultAnisotropy()
