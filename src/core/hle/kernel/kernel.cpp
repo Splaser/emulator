@@ -386,8 +386,8 @@ struct KernelCore::Impl {
             ASSERT(KThread::InitializeDummyThread(thread, nullptr).IsSuccess());
             return thread;
         }};
-
-        t.raw_thread.emplace(system.Kernel());
+        if (!t.raw_thread)
+            t.raw_thread.emplace(system.Kernel());
         t.thread = existing_thread ? existing_thread : initialize(&t.raw_thread.value());
         return t.thread;
     }
