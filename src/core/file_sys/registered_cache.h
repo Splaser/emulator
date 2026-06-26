@@ -6,11 +6,14 @@
 
 #include <array>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 #include <boost/container/flat_map.hpp>
 #include "common/common_types.h"
@@ -231,6 +234,8 @@ public:
     ~ContentProviderUnion() override;
 
     void SetSlot(ContentProviderUnionSlot slot, ContentProvider* provider);
+    void SetSlots(
+        std::initializer_list<std::pair<ContentProviderUnionSlot, ContentProvider*>> slots);
     void ClearSlot(ContentProviderUnionSlot slot);
 
     void Refresh() override;
@@ -251,10 +256,15 @@ public:
     std::optional<ContentProviderUnionSlot> GetSlotForEntry(u64 title_id,
                                                             ContentRecordType type) const;
 
+    VirtualFile GetExternalEntryForVersion(u64 title_id, ContentRecordType type,
+                                           u32 version) const;
+    std::vector<ExternalUpdateEntry> ListExternalUpdateVersions(u64 title_id) const;
+
     const class ExternalContentProvider* GetExternalProvider() const;
     const ContentProvider* GetSlotProvider(ContentProviderUnionSlot slot) const;
 
 private:
+    mutable std::shared_mutex providers_mutex;
     std::map<ContentProviderUnionSlot, ContentProvider*> providers;
 };
 

@@ -3,8 +3,10 @@
 
 #include <algorithm>
 #include <array>
+#include <mutex>
 #include <random>
 #include <regex>
+#include <shared_mutex>
 #include <vector>
 #include <fmt/format.h>
 #include <openssl/evp.h>
@@ -854,6 +856,7 @@ bool RegisteredCache::RawInstallCitronMeta(const CNMT& cnmt) {
 ContentProviderUnion::~ContentProviderUnion() = default;
 
 const ExternalContentProvider* ContentProviderUnion::GetExternalProvider() const {
+    std::shared_lock lock{providers_mutex};
     auto it = providers.find(ContentProviderUnionSlot::External);
     if (it != providers.end()) {
         return static_cast<const ExternalContentProvider*>(it->second);
@@ -862,6 +865,7 @@ const ExternalContentProvider* ContentProviderUnion::GetExternalProvider() const
 }
 
 const ContentProvider* ContentProviderUnion::GetSlotProvider(ContentProviderUnionSlot slot) const {
+    std::shared_lock lock{providers_mutex};
     auto it = providers.find(slot);
     if (it != providers.end()) {
         return it->second;
@@ -870,14 +874,25 @@ const ContentProvider* ContentProviderUnion::GetSlotProvider(ContentProviderUnio
 }
 
 void ContentProviderUnion::SetSlot(ContentProviderUnionSlot slot, ContentProvider* provider) {
+    std::unique_lock lock{providers_mutex};
     providers[slot] = provider;
 }
 
+void ContentProviderUnion::SetSlots(
+    std::initializer_list<std::pair<ContentProviderUnionSlot, ContentProvider*>> slots) {
+    std::unique_lock lock{providers_mutex};
+    for (const auto& [slot, provider] : slots) {
+        providers[slot] = provider;
+    }
+}
+
 void ContentProviderUnion::ClearSlot(ContentProviderUnionSlot slot) {
+    std::unique_lock lock{providers_mutex};
     providers[slot] = nullptr;
 }
 
 void ContentProviderUnion::Refresh() {
+    std::unique_lock lock{providers_mutex};
     for (auto& provider : providers) {
         if (provider.second == nullptr)
             continue;
@@ -887,6 +902,7 @@ void ContentProviderUnion::Refresh() {
 }
 
 bool ContentProviderUnion::HasEntry(u64 title_id, ContentRecordType type) const {
+    std::shared_lock lock{providers_mutex};
     for (const auto& provider : providers) {
         if (provider.second == nullptr)
             continue;
@@ -899,6 +915,7 @@ bool ContentProviderUnion::HasEntry(u64 title_id, ContentRecordType type) const 
 }
 
 std::optional<u32> ContentProviderUnion::GetEntryVersion(u64 title_id) const {
+    std::shared_lock lock{providers_mutex};
     for (const auto& provider : providers) {
         if (provider.second == nullptr)
             continue;
@@ -912,6 +929,7 @@ std::optional<u32> ContentProviderUnion::GetEntryVersion(u64 title_id) const {
 }
 
 VirtualFile ContentProviderUnion::GetEntryUnparsed(u64 title_id, ContentRecordType type) const {
+    std::shared_lock lock{providers_mutex};
     for (const auto& provider : providers) {
         if (provider.second == nullptr)
             continue;
@@ -925,6 +943,7 @@ VirtualFile ContentProviderUnion::GetEntryUnparsed(u64 title_id, ContentRecordTy
 }
 
 VirtualFile ContentProviderUnion::GetEntryRaw(u64 title_id, ContentRecordType type) const {
+    std::shared_lock lock{providers_mutex};
     for (const auto& provider : providers) {
         if (provider.second == nullptr)
             continue;
@@ -938,6 +957,7 @@ VirtualFile ContentProviderUnion::GetEntryRaw(u64 title_id, ContentRecordType ty
 }
 
 std::unique_ptr<NCA> ContentProviderUnion::GetEntry(u64 title_id, ContentRecordType type) const {
+    std::shared_lock lock{providers_mutex};
     for (const auto& provider : providers) {
         if (provider.second == nullptr)
             continue;
@@ -955,6 +975,7 @@ std::vector<ContentProviderEntry> ContentProviderUnion::ListEntriesFilter(
     std::optional<u64> title_id) const {
     std::vector<ContentProviderEntry> out;
 
+    std::shared_lock lock{providers_mutex};
     for (const auto& provider : providers) {
         if (provider.second == nullptr)
             continue;
@@ -975,6 +996,7 @@ ContentProviderUnion::ListEntriesFilterOrigin(std::optional<ContentProviderUnion
                                               std::optional<u64> title_id) const {
     std::vector<std::pair<ContentProviderUnionSlot, ContentProviderEntry>> out;
 
+    std::shared_lock lock{providers_mutex};
     for (const auto& provider : providers) {
         if (provider.second == nullptr)
             continue;
@@ -996,6 +1018,7 @@ ContentProviderUnion::ListEntriesFilterOrigin(std::optional<ContentProviderUnion
 
 std::optional<ContentProviderUnionSlot> ContentProviderUnion::GetSlotForEntry(
     u64 title_id, ContentRecordType type) const {
+    std::shared_lock lock{providers_mutex};
     const auto iter =
         std::find_if(providers.begin(), providers.end(), [title_id, type](const auto& provider) {
             return provider.second != nullptr && provider.second->HasEntry(title_id, type);
@@ -1006,6 +1029,29 @@ std::optional<ContentProviderUnionSlot> ContentProviderUnion::GetSlotForEntry(
     }
 
     return iter->first;
+}
+
+VirtualFile ContentProviderUnion::GetExternalEntryForVersion(u64 title_id, ContentRecordType type,
+                                                             u32 version) const {
+    std::shared_lock lock{providers_mutex};
+    auto it = providers.find(ContentProviderUnionSlot::External);
+    if (it == providers.end() || it->second == nullptr) {
+        return nullptr;
+    }
+
+    return static_cast<const ExternalContentProvider*>(it->second)
+        ->GetEntryForVersion(title_id, type, version);
+}
+
+std::vector<ExternalUpdateEntry> ContentProviderUnion::ListExternalUpdateVersions(
+    u64 title_id) const {
+    std::shared_lock lock{providers_mutex};
+    auto it = providers.find(ContentProviderUnionSlot::External);
+    if (it == providers.end() || it->second == nullptr) {
+        return {};
+    }
+
+    return static_cast<const ExternalContentProvider*>(it->second)->ListUpdateVersions(title_id);
 }
 
 ManualContentProvider::~ManualContentProvider() = default;
