@@ -469,14 +469,15 @@ void RegisteredCache::ProcessFiles(const std::vector<NcaID>& ids, std::map<u64, 
                 continue;
 
             CNMT cnmt(section0_file);
+            const auto title_id = cnmt.GetTitleID();
             LOG_INFO(Service_FS,
-                     "RegisteredCache ProcessFiles: parsed meta nca_id={}, title_id={:016X}, "
-                     "records={}",
-                     Common::HexToString(id, false), cnmt.GetTitleID(),
+                     "RegisteredCache ProcessFiles: parsed meta nca_id={}, nca_title_id={:016X}, "
+                     "cnmt_title_id={:016X}, records={}",
+                     Common::HexToString(id, false), nca->GetTitleId(), title_id,
                      cnmt.GetContentRecords().size());
 
-            out_meta.insert_or_assign(nca->GetTitleId(), std::move(cnmt));
-            out_meta_id.insert_or_assign(nca->GetTitleId(), id);
+            out_meta.insert_or_assign(title_id, std::move(cnmt));
+            out_meta_id.insert_or_assign(title_id, id);
             found_cnmt = true;
             break;
         }
