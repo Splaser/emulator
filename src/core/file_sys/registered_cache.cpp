@@ -472,9 +472,24 @@ void RegisteredCache::ProcessFiles(const std::vector<NcaID>& ids, std::map<u64, 
             const auto title_id = cnmt.GetTitleID();
             LOG_INFO(Service_FS,
                      "RegisteredCache ProcessFiles: parsed meta nca_id={}, nca_title_id={:016X}, "
-                     "cnmt_title_id={:016X}, records={}",
+                     "cnmt_title_id={:016X}, title_type={:02X}, records={}",
                      Common::HexToString(id, false), nca->GetTitleId(), title_id,
-                     cnmt.GetContentRecords().size());
+                     static_cast<u32>(cnmt.GetType()), cnmt.GetContentRecords().size());
+
+            if (cnmt.GetType() == TitleType::AOC || cnmt.GetType() == TitleType::Update) {
+                const auto& content_records = cnmt.GetContentRecords();
+                for (std::size_t record_index = 0; record_index < content_records.size();
+                     ++record_index) {
+                    const auto& record = content_records[record_index];
+                    LOG_INFO(Service_FS,
+                             "RegisteredCache ProcessFiles: meta record title_id={:016X}, "
+                             "record_index={}, record_type={:02X}, record_nca_id={}, "
+                             "record_file_found={}",
+                             title_id, record_index, static_cast<u32>(record.type),
+                             Common::HexToString(record.nca_id, false),
+                             GetFileAtID(record.nca_id) != nullptr);
+                }
+            }
 
             out_meta.insert_or_assign(title_id, std::move(cnmt));
             out_meta_id.insert_or_assign(title_id, id);

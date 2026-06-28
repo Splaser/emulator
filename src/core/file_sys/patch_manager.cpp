@@ -588,6 +588,14 @@ VirtualFile PatchManager::PatchRomFS(const NCA* base_nca, VirtualFile base_romfs
             }
         }
 
+        if (type == ContentRecordType::Program || type == ContentRecordType::Control) {
+            LOG_INFO(Loader,
+                     "PatchRomFS update lookup: title_id={:016X}, type={:02X}, found_best={}, "
+                     "best_version={}, best_update_raw={}",
+                     title_id, static_cast<u32>(type), found_best, best_version,
+                     best_update_raw != nullptr);
+        }
+
         // 3. Packed Update (Fallback)
         // If we still haven't found a best update, or if the packed one is enabled (named "Update"
         // usually? Or "Update (PACKED)"?) The GetPatches logic names it "Update" with version
@@ -1224,6 +1232,10 @@ PatchManager::Metadata PatchManager::GetControlMetadata() const {
     }
 
     const auto active_update = GetActiveUpdate();
+    LOG_INFO(Loader,
+             "GetControlMetadata: title_id={:016X}, active_update_found={}, version={}, "
+             "is_external={}",
+             title_id, active_update.found, active_update.version, active_update.is_external);
     if (active_update.found) {
         const auto update_tid = GetUpdateTitleID(title_id);
         if (active_update.is_external) {
@@ -1238,14 +1250,20 @@ PatchManager::Metadata PatchManager::GetControlMetadata() const {
         } else {
             control_nca = content_provider.GetEntry(update_tid, ContentRecordType::Control);
         }
+        LOG_INFO(Loader, "GetControlMetadata: update control_nca={}", control_nca != nullptr);
     }
 
     if (control_nca == nullptr) {
         control_nca = content_provider.GetEntry(title_id, ContentRecordType::Control);
+        LOG_INFO(Loader, "GetControlMetadata: base control_nca={}", control_nca != nullptr);
     }
 
-    if (control_nca == nullptr)
+    if (control_nca == nullptr) {
+        LOG_WARNING(Loader, "GetControlMetadata: no control NCA for title_id={:016X}", title_id);
         return {};
+    }
+    LOG_INFO(Loader, "GetControlMetadata: selected control status={}, type={:02X}",
+             static_cast<u32>(control_nca->GetStatus()), static_cast<u32>(control_nca->GetType()));
     return ParseControlNCA(*control_nca);
 }
 
