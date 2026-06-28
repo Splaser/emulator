@@ -16,6 +16,7 @@
 #include "common/settings.h"
 #include "common/string_util.h"
 #include "core/core.h"
+#include "core/file_sys/common_funcs.h"
 #include "core/file_sys/content_archive.h"
 #include "core/file_sys/errors.h"
 #include "core/file_sys/fs_directory.h"
@@ -490,8 +491,10 @@ Result FSP_SRV::OpenDataStorageByCurrentProcess(OutInterface<IStorage> out_inter
 
 Result FSP_SRV::OpenDataStorageByDataId(OutInterface<IStorage> out_interface,
                                         FileSys::StorageId storage_id, u32 unknown, u64 title_id) {
-    LOG_DEBUG(Service_FS, "called with storage_id={:02X}, unknown={:08X}, title_id={:016X}",
-              storage_id, unknown, title_id);
+    LOG_WARNING(Service_FS,
+                "OpenDataStorageByDataId called with storage_id={:02X}, unknown={:08X}, "
+                "title_id={:016X}",
+                storage_id, unknown, title_id);
 
     auto data = romfs_controller->OpenRomFS(title_id, storage_id, FileSys::ContentRecordType::Data);
 
@@ -503,10 +506,45 @@ Result FSP_SRV::OpenDataStorageByDataId(OutInterface<IStorage> out_interface,
             R_SUCCEED();
         }
 
+        const auto requested_base = FileSys::GetBaseTitleID(title_id);
+        const auto requested_aoc_base = FileSys::GetAOCBaseTitleID(title_id);
+        const auto requested_aoc_id = FileSys::GetAOCID(title_id);
+        if (title_id >= requested_aoc_base &&
+            title_id <= requested_aoc_base + FileSys::AOC_TITLE_ID_MASK) {
+            std::size_t matching_aoc_count = 0;
+            const auto entries = content_provider.ListEntriesFilter(
+                FileSys::TitleType::AOC, FileSys::ContentRecordType::Data);
+            for (const auto& entry : entries) {
+                if (FileSys::GetBaseTitleID(entry.title_id) != requested_base) {
+                    continue;
+                }
+
+                ++matching_aoc_count;
+                LOG_WARNING(Service_FS,
+                            "OpenDataStorageByDataId miss context: installed_aoc_index={}, "
+                            "installed_title_id={:016X}",
+                            FileSys::GetAOCID(entry.title_id), entry.title_id);
+            }
+
+            LOG_WARNING(Service_FS,
+                        "OpenDataStorageByDataId AOC miss: requested_base={:016X}, "
+                        "requested_aoc_base={:016X}, requested_aoc_index={}, "
+                        "matching_installed_aoc_count={}",
+                        requested_base, requested_aoc_base, requested_aoc_id, matching_aoc_count);
+        }
+
         LOG_ERROR(Service_FS,
                   "Could not open data storage with title_id={:016X}, storage_id={:02X}", title_id,
                   storage_id);
         R_RETURN(FileSys::ResultTargetNotFound);
+    }
+
+    const auto opened_aoc_base = FileSys::GetAOCBaseTitleID(title_id);
+    if (title_id >= opened_aoc_base && title_id <= opened_aoc_base + FileSys::AOC_TITLE_ID_MASK) {
+        LOG_WARNING(Service_FS,
+                    "OpenDataStorageByDataId opened AOC: base={:016X}, addon_index={}, "
+                    "title_id={:016X}",
+                    FileSys::GetBaseTitleID(title_id), FileSys::GetAOCID(title_id), title_id);
     }
 
     const FileSys::PatchManager pm{title_id, fsc, content_provider};

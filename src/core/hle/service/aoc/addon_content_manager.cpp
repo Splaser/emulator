@@ -148,11 +148,13 @@ Result IAddOnContentManager::ListAddOnContent(Out<u32> out_count,
     // TODO(DarkLordZach): Find the correct error code.
     R_UNLESS(out.size() >= offset, ResultUnknown);
 
-    *out_count = static_cast<u32>(std::min<size_t>(out.size() - offset, count));
+    const auto buffer_count = out_addons.size() / sizeof(u32);
+    *out_count = static_cast<u32>(std::min({out.size() - offset, static_cast<size_t>(count),
+                                            buffer_count}));
     LOG_WARNING(Service_AOC,
-            "ListAddOnContent result: base_id={:016X}, matched_total={}, offset={}, "
-            "requested_count={}, returned_count={}, buffer_bytes={}",
-            current, out.size(), offset, count, *out_count, out_addons.size());
+                "ListAddOnContent result: base_id={:016X}, matched_total={}, offset={}, "
+                "requested_count={}, returned_count={}, buffer_bytes={}",
+                current, out.size(), offset, count, *out_count, out_addons.size());
 
     for (u32 i = 0; i < *out_count; ++i) {
         const auto addon_index = out[offset + i];
@@ -219,7 +221,25 @@ Result IAddOnContentManager::ListAddOnContentByApplicationId(
     // TODO(DarkLordZach): Find the correct error code.
     R_UNLESS(out.size() >= offset, ResultUnknown);
 
-    *out_count = static_cast<u32>(std::min<size_t>(out.size() - offset, count));
+    const auto buffer_count = out_addons.size() / sizeof(u32);
+    *out_count = static_cast<u32>(std::min({out.size() - offset, static_cast<size_t>(count),
+                                            buffer_count}));
+    LOG_WARNING(Service_AOC,
+                "ListAddOnContentByApplicationId result: base_id={:016X}, matched_total={}, "
+                "offset={}, requested_count={}, returned_count={}, buffer_bytes={}",
+                current, out.size(), offset, count, *out_count, out_addons.size());
+
+    for (u32 i = 0; i < *out_count; ++i) {
+        const auto addon_index = out[offset + i];
+        const auto reconstructed_title_id =
+            FileSys::GetAOCBaseTitleID(current) + addon_index;
+
+        LOG_WARNING(Service_AOC,
+                    "ListAddOnContentByApplicationId output[{}]: addon_index={}, "
+                    "title_id={:016X}",
+                    i, addon_index, reconstructed_title_id);
+    }
+
     std::rotate(out.begin(), out.begin() + offset, out.end());
 
     std::memcpy(out_addons.data(), out.data(), *out_count * sizeof(u32));
