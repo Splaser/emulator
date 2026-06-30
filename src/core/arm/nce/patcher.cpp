@@ -4,6 +4,7 @@
 #include "common/arm64/native_clock.h"
 #include "common/bit_cast.h"
 #include "common/literals.h"
+#include "common/logging.h"
 #include "core/arm/nce/arm_nce.h"
 #include "core/arm/nce/guest_context.h"
 #include "core/arm/nce/instructions.h"
@@ -20,6 +21,9 @@ using namespace oaknut::util;
 using NativeExecutionParameters = Kernel::KThread::NativeExecutionParameters;
 
 constexpr size_t MaxRelativeBranch = 128_MiB;
+constexpr ptrdiff_t MinRelativeBranchOffset = -static_cast<ptrdiff_t>(MaxRelativeBranch);
+constexpr ptrdiff_t MaxRelativeBranchOffset =
+    static_cast<ptrdiff_t>(MaxRelativeBranch) - sizeof(u32);
 constexpr u32 ModuleCodeIndex = 0x24 / sizeof(u32);
 
 Patcher::Patcher() : c(m_patch_instructions) {
@@ -131,22 +135,54 @@ bool Patcher::RelocateAndCopy(Common::ProcessAddress load_base,
     const auto text_words =
         std::span<u32>{reinterpret_cast<u32*>(text.data()), text.size() / sizeof(u32)};
 
+    const auto IsValidBranchOffset = [](ptrdiff_t offset) {
+        return offset >= MinRelativeBranchOffset && offset <= MaxRelativeBranchOffset &&
+               offset % sizeof(u32) == 0;
+    };
+
+    const auto LogBranchRelocation = [&](const char* kind, ptrdiff_t branch_offset,
+                                         const Relocation& rel) {
+        if (IsValidBranchOffset(branch_offset)) {
+            return;
+        }
+
+        LOG_CRITICAL(Core_ARM,
+                     "NCE branch relocation is outside AArch64 B range: kind={}, mode={}, "
+                     "relocate_module={}, modules={}, branch_offset={:#x}, valid_range=[{:#x}, "
+                     "{:#x}], patch_offset={:#x}, module_offset={:#x}, patch_size={:#x}, "
+                     "image_size={:#x}, total_program_size={:#x}, load_base={:#x}",
+                     kind, mode, m_relocate_module_index, modules.size(), branch_offset,
+                     MinRelativeBranchOffset, MaxRelativeBranchOffset, rel.patch_offset,
+                     rel.module_offset, patch_size, image_size, total_program_size,
+                     GetInteger(load_base));
+    };
+
     const auto ApplyBranchToPatchRelocation = [&](u32* target, const Relocation& rel) {
         oaknut::CodeGenerator rc{target};
+        ptrdiff_t branch_offset;
         if (mode == PatchMode::PreText) {
-            rc.B(rel.patch_offset - patch_size - rel.module_offset);
+            branch_offset = rel.patch_offset - static_cast<ptrdiff_t>(patch_size) -
+                            static_cast<ptrdiff_t>(rel.module_offset);
         } else {
-            rc.B(total_program_size - rel.module_offset + rel.patch_offset);
+            branch_offset = static_cast<ptrdiff_t>(total_program_size) -
+                            static_cast<ptrdiff_t>(rel.module_offset) + rel.patch_offset;
         }
+        LogBranchRelocation("module_to_patch", branch_offset, rel);
+        rc.B(branch_offset);
     };
 
     const auto ApplyBranchToModuleRelocation = [&](u32* target, const Relocation& rel) {
         oaknut::CodeGenerator rc{target};
+        ptrdiff_t branch_offset;
         if (mode == PatchMode::PreText) {
-            rc.B(patch_size - rel.patch_offset + rel.module_offset);
+            branch_offset = static_cast<ptrdiff_t>(patch_size) - rel.patch_offset +
+                            static_cast<ptrdiff_t>(rel.module_offset);
         } else {
-            rc.B(rel.module_offset - total_program_size - rel.patch_offset);
+            branch_offset = static_cast<ptrdiff_t>(rel.module_offset) -
+                            static_cast<ptrdiff_t>(total_program_size) - rel.patch_offset;
         }
+        LogBranchRelocation("patch_to_module", branch_offset, rel);
+        rc.B(branch_offset);
     };
 
     const auto RebasePatch = [&](ptrdiff_t patch_offset) {
@@ -198,6 +234,14 @@ bool Patcher::RelocateAndCopy(Common::ProcessAddress load_base,
     // Only copy to the program image of the last module
     if (m_relocate_module_index == modules.size()) {
         if (this->mode == PatchMode::PreText) {
+            if (image_size != total_program_size) {
+                LOG_CRITICAL(Core_ARM,
+                             "NCE PreText final copy size mismatch: image_size={:#x}, "
+                             "total_program_size={:#x}, patch_size={:#x}, relocate_module={}, "
+                             "modules={}, load_base={:#x}",
+                             image_size, total_program_size, patch_size, m_relocate_module_index,
+                             modules.size(), GetInteger(load_base));
+            }
             ASSERT(image_size == total_program_size);
             std::memcpy(program_image.data(), m_patch_instructions.data(),
                         m_patch_instructions.size() * sizeof(u32));
