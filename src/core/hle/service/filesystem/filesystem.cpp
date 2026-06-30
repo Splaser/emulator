@@ -9,6 +9,7 @@
 #include "common/fs/path_util.h"
 #include "common/settings.h"
 #include "core/core.h"
+#include "core/crypto/key_manager.h"
 #include "core/file_sys/bis_factory.h"
 #include "core/file_sys/card_image.h"
 #include "core/file_sys/control_metadata.h"
@@ -828,6 +829,8 @@ void FileSystemController::CreateFactories(FileSys::VfsFilesystem& vfs, bool ove
         return;
     }
 
+    Core::Crypto::KeyManager::Instance().PopulateTickets();
+
     using CitronPath = Common::FS::CitronPath;
     const auto sdmc_dir_path = Common::FS::GetCitronPath(CitronPath::SDMCDir);
     const auto sdmc_load_dir_path = sdmc_dir_path / "atmosphere/contents";
@@ -921,6 +924,8 @@ void FileSystemController::CreateFactories(FileSys::VfsFilesystem& vfs, bool ove
 }
 
 void FileSystemController::RefreshExternalContentProvider() {
+    Core::Crypto::KeyManager::Instance().PopulateTickets();
+
     auto vfs = system.GetFilesystem();
     std::vector<FileSys::VirtualDir> load_dirs;
     for (const auto& path : Settings::values.external_content_dirs) {
