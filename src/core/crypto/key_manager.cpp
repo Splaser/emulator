@@ -690,6 +690,8 @@ KeyManager::KeyManager() {
 }
 
 void KeyManager::ReloadKeys() {
+    std::scoped_lock lock{key_mutex};
+
     ticket_databases_loaded = false;
     common_tickets.clear();
     personal_tickets.clear();
@@ -725,6 +727,8 @@ static bool ValidCryptoRevisionString(std::string_view base, size_t begin, size_
 }
 
 void KeyManager::LoadFromFile(const std::filesystem::path& file_path, bool is_title_keys) {
+    std::scoped_lock lock{key_mutex};
+
     if (!Common::FS::Exists(file_path)) {
         return;
     }
@@ -835,6 +839,7 @@ void KeyManager::LoadFromFile(const std::filesystem::path& file_path, bool is_ti
 }
 
 bool KeyManager::AreKeysLoaded() const {
+    std::scoped_lock lock{key_mutex};
     return !s128_keys.empty() && !s256_keys.empty();
 }
 
@@ -862,36 +867,47 @@ bool KeyManager::BaseDeriveNecessary() const {
 }
 
 bool KeyManager::HasKey(S128KeyType id, u64 field1, u64 field2) const {
+    std::scoped_lock lock{key_mutex};
     return s128_keys.find({id, field1, field2}) != s128_keys.end();
 }
 
 bool KeyManager::HasKey(S256KeyType id, u64 field1, u64 field2) const {
+    std::scoped_lock lock{key_mutex};
     return s256_keys.find({id, field1, field2}) != s256_keys.end();
 }
 
 Key128 KeyManager::GetKey(S128KeyType id, u64 field1, u64 field2) const {
-    if (!HasKey(id, field1, field2)) {
+    std::scoped_lock lock{key_mutex};
+
+    const auto iter = s128_keys.find({id, field1, field2});
+    if (iter == s128_keys.end()) {
         return {};
     }
-    return s128_keys.at({id, field1, field2});
+    return iter->second;
 }
 
 Key256 KeyManager::GetKey(S256KeyType id, u64 field1, u64 field2) const {
-    if (!HasKey(id, field1, field2)) {
+    std::scoped_lock lock{key_mutex};
+
+    const auto iter = s256_keys.find({id, field1, field2});
+    if (iter == s256_keys.end()) {
         return {};
     }
-    return s256_keys.at({id, field1, field2});
+    return iter->second;
 }
 
 Key256 KeyManager::GetBISKey(u8 partition_id) const {
+    std::scoped_lock lock{key_mutex};
+
     Key256 out{};
 
     for (const auto& bis_type : {BISKeyType::Crypto, BISKeyType::Tweak}) {
-        if (HasKey(S128KeyType::BIS, partition_id, static_cast<u64>(bis_type))) {
+        const auto iter =
+            s128_keys.find({S128KeyType::BIS, partition_id, static_cast<u64>(bis_type)});
+        if (iter != s128_keys.end()) {
             std::memcpy(
                 out.data() + sizeof(Key128) * static_cast<u64>(bis_type),
-                s128_keys.at({S128KeyType::BIS, partition_id, static_cast<u64>(bis_type)}).data(),
-                sizeof(Key128));
+                iter->second.data(), sizeof(Key128));
         }
     }
 
@@ -937,6 +953,8 @@ void KeyManager::WriteKeyToFile(KeyCategory category, std::string_view keyname,
 }
 
 void KeyManager::SetKey(S128KeyType id, Key128 key, u64 field1, u64 field2) {
+    std::scoped_lock lock{key_mutex};
+
     if (s128_keys.find({id, field1, field2}) != s128_keys.end() || key == Key128{}) {
         return;
     }
@@ -984,6 +1002,8 @@ void KeyManager::SetKey(S128KeyType id, Key128 key, u64 field1, u64 field2) {
 }
 
 void KeyManager::SetKey(S256KeyType id, Key256 key, u64 field1, u64 field2) {
+    std::scoped_lock lock{key_mutex};
+
     if (s256_keys.find({id, field1, field2}) != s256_keys.end() || key == Key256{}) {
         return;
     }
@@ -1199,6 +1219,8 @@ void KeyManager::DeriveETicket(PartitionDataManager& data,
 }
 
 void KeyManager::PopulateTickets() {
+    std::scoped_lock lock{key_mutex};
+
     if (ticket_databases_loaded) {
         return;
     }
@@ -1230,6 +1252,8 @@ void KeyManager::PopulateTickets() {
 }
 
 void KeyManager::ReloadTickets() {
+    std::scoped_lock lock{key_mutex};
+
     ticket_databases_loaded = false;
     common_tickets.clear();
     personal_tickets.clear();
@@ -1239,6 +1263,8 @@ void KeyManager::ReloadTickets() {
 }
 
 void KeyManager::SynthesizeTickets() {
+    std::scoped_lock lock{key_mutex};
+
     for (const auto& key : s128_keys) {
         if (key.first.type != S128KeyType::Titlekey) {
             continue;
@@ -1314,15 +1340,19 @@ void KeyManager::PopulateFromPartitionData(PartitionDataManager& data) {
     DeriveBase();
 }
 
-const std::map<u128, Ticket>& KeyManager::GetCommonTickets() const {
+std::map<u128, Ticket> KeyManager::GetCommonTickets() const {
+    std::scoped_lock lock{key_mutex};
     return common_tickets;
 }
 
-const std::map<u128, Ticket>& KeyManager::GetPersonalizedTickets() const {
+std::map<u128, Ticket> KeyManager::GetPersonalizedTickets() const {
+    std::scoped_lock lock{key_mutex};
     return personal_tickets;
 }
 
 bool KeyManager::AddTicket(const Ticket& ticket) {
+    std::scoped_lock lock{key_mutex};
+
     if (!ticket.IsValid()) {
         LOG_WARNING(Crypto, "Attempted to add invalid ticket.");
         return false;
@@ -1353,6 +1383,8 @@ bool KeyManager::AddTicket(const Ticket& ticket) {
 }
 
 bool KeyManager::PersistTicket(const Ticket& ticket) {
+    std::scoped_lock lock{key_mutex};
+
     if (!ticket.IsValid()) {
         LOG_WARNING(Crypto, "Attempted to persist invalid ticket.");
         return false;
@@ -1399,5 +1431,11 @@ bool KeyManager::PersistTicket(const Ticket& ticket) {
     }
 
     return ticket_save.Flush();
+}
+
+bool KeyManager::AddAndPersistTicket(const Ticket& ticket) {
+    std::scoped_lock lock{key_mutex};
+
+    return AddTicket(ticket) && PersistTicket(ticket);
 }
 } // namespace Core::Crypto

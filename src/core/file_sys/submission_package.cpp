@@ -191,12 +191,8 @@ void NSP::SetTicketKeys(const std::vector<VirtualFile>& files) {
         }
 
         auto ticket = Core::Crypto::Ticket::Read(ticket_file);
-        if (!keys.AddTicket(ticket)) {
-            LOG_WARNING(Common_Filesystem, "Could not load NSP ticket {}", ticket_file->GetName());
-            continue;
-        }
-        if (!keys.PersistTicket(ticket)) {
-            LOG_WARNING(Common_Filesystem, "Could not persist NSP ticket {}",
+        if (!keys.AddAndPersistTicket(ticket)) {
+            LOG_WARNING(Common_Filesystem, "Could not load or persist NSP ticket {}",
                         ticket_file->GetName());
         }
     }
