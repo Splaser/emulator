@@ -149,7 +149,16 @@ std::optional<VAddr> AppLoader_NSO::LoadModule(Kernel::KProcess& process, Core::
 
     // Apply patches if necessary
     const auto name = nso_file.GetName();
-    if (pm && (pm->HasNSOPatch(nso_header.build_id, name) || Settings::values.dump_nso)) {
+    const bool has_nso_patch = pm && pm->HasNSOPatch(nso_header.build_id, name);
+#ifdef HAS_NCE
+    if (load_into_process && patches && Settings::IsNceEnabled() && has_nso_patch) {
+        LOG_WARNING(Loader,
+                    "NCE layout preflight used the unpatched NSO image while runtime patches "
+                    "are present: module={}, build_id={}",
+                    name, Common::HexToString(nso_header.build_id));
+    }
+#endif
+    if (pm && (has_nso_patch || Settings::values.dump_nso)) {
         std::span<u8> patchable_section(program_image.data() + module_start,
                                         program_image.size() - module_start);
         std::vector<u8> pi_header(sizeof(NSOHeader) + patchable_section.size());
