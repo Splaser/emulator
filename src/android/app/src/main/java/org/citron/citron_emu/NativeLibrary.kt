@@ -343,6 +343,13 @@ object NativeLibrary {
     external fun submitInlineKeyboardText(text: String?)
 
     /**
+     * Replaces inline keyboard text with the IME editor contents.
+     * @param text Current text from the Android IME editor.
+     * @param cursor_position Cursor position in the editor text.
+     */
+    external fun replaceInlineKeyboardText(text: String?, cursor_position: Int)
+
+    /**
      * Submits inline keyboard input. Used to indicate keys pressed that are not text.
      * @param key_code Android Key Code associated with the keyboard input.
      */

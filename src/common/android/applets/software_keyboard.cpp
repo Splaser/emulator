@@ -21,6 +21,19 @@ static jmethodID s_swkbd_execute_inline;
 
 namespace Common::Android::SoftwareKeyboard {
 
+static s32 ClampCursorPosition(s32 cursor_position, std::size_t text_size) {
+    if (cursor_position < 0) {
+        return 0;
+    }
+
+    const auto max_position = static_cast<s32>(text_size);
+    if (cursor_position > max_position) {
+        return max_position;
+    }
+
+    return cursor_position;
+}
+
 static jobject ToJKeyboardParams(const Core::Frontend::KeyboardInitializeParameters& config) {
     JNIEnv* env = GetEnvForThread();
     jobject object = env->AllocObject(s_keyboard_config_class);
@@ -155,7 +168,7 @@ void AndroidKeyboard::ShowTextCheckDialog(
 }
 
 void AndroidKeyboard::ShowInlineKeyboard(
-    Core::Frontend::InlineAppearParameters appear_parameters) const {
+    Core::Frontend::InlineAppearParameters appear_parameters) {
     LOG_WARNING(Frontend,
                 "(STUBBED) called, backend requested to show the inline software keyboard.");
 
@@ -182,6 +195,8 @@ void AndroidKeyboard::ShowInlineKeyboard(
 
     // Pivot to a new thread, as we cannot call GetEnvForThread() from a Fiber.
     m_current_text = parameters.initial_text;
+    m_current_cursor_position =
+        ClampCursorPosition(parameters.initial_cursor_position, m_current_text.size());
     m_is_inline_active = true;
     std::thread([&] {
         GetEnvForThread()->CallStaticVoidMethod(s_software_keyboard_class, s_swkbd_execute_inline,
@@ -194,8 +209,7 @@ void AndroidKeyboard::HideInlineKeyboard() const {
                 "(STUBBED) called, backend requested to hide the inline software keyboard.");
 }
 
-void AndroidKeyboard::InlineTextChanged(
-    Core::Frontend::InlineTextParameters text_parameters) const {
+void AndroidKeyboard::InlineTextChanged(Core::Frontend::InlineTextParameters text_parameters) {
     LOG_WARNING(Frontend,
                 "(STUBBED) called, backend requested to change the inline keyboard text.");
 
@@ -205,8 +219,14 @@ void AndroidKeyboard::InlineTextChanged(
              "\ncursor_position={}",
              Common::UTF16ToUTF8(text_parameters.input_text), text_parameters.cursor_position);
 
+    m_current_text = text_parameters.input_text;
+    m_current_cursor_position =
+        ClampCursorPosition(text_parameters.cursor_position, m_current_text.size());
+    parameters.initial_text = m_current_text;
+    parameters.initial_cursor_position = m_current_cursor_position;
+
     submit_inline_callback(Service::AM::Frontend::SwkbdReplyType::ChangedString,
-                           text_parameters.input_text, text_parameters.cursor_position);
+                           m_current_text, m_current_cursor_position);
 }
 
 void AndroidKeyboard::ExitKeyboard() const {
@@ -214,14 +234,33 @@ void AndroidKeyboard::ExitKeyboard() const {
 }
 
 void AndroidKeyboard::SubmitInlineKeyboardText(std::u16string submitted_text) {
+    if (!m_is_inline_active || submitted_text.empty()) {
+        return;
+    }
+
+    m_current_cursor_position =
+        ClampCursorPosition(m_current_cursor_position, m_current_text.size());
+    m_current_text.insert(static_cast<std::size_t>(m_current_cursor_position), submitted_text);
+    m_current_cursor_position += static_cast<s32>(submitted_text.size());
+    parameters.initial_text = m_current_text;
+    parameters.initial_cursor_position = m_current_cursor_position;
+
+    submit_inline_callback(Service::AM::Frontend::SwkbdReplyType::ChangedString, m_current_text,
+                           m_current_cursor_position);
+}
+
+void AndroidKeyboard::ReplaceInlineKeyboardText(std::u16string submitted_text, s32 cursor_position) {
     if (!m_is_inline_active) {
         return;
     }
 
-    m_current_text += submitted_text;
+    m_current_text = std::move(submitted_text);
+    m_current_cursor_position = ClampCursorPosition(cursor_position, m_current_text.size());
+    parameters.initial_text = m_current_text;
+    parameters.initial_cursor_position = m_current_cursor_position;
 
     submit_inline_callback(Service::AM::Frontend::SwkbdReplyType::ChangedString, m_current_text,
-                           static_cast<int>(m_current_text.size()));
+                           m_current_cursor_position);
 }
 
 void AndroidKeyboard::SubmitInlineKeyboardInput(int key_code) {
@@ -238,20 +277,26 @@ void AndroidKeyboard::SubmitInlineKeyboardInput(int key_code) {
     case KEYCODE_ENTER:
         m_is_inline_active = false;
         submit_inline_callback(Service::AM::Frontend::SwkbdReplyType::DecidedEnter, m_current_text,
-                               static_cast<s32>(m_current_text.size()));
+                               m_current_cursor_position);
         break;
     case KEYCODE_BACK:
     case KEYCODE_ESCAPE:
         m_is_inline_active = false;
         submit_inline_callback(Service::AM::Frontend::SwkbdReplyType::DecidedCancel, m_current_text,
-                               static_cast<s32>(m_current_text.size()));
+                               m_current_cursor_position);
         break;
     case KEYCODE_DEL:
-        if (m_current_text.empty()) {
+        m_current_cursor_position =
+            ClampCursorPosition(m_current_cursor_position, m_current_text.size());
+        if (m_current_cursor_position <= 0 || m_current_text.empty()) {
             return;
         }
+        --m_current_cursor_position;
+        m_current_text.erase(static_cast<std::size_t>(m_current_cursor_position), 1);
+        parameters.initial_text = m_current_text;
+        parameters.initial_cursor_position = m_current_cursor_position;
         submit_inline_callback(Service::AM::Frontend::SwkbdReplyType::ChangedString, m_current_text,
-                               static_cast<int>(m_current_text.size()));
+                               m_current_cursor_position);
         break;
     }
 }

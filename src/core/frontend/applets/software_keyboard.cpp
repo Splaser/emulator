@@ -75,8 +75,7 @@ void DefaultSoftwareKeyboardApplet::ShowTextCheckDialog(
     LOG_WARNING(Service_AM, "(STUBBED) called, backend requested to show the text check dialog.");
 }
 
-void DefaultSoftwareKeyboardApplet::ShowInlineKeyboard(
-    InlineAppearParameters appear_parameters) const {
+void DefaultSoftwareKeyboardApplet::ShowInlineKeyboard(InlineAppearParameters appear_parameters) {
     LOG_WARNING(Service_AM,
                 "(STUBBED) called, backend requested to show the inline software keyboard.");
 
@@ -109,7 +108,7 @@ void DefaultSoftwareKeyboardApplet::HideInlineKeyboard() const {
                 "(STUBBED) called, backend requested to hide the inline software keyboard.");
 }
 
-void DefaultSoftwareKeyboardApplet::InlineTextChanged(InlineTextParameters text_parameters) const {
+void DefaultSoftwareKeyboardApplet::InlineTextChanged(InlineTextParameters text_parameters) {
     LOG_WARNING(Service_AM,
                 "(STUBBED) called, backend requested to change the inline keyboard text.");
 

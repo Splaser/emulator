@@ -1622,7 +1622,7 @@ void QtSoftwareKeyboard::ShowTextCheckDialog(
 }
 
 void QtSoftwareKeyboard::ShowInlineKeyboard(
-    Core::Frontend::InlineAppearParameters appear_parameters) const {
+    Core::Frontend::InlineAppearParameters appear_parameters) {
     LOG_INFO(Service_AM,
              "\nInlineAppearParameters:"
              "\nmax_text_length={}"
@@ -1651,8 +1651,7 @@ void QtSoftwareKeyboard::HideInlineKeyboard() const {
     emit MainWindowHideInlineKeyboard();
 }
 
-void QtSoftwareKeyboard::InlineTextChanged(
-    Core::Frontend::InlineTextParameters text_parameters) const {
+void QtSoftwareKeyboard::InlineTextChanged(Core::Frontend::InlineTextParameters text_parameters) {
     LOG_INFO(Service_AM,
              "\nInlineTextParameters:"
              "\ninput_text={}"

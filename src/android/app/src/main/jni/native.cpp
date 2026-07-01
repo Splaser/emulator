@@ -735,6 +735,14 @@ void Java_org_citron_citron_1emu_NativeLibrary_submitInlineKeyboardText(JNIEnv* 
     EmulationSession::GetInstance().SoftwareKeyboard()->SubmitInlineKeyboardText(input);
 }
 
+void Java_org_citron_citron_1emu_NativeLibrary_replaceInlineKeyboardText(JNIEnv* env, jclass clazz,
+                                                                         jstring j_text,
+                                                                         jint j_cursor_position) {
+    const std::u16string input = Common::UTF8ToUTF16(Common::Android::GetJString(env, j_text));
+    EmulationSession::GetInstance().SoftwareKeyboard()->ReplaceInlineKeyboardText(
+        input, static_cast<s32>(j_cursor_position));
+}
+
 void Java_org_citron_citron_1emu_NativeLibrary_submitInlineKeyboardInput(JNIEnv* env, jclass clazz,
                                                                      jint j_key_code) {
     EmulationSession::GetInstance().SoftwareKeyboard()->SubmitInlineKeyboardInput(j_key_code);

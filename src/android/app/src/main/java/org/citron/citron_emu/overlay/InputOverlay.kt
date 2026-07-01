@@ -13,19 +13,28 @@ import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.VectorDrawable
 import android.os.Build
+import android.text.Editable
+import android.text.InputType
+import android.text.Selection
 import android.util.AttributeSet
 import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceView
 import android.view.View
 import android.view.View.OnTouchListener
 import android.view.WindowInsets
+import android.view.inputmethod.BaseInputConnection
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import androidx.core.content.ContextCompat
 import androidx.window.layout.WindowMetricsCalculator
 import kotlin.math.max
 import kotlin.math.min
-import org.citron.citron_emu.features.input.NativeInput
+import org.citron.citron_emu.NativeLibrary
 import org.citron.citron_emu.R
+import org.citron.citron_emu.applets.keyboard.SoftwareKeyboard
+import org.citron.citron_emu.features.input.NativeInput
 import org.citron.citron_emu.features.input.model.NativeAnalog
 import org.citron.citron_emu.features.input.model.NativeButton
 import org.citron.citron_emu.features.input.model.NpadStyleIndex
@@ -36,13 +45,6 @@ import org.citron.citron_emu.overlay.model.OverlayControlData
 import org.citron.citron_emu.overlay.model.OverlayLayout
 import org.citron.citron_emu.utils.NativeConfig
 
-import android.view.inputmethod.BaseInputConnection
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputConnection
-import org.citron.citron_emu.NativeLibrary
-import android.view.KeyEvent
-import android.text.Editable
-import android.text.InputType
 /**
  * Draws the interactive input overlay on top of the
  * [SurfaceView] that is rendering emulation.
@@ -54,6 +56,7 @@ class InputOverlay(context: Context, attrs: AttributeSet?) :
     private val overlayDpads: MutableSet<InputOverlayDrawableDpad> = HashSet()
     private val overlayJoysticks: MutableSet<InputOverlayDrawableJoystick> = HashSet()
     private val keyboardEditable = Editable.Factory.getInstance().newEditable("")
+    private var keyboardLastSubmittedText = ""
 
     private var inEditMode = false
     private var buttonBeingConfigured: InputOverlayDrawableButton? = null
@@ -89,35 +92,96 @@ class InputOverlay(context: Context, attrs: AttributeSet?) :
         requestFocus()
 
     }
-       // Support for Android virtual keyboard (Software Keyboard)
+
+    // Support for Android virtual keyboard (Software Keyboard)
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
+        val initialText = SoftwareKeyboard.getInlineInitialText()
+        val initialCursorPosition =
+            SoftwareKeyboard.getInlineInitialCursorPosition().coerceIn(0, initialText.length)
+
         keyboardEditable.clear()
+        keyboardEditable.append(initialText)
+        Selection.setSelection(keyboardEditable, initialCursorPosition)
+        keyboardLastSubmittedText = initialText
 
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or
             InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
 
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_DONE
-        outAttrs.initialSelStart = 0
-        outAttrs.initialSelEnd = 0
+        outAttrs.initialSelStart = initialCursorPosition
+        outAttrs.initialSelEnd = initialCursorPosition
 
         return object : BaseInputConnection(this, true) {
             override fun getEditable(): Editable = keyboardEditable
 
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                if (!text.isNullOrEmpty()) {
-                    forwardTextToNative(text)
+                if (text == null) {
+                    return true
                 }
-                return super.commitText(text, newCursorPosition)
+
+                val submittedText = text.toString()
+                val newlineIndex = submittedText.indexOf('\n')
+                if (newlineIndex >= 0) {
+                    val prefix = submittedText.substring(0, newlineIndex)
+                    if (prefix.isNotEmpty()) {
+                        super.commitText(prefix, newCursorPosition)
+                        submitEditableTextToNative()
+                    }
+                    NativeLibrary.submitInlineKeyboardInput(KeyEvent.KEYCODE_ENTER)
+                    SoftwareKeyboard.clearInlineConfig()
+                    return true
+                }
+
+                val result = super.commitText(text, newCursorPosition)
+                submitEditableTextToNative()
+                return result
+            }
+
+            override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                if (text == null) {
+                    return true
+                }
+
+                val submittedText = text.toString()
+                val newlineIndex = submittedText.indexOf('\n')
+                if (newlineIndex >= 0) {
+                    val prefix = submittedText.substring(0, newlineIndex)
+                    if (prefix.isNotEmpty()) {
+                        super.setComposingText(prefix, newCursorPosition)
+                        submitEditableTextToNative()
+                    }
+                    NativeLibrary.submitInlineKeyboardInput(KeyEvent.KEYCODE_ENTER)
+                    SoftwareKeyboard.clearInlineConfig()
+                    return true
+                }
+
+                val result = super.setComposingText(text, newCursorPosition)
+                submitEditableTextToNative()
+                return result
+            }
+
+            override fun finishComposingText(): Boolean {
+                val result = super.finishComposingText()
+                submitEditableTextToNative()
+                return result
             }
 
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-                repeat(beforeLength.coerceAtLeast(0)) {
-                    NativeLibrary.submitInlineKeyboardInput(KeyEvent.KEYCODE_DEL)
-                }
-                return super.deleteSurroundingText(beforeLength, afterLength)
+                val result = super.deleteSurroundingText(beforeLength, afterLength)
+                submitEditableTextToNative()
+                return result
+            }
+
+            override fun deleteSurroundingTextInCodePoints(
+                beforeLength: Int,
+                afterLength: Int
+            ): Boolean {
+                val result = super.deleteSurroundingTextInCodePoints(beforeLength, afterLength)
+                submitEditableTextToNative()
+                return result
             }
 
             override fun sendKeyEvent(event: KeyEvent): Boolean {
@@ -125,13 +189,19 @@ class InputOverlay(context: Context, attrs: AttributeSet?) :
 
                 when (event.keyCode) {
                     KeyEvent.KEYCODE_BACK,
-                    KeyEvent.KEYCODE_DEL,
-                    KeyEvent.KEYCODE_ENTER,
-                    KeyEvent.KEYCODE_ESCAPE -> NativeLibrary.submitInlineKeyboardInput(event.keyCode)
+                    KeyEvent.KEYCODE_ESCAPE -> {
+                        NativeLibrary.submitInlineKeyboardInput(event.keyCode)
+                        SoftwareKeyboard.clearInlineConfig()
+                    }
+                    KeyEvent.KEYCODE_ENTER -> {
+                        NativeLibrary.submitInlineKeyboardInput(event.keyCode)
+                        SoftwareKeyboard.clearInlineConfig()
+                    }
+                    KeyEvent.KEYCODE_DEL -> deleteSurroundingText(1, 0)
                     else -> {
                         val unicode = event.unicodeChar
                         if (unicode != 0) {
-                            NativeLibrary.submitInlineKeyboardText(unicode.toChar().toString())
+                            commitText(unicode.toChar().toString(), 1)
                         }
                     }
                 }
@@ -140,28 +210,21 @@ class InputOverlay(context: Context, attrs: AttributeSet?) :
 
             override fun performEditorAction(actionCode: Int): Boolean {
                 NativeLibrary.submitInlineKeyboardInput(KeyEvent.KEYCODE_ENTER)
+                SoftwareKeyboard.clearInlineConfig()
                 return true
             }
         }
     }
 
-    private fun forwardTextToNative(text: CharSequence) {
-        val buffer = StringBuilder()
-        text.forEach { char ->
-            when (char) {
-                '\n' -> {
-                    if (buffer.isNotEmpty()) {
-                        NativeLibrary.submitInlineKeyboardText(buffer.toString())
-                        buffer.clear()
-                    }
-                    NativeLibrary.submitInlineKeyboardInput(KeyEvent.KEYCODE_ENTER)
-                }
-                else -> buffer.append(char)
-            }
+    private fun submitEditableTextToNative() {
+        val text = keyboardEditable.toString()
+        if (text == keyboardLastSubmittedText) {
+            return
         }
-        if (buffer.isNotEmpty()) {
-            NativeLibrary.submitInlineKeyboardText(buffer.toString())
-        }
+
+        keyboardLastSubmittedText = text
+        val cursorPosition = Selection.getSelectionEnd(keyboardEditable).coerceIn(0, text.length)
+        NativeLibrary.replaceInlineKeyboardText(text, cursorPosition)
     }
 
     override fun draw(canvas: Canvas) {

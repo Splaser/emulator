@@ -25,6 +25,9 @@ object SoftwareKeyboard {
     lateinit var data: KeyboardData
     val dataLock = Object()
 
+    @Volatile
+    private var inlineConfig: KeyboardConfig? = null
+
     private fun executeNormalImpl(config: KeyboardConfig) {
         val activity = NativeLibrary.sEmulationActivity.get() ?: return
 
@@ -39,6 +42,8 @@ object SoftwareKeyboard {
         val overlayView = activity.findViewById<View>(R.id.surface_input_overlay) ?: return
         val previousVisibility = overlayView.visibility
         val previousAlpha = overlayView.alpha
+
+        inlineConfig = config
 
         // Make sure the overlay can receive input
         overlayView.visibility = View.VISIBLE
@@ -84,8 +89,17 @@ object SoftwareKeyboard {
                 overlayView.visibility = previousVisibility
                 overlayView.alpha = previousAlpha
                 NativeLibrary.submitInlineKeyboardInput(KeyEvent.KEYCODE_BACK)
+                clearInlineConfig()
             }
         }, delayMs)
+    }
+
+    fun getInlineInitialText(): String = inlineConfig?.initial_text.orEmpty()
+
+    fun getInlineInitialCursorPosition(): Int = inlineConfig?.initial_cursor_position ?: 0
+
+    fun clearInlineConfig() {
+        inlineConfig = null
     }
 
     @JvmStatic
