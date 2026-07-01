@@ -168,7 +168,7 @@ void AndroidKeyboard::ShowTextCheckDialog(
 }
 
 void AndroidKeyboard::ShowInlineKeyboard(
-    Core::Frontend::InlineAppearParameters appear_parameters) const {
+    Core::Frontend::InlineAppearParameters appear_parameters) {
     LOG_WARNING(Frontend,
                 "(STUBBED) called, backend requested to show the inline software keyboard.");
 
@@ -209,8 +209,7 @@ void AndroidKeyboard::HideInlineKeyboard() const {
                 "(STUBBED) called, backend requested to hide the inline software keyboard.");
 }
 
-void AndroidKeyboard::InlineTextChanged(
-    Core::Frontend::InlineTextParameters text_parameters) const {
+void AndroidKeyboard::InlineTextChanged(Core::Frontend::InlineTextParameters text_parameters) {
     LOG_WARNING(Frontend,
                 "(STUBBED) called, backend requested to change the inline keyboard text.");
 

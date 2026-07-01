@@ -247,12 +247,11 @@ public:
     void ShowTextCheckDialog(Service::AM::Frontend::SwkbdTextCheckResult text_check_result,
                              std::u16string text_check_message) const override;
 
-    void ShowInlineKeyboard(
-        Core::Frontend::InlineAppearParameters appear_parameters) const override;
+    void ShowInlineKeyboard(Core::Frontend::InlineAppearParameters appear_parameters) override;
 
     void HideInlineKeyboard() const override;
 
-    void InlineTextChanged(Core::Frontend::InlineTextParameters text_parameters) const override;
+    void InlineTextChanged(Core::Frontend::InlineTextParameters text_parameters) override;
 
     void ExitKeyboard() const override;
 

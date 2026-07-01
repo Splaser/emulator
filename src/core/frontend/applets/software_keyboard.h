@@ -72,11 +72,11 @@ public:
     virtual void ShowTextCheckDialog(Service::AM::Frontend::SwkbdTextCheckResult text_check_result,
                                      std::u16string text_check_message) const = 0;
 
-    virtual void ShowInlineKeyboard(InlineAppearParameters appear_parameters) const = 0;
+    virtual void ShowInlineKeyboard(InlineAppearParameters appear_parameters) = 0;
 
     virtual void HideInlineKeyboard() const = 0;
 
-    virtual void InlineTextChanged(InlineTextParameters text_parameters) const = 0;
+    virtual void InlineTextChanged(InlineTextParameters text_parameters) = 0;
 
     virtual void ExitKeyboard() const = 0;
 };
@@ -96,11 +96,11 @@ public:
     void ShowTextCheckDialog(Service::AM::Frontend::SwkbdTextCheckResult text_check_result,
                              std::u16string text_check_message) const override;
 
-    void ShowInlineKeyboard(InlineAppearParameters appear_parameters) const override;
+    void ShowInlineKeyboard(InlineAppearParameters appear_parameters) override;
 
     void HideInlineKeyboard() const override;
 
-    void InlineTextChanged(InlineTextParameters text_parameters) const override;
+    void InlineTextChanged(InlineTextParameters text_parameters) override;
 
     void ExitKeyboard() const override;
 

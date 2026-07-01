@@ -27,12 +27,11 @@ public:
     void ShowTextCheckDialog(Service::AM::Frontend::SwkbdTextCheckResult text_check_result,
                              std::u16string text_check_message) const override;
 
-    void ShowInlineKeyboard(
-        Core::Frontend::InlineAppearParameters appear_parameters) const override;
+    void ShowInlineKeyboard(Core::Frontend::InlineAppearParameters appear_parameters) override;
 
     void HideInlineKeyboard() const override;
 
-    void InlineTextChanged(Core::Frontend::InlineTextParameters text_parameters) const override;
+    void InlineTextChanged(Core::Frontend::InlineTextParameters text_parameters) override;
 
     void ExitKeyboard() const override;
 
@@ -52,15 +51,15 @@ private:
 
     void SubmitNormalText(const ResultData& result) const;
 
-    mutable Core::Frontend::KeyboardInitializeParameters parameters{};
+    Core::Frontend::KeyboardInitializeParameters parameters{};
 
     mutable SubmitNormalCallback submit_normal_callback;
     mutable SubmitInlineCallback submit_inline_callback;
 
 private:
-    mutable bool m_is_inline_active{};
-    mutable std::u16string m_current_text;
-    mutable s32 m_current_cursor_position{};
+    bool m_is_inline_active{};
+    std::u16string m_current_text;
+    s32 m_current_cursor_position{};
 };
 
 // Should be called in JNI_Load
