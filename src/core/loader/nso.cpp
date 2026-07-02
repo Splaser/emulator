@@ -192,12 +192,12 @@ std::optional<VAddr> AppLoader_NSO::LoadModule(Kernel::KProcess& process, Core::
     } else if (patch) {
         // Relocate code patch and copy to the program_image.
         const auto build_id = Common::HexToString(nso_header.build_id);
-        LOG_INFO(Loader,
-                 "NCE relocating NSO module: name={}, build_id={}, patch_index={}, mode={}, "
-                 "load_base={:#x}, image_size={:#x}, code_offset={:#x}, code_size={:#x}, "
-                 "patch_section_size={:#x}",
-                 name, build_id, patch_index, patch->GetPatchMode(), load_base,
-                 program_image.size(), code.offset, code.size, patch->GetSectionSize());
+        LOG_DEBUG(Loader,
+                  "NCE relocating NSO module: name={}, build_id={}, patch_index={}, mode={}, "
+                  "load_base={:#x}, image_size={:#x}, code_offset={:#x}, code_size={:#x}, "
+                  "patch_section_size={:#x}",
+                  name, build_id, patch_index, patch->GetPatchMode(), load_base,
+                  program_image.size(), code.offset, code.size, patch->GetSectionSize());
 
         bool copied_patch_section;
         try {
@@ -215,10 +215,10 @@ std::optional<VAddr> AppLoader_NSO::LoadModule(Kernel::KProcess& process, Core::
             throw;
         }
 
-        LOG_INFO(Loader,
-                 "NCE relocated NSO module: name={}, build_id={}, patch_index={}, "
-                 "copied_patch_section={}, final_image_size={:#x}",
-                 name, build_id, patch_index, copied_patch_section, program_image.size());
+        LOG_DEBUG(Loader,
+                  "NCE relocated NSO module: name={}, build_id={}, patch_index={}, "
+                  "copied_patch_section={}, final_image_size={:#x}",
+                  name, build_id, patch_index, copied_patch_section, program_image.size());
 
         if (copied_patch_section) {
             // Update patch section.

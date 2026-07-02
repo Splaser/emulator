@@ -225,7 +225,7 @@ struct Memory::Impl {
             src_addr, size,
             [src_addr, size, &dest_buffer](const std::size_t copy_amount,
                                            const Common::ProcessAddress current_vaddr) {
-                LOG_ERROR(HW_Memory,
+                LOG_DEBUG(HW_Memory,
                           "Unmapped ReadBlock @ 0x{:016X} (start address = 0x{:016X}, size = {})",
                           GetInteger(current_vaddr), GetInteger(src_addr), size);
                std::memset(dest_buffer, 0, copy_amount);
@@ -280,7 +280,7 @@ struct Memory::Impl {
             dest_addr, size,
             [dest_addr, size](const std::size_t copy_amount,
                               const Common::ProcessAddress current_vaddr) {
-                LOG_ERROR(HW_Memory,
+                LOG_DEBUG(HW_Memory,
                           "Unmapped WriteBlock @ 0x{:016X} (start address = 0x{:016X}, size = {})",
                           GetInteger(current_vaddr), GetInteger(dest_addr), size);
             },
@@ -316,7 +316,7 @@ struct Memory::Impl {
             dest_addr, size,
             [dest_addr, size](const std::size_t copy_amount,
                               const Common::ProcessAddress current_vaddr) {
-                LOG_ERROR(HW_Memory,
+                LOG_DEBUG(HW_Memory,
                           "Unmapped ZeroBlock @ 0x{:016X} (start address = 0x{:016X}, size = {})",
                           GetInteger(current_vaddr), GetInteger(dest_addr), size);
             },
@@ -336,7 +336,7 @@ struct Memory::Impl {
         return WalkBlock(
             dest_addr, size,
             [&](const std::size_t copy_amount, const Common::ProcessAddress current_vaddr) {
-                LOG_ERROR(HW_Memory,
+                LOG_DEBUG(HW_Memory,
                           "Unmapped CopyBlock @ 0x{:016X} (start address = 0x{:016X}, size = {})",
                           GetInteger(current_vaddr), GetInteger(src_addr), size);
                 ZeroBlock(dest_addr, copy_amount);
@@ -364,7 +364,7 @@ struct Memory::Impl {
             WalkBlock(
                 dest_addr, size,
                 [&](const std::size_t block_size, const Common::ProcessAddress current_vaddr) {
-                    LOG_ERROR(HW_Memory, "Unmapped cache maintenance @ {:#018X}",
+                    LOG_DEBUG(HW_Memory, "Unmapped cache maintenance @ {:#018X}",
                               GetInteger(current_vaddr));
                     throw InvalidMemoryException();
                 },
@@ -632,7 +632,7 @@ struct Memory::Impl {
         return GetPointerImpl(
             GetInteger(vaddr),
             [vaddr]() {
-                LOG_ERROR(HW_Memory, "Unmapped GetPointer @ 0x{:016X}", GetInteger(vaddr));
+                LOG_DEBUG(HW_Memory, "Unmapped GetPointer @ 0x{:016X}", GetInteger(vaddr));
             },
             []() {});
     }
@@ -651,7 +651,7 @@ struct Memory::Impl {
         auto const addr_c1 = GetInteger(vaddr);
         if constexpr (sizeof(T) <= 1) {
             if (auto const ptr_c1 = GetPointerImpl(addr_c1, [addr_c1] {
-                LOG_ERROR(HW_Memory, "Unmapped Read{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
+                LOG_DEBUG(HW_Memory, "Unmapped Read{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
             }, [&] {
                 HandleRasterizerDownload(addr_c1, sizeof(T));
             }); ptr_c1) {
@@ -666,7 +666,7 @@ struct Memory::Impl {
             const bool crosses_page = (addr_c1 & 4095) + sizeof(T) > 4096;
             if (!crosses_page) {
                 if (auto const ptr_c1 = GetPointerImpl(addr_c1, [addr_c1] {
-                    LOG_ERROR(HW_Memory, "Unmapped Read{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
+                    LOG_DEBUG(HW_Memory, "Unmapped Read{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
                 }, [&] {
                     HandleRasterizerDownload(addr_c1, sizeof(T));
                 }); ptr_c1) {
@@ -681,12 +681,12 @@ struct Memory::Impl {
                 auto const count_c2 = (addr_c1 + sizeof(T)) & 4095;
                 auto const count_c1 = sizeof(T) - count_c2;
                 if (auto const ptr_c1 = GetPointerImpl(addr_c1, [addr_c1] {
-                    LOG_ERROR(HW_Memory, "Unmapped Read{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
+                    LOG_DEBUG(HW_Memory, "Unmapped Read{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
                 }, [&] {
                     HandleRasterizerDownload(addr_c1, count_c1);
                 }); ptr_c1) {
                     if (auto const ptr_c2 = GetPointerImpl(addr_c2, [addr_c2] {
-                        LOG_ERROR(HW_Memory, "Unmapped Read{} @ 0x{:016X}", sizeof(T) * 8, addr_c2);
+                        LOG_DEBUG(HW_Memory, "Unmapped Read{} @ 0x{:016X}", sizeof(T) * 8, addr_c2);
                     }, [&] {
                         HandleRasterizerDownload(addr_c2, count_c2);
                     }); ptr_c2) {
@@ -709,7 +709,7 @@ struct Memory::Impl {
         auto const addr_c1 = GetInteger(vaddr);
         if constexpr (sizeof(T) <= 1) {
             if (auto const ptr_c1 = GetPointerImpl(addr_c1, [addr_c1] {
-                LOG_ERROR(HW_Memory, "Unmapped Write{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
+                LOG_DEBUG(HW_Memory, "Unmapped Write{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
             }, [&] {
                 HandleRasterizerWrite(addr_c1, sizeof(T));
             }); ptr_c1) {
@@ -719,7 +719,7 @@ struct Memory::Impl {
             const bool crosses_page = (addr_c1 & 4095) + sizeof(T) > 4096;
             if (!crosses_page) {
                 if (auto const ptr_c1 = GetPointerImpl(addr_c1, [addr_c1] {
-                    LOG_ERROR(HW_Memory, "Unmapped Write{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
+                    LOG_DEBUG(HW_Memory, "Unmapped Write{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
                 }, [&] {
                     HandleRasterizerWrite(addr_c1, sizeof(T));
                 }); ptr_c1) {
@@ -732,12 +732,12 @@ struct Memory::Impl {
                 auto const count_c2 = (addr_c1 + sizeof(T)) & 4095;
                 auto const count_c1 = sizeof(T) - count_c2;
                 if (auto const ptr_c1 = GetPointerImpl(addr_c1, [addr_c1] {
-                    LOG_ERROR(HW_Memory, "Unmapped Write{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
+                    LOG_DEBUG(HW_Memory, "Unmapped Write{} @ 0x{:016X}", sizeof(T) * 8, addr_c1);
                 }, [&] {
                     HandleRasterizerWrite(addr_c1, count_c1);
                 }); ptr_c1) {
                     if (auto const ptr_c2 = GetPointerImpl(addr_c2, [addr_c2] {
-                        LOG_ERROR(HW_Memory, "Unmapped Write{} @ 0x{:016X}", sizeof(T) * 8, addr_c2);
+                        LOG_DEBUG(HW_Memory, "Unmapped Write{} @ 0x{:016X}", sizeof(T) * 8, addr_c2);
                     }, [&] {
                         HandleRasterizerWrite(addr_c2, count_c2);
                     }); ptr_c2) {
@@ -755,7 +755,7 @@ struct Memory::Impl {
         u8* const ptr = GetPointerImpl(
             GetInteger(vaddr),
             [vaddr, data]() {
-                LOG_ERROR(HW_Memory, "Unmapped WriteExclusive{} @ 0x{:016X} = 0x{:016X}",
+                LOG_DEBUG(HW_Memory, "Unmapped WriteExclusive{} @ 0x{:016X} = 0x{:016X}",
                           sizeof(T) * 8, GetInteger(vaddr), static_cast<u64>(data));
             },
             [&]() { HandleRasterizerWrite(GetInteger(vaddr), sizeof(T)); });
@@ -769,7 +769,7 @@ struct Memory::Impl {
         u8* const ptr = GetPointerImpl(
             GetInteger(vaddr),
             [vaddr, data]() {
-                LOG_ERROR(HW_Memory, "Unmapped WriteExclusive128 @ 0x{:016X} = 0x{:016X}{:016X}",
+                LOG_DEBUG(HW_Memory, "Unmapped WriteExclusive128 @ 0x{:016X} = 0x{:016X}{:016X}",
                           GetInteger(vaddr), static_cast<u64>(data[1]), static_cast<u64>(data[0]));
             },
             [&]() { HandleRasterizerWrite(GetInteger(vaddr), sizeof(u128)); });
@@ -1064,11 +1064,7 @@ bool Memory::InvalidateNCE(Common::ProcessAddress vaddr, size_t size) {
 
     u8* const ptr = impl->GetPointerImpl(
         GetInteger(vaddr),
-        [&] {
-            LOG_ERROR(HW_Memory, "Unmapped InvalidateNCE for {} bytes @ {:#x}", size,
-                      GetInteger(vaddr));
-            mapped = false;
-        },
+        [&] { mapped = false; },
         [&] { rasterizer = true; });
     if (rasterizer) {
         impl->InvalidateGPUMemory(ptr, size);
