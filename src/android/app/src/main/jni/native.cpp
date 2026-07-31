@@ -340,6 +340,7 @@ void EmulationSession::InitializeSystem(bool reload) {
                                      m_manual_provider.get());
     fs_controller.SetInitStage(Service::FileSystem::InitStage::FS_READY);
     fs_controller.InitializeContentSystem(*m_vfs);
+    m_firmware_available.reset();
 }
 
 
@@ -348,6 +349,7 @@ void EmulationSession::RefreshContentSystemUnlocked()
     auto& fs = m_system.GetFileSystemController();
     if (auto filesystem = m_system.GetFilesystem()) {
         fs.InitializeContentSystem(*filesystem);
+        m_firmware_available.reset();
     }
 }
 
@@ -371,6 +373,37 @@ bool EmulationSession::RefreshContentIfIdle(bool keys_loaded)
 
     RefreshContentSystemUnlocked();
     return true;
+}
+
+bool EmulationSession::IsFirmwareAvailable() {
+    std::scoped_lock lock(m_mutex);
+    if (m_firmware_available.has_value()) {
+        return *m_firmware_available;
+    }
+
+    // RegisteredCache::Refresh mutates the content maps. Never rebuild them while emulation can
+    // still be reading from the same providers.
+    if (m_is_running || m_load_result == Core::SystemResultStatus::Success) {
+        return false;
+    }
+
+    auto* bis_system = m_system.GetFileSystemController().GetSystemNANDContents();
+    if (bis_system == nullptr) {
+        return false;
+    }
+
+    // Preserve the restart detection workaround, but run it at most once per app process.
+    // InitializeContentSystem already rebuilds the registered-content caches after keys, firmware,
+    // or user data changes, so forcing another refresh after each rebuild is redundant.
+    if (!m_firmware_refresh_performed) {
+        bis_system->Refresh();
+        m_firmware_refresh_performed = true;
+    }
+
+    constexpr u64 MiiEditAppletId = 0x010000000000100Dull;
+    m_firmware_available =
+        bis_system->GetEntry(MiiEditAppletId, FileSys::ContentRecordType::Program) != nullptr;
+    return *m_firmware_available;
 }
 
 void EmulationSession::SetFilesystemInitStage(Service::FileSystem::InitStage stage) {
@@ -969,22 +1002,7 @@ void Java_org_citron_citron_1emu_NativeLibrary_setCabinetMode(JNIEnv* env, jclas
 }
 
 jboolean Java_org_citron_citron_1emu_NativeLibrary_isFirmwareAvailable(JNIEnv* env, jclass clazz) {
-    auto bis_system =
-        EmulationSession::GetInstance().System().GetFileSystemController().GetSystemNANDContents();
-    if (!bis_system) {
-        return false;
-    }
-
-    // refresh to fix firmware detection on app restart
-    bis_system->Refresh();
-
-    // Query an applet to see if it's available
-    auto applet_nca =
-        bis_system->GetEntry(0x010000000000100Dull, FileSys::ContentRecordType::Program);
-    if (!applet_nca) {
-        return false;
-    }
-    return true;
+    return EmulationSession::GetInstance().IsFirmwareAvailable();
 }
 
 jobjectArray Java_org_citron_citron_1emu_NativeLibrary_getPatchesForFile(JNIEnv* env, jobject jobj,

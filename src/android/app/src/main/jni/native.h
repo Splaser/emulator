@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <android/native_window_jni.h>
+#include <optional>
 #include "common/android/applets/software_keyboard.h"
 #include "common/detached_tasks.h"
 #include "core/core.h"
@@ -51,6 +52,7 @@ public:
     void InitializeSystem(bool reload);
     void RefreshContentSystem();
     bool RefreshContentIfIdle(bool keys_loaded);
+    bool IsFirmwareAvailable();
     void SetFilesystemInitStage(Service::FileSystem::InitStage stage);
     void PromoteFilesystemInitStage(Service::FileSystem::InitStage stage);
     void SetAppletId(int applet_id);
@@ -90,6 +92,8 @@ private:
     bool m_network_initialized{};
     Common::Android::SoftwareKeyboard::AndroidKeyboard* m_software_keyboard{};
     std::unique_ptr<FileSys::ManualContentProvider> m_manual_provider;
+    std::optional<bool> m_firmware_available;
+    bool m_firmware_refresh_performed{};
     int m_applet_id{1};
 
     // GPU driver parameters
