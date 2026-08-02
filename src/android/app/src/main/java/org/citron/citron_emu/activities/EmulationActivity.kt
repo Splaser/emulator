@@ -190,6 +190,7 @@ class EmulationActivity : AppCompatActivity(), SensorEventListener {
     }
 
     override fun onPause() {
+        InputHandler.releaseAllInputs()
         super.onPause()
         nfcReader.stopScanning()
         stopMotionSensorListener()
@@ -247,6 +248,7 @@ class EmulationActivity : AppCompatActivity(), SensorEventListener {
 
         // Don't attempt to do anything if we are disconnecting a device.
         if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            InputHandler.releaseAllInputs()
             return true
         }
 

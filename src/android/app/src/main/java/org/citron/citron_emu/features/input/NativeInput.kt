@@ -112,6 +112,12 @@ object NativeInput {
     )
 
     /**
+     * Releases every button and axis currently held by the Android input driver.
+     * Used when gameplay stops receiving controller events so releases cannot be lost.
+     */
+    external fun resetGamePadInputState()
+
+    /**
      * Handles motion events.
      * @param guid 32 character hexadecimal string consisting of the controller's PID+VID.
      * @param port Port determined by controller connection order.

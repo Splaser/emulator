@@ -337,6 +337,13 @@ void Java_org_citron_citron_1emu_features_input_NativeInput_onGamePadAxisEventBy
     }
 }
 
+void Java_org_citron_citron_1emu_features_input_NativeInput_resetGamePadInputState(
+    JNIEnv* env, jobject j_obj) {
+    auto* android = EmulationSession::GetInstance().GetInputSubsystem().GetAndroid();
+    android->ResetButtonState();
+    android->ResetAnalogState();
+}
+
 void Java_org_citron_citron_1emu_features_input_NativeInput_onGamePadMotionEvent(
     JNIEnv* env, jobject j_obj, jstring j_guid, jint j_port, jlong j_delta_timestamp,
     jfloat j_x_gyro, jfloat j_y_gyro, jfloat j_z_gyro, jfloat j_x_accel, jfloat j_y_accel,

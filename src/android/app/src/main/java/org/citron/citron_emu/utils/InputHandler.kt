@@ -112,6 +112,11 @@ object InputHandler {
         return true
     }
 
+    fun releaseAllInputs() {
+        NativeInput.resetGamePadInputState()
+        controllerStates.clear()
+    }
+
     private fun inputTimingStartNs(): Long =
         if (BuildConfig.DEBUG) {
             System.nanoTime()
@@ -154,7 +159,7 @@ object InputHandler {
     }
 
     fun updateControllerData() {
-        controllerStates.clear()
+        releaseAllInputs()
         NativeInput.clearRegisteredControllers()
         androidControllers = getDevices()
         androidControllers.forEach {

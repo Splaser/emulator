@@ -55,6 +55,10 @@ public:
         return image_count;
     }
 
+    bool IsMailbox() const {
+        return present_mode == VK_PRESENT_MODE_MAILBOX_KHR;
+    }
+
     std::size_t GetImageIndex() const {
         return image_index;
     }

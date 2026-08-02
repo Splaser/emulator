@@ -291,6 +291,13 @@ void PresentManager::SetImageCount() {
     // FRAMES_IN_FLIGHT is 8, and the cache TICKS_TO_DESTROY is 8.
     // Mali drivers will give us 6.
     image_count = std::min<size_t>(swapchain.GetImageCount(), 7);
+#ifdef ANDROID
+    // Mailbox already replaces stale compositor frames. Keep at most one additional frame in the
+    // application's async present pipeline so old frames do not queue before reaching Mailbox.
+    if (use_present_thread && swapchain.IsMailbox()) {
+        image_count = std::min<size_t>(image_count, 2);
+    }
+#endif
 }
 
 void PresentManager::CopyToSwapchain(Frame* frame) {
