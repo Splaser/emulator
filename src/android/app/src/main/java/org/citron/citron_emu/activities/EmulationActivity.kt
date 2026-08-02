@@ -182,6 +182,7 @@ class EmulationActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onResume() {
         super.onResume()
+        DisplayModeUtil.preferHighestRefreshRate(this)
         nfcReader.startScanning()
         startMotionSensorListener()
         InputHandler.updateControllerData()

@@ -834,6 +834,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         Log.debug("[EmulationFragment] Surface changed. Resolution: " + width + "x" + height)
+        DisplayModeUtil.configureSurface(requireActivity(), holder.surface)
         emulationState.newSurface(holder.surface)
     }
 
