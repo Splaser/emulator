@@ -64,6 +64,10 @@ private:
 
     void SetImageCount();
 
+    void UpdateFramePipelineLimit();
+
+    void ReleaseRenderFrame(Frame* frame);
+
 private:
     const vk::Instance& instance;
     Core::Frontend::EmuWindow& render_window;
@@ -85,6 +89,10 @@ private:
     bool blit_supported;
     bool use_present_thread;
     std::size_t image_count{};
+    std::size_t frames_in_flight{};
+    bool limit_mailbox_frames{};
+
+    static constexpr std::size_t MAX_MAILBOX_FRAMES_IN_FLIGHT = 2;
 };
 
 } // namespace Vulkan

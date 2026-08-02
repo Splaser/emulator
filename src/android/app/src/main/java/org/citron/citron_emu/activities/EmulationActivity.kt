@@ -473,7 +473,10 @@ class EmulationActivity : AppCompatActivity(), SensorEventListener {
             if (intent.action == actionPlay) {
                 if (NativeLibrary.isPaused()) NativeLibrary.unpauseEmulation()
             } else if (intent.action == actionPause) {
-                if (!NativeLibrary.isPaused()) NativeLibrary.pauseEmulation()
+                if (!NativeLibrary.isPaused()) {
+                    InputHandler.releaseAllInputs()
+                    NativeLibrary.pauseEmulation()
+                }
             }
             if (intent.action == actionUnmute) {
                 if (BooleanSetting.AUDIO_MUTED.getBoolean()) {

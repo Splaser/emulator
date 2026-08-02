@@ -100,6 +100,7 @@ PresentManager::PresentManager(const vk::Instance& instance_,
                                                            swapchain.GetImageViewFormat())},
       use_present_thread{Settings::values.async_presentation.GetValue()} {
     SetImageCount();
+    UpdateFramePipelineLimit();
 
     auto& dld = device.GetLogical();
     cmdpool = dld.CreateCommandPool({
@@ -136,13 +137,18 @@ PresentManager::PresentManager(const vk::Instance& instance_,
 PresentManager::~PresentManager() = default;
 
 Frame* PresentManager::GetRenderFrame() {
-    // Wait for free presentation frames
+    // Bound the whole Mailbox async pipeline before another frame can enter present_queue. Waiting
+    // here preserves the fences and semaphores of frames that are already rendered or in flight.
     std::unique_lock lock{free_mutex};
-    free_cv.wait(lock, [this] { return !free_queue.empty(); });
+    free_cv.wait(lock, [this] {
+        return !free_queue.empty() &&
+               (!limit_mailbox_frames || frames_in_flight < MAX_MAILBOX_FRAMES_IN_FLIGHT);
+    });
 
     // Take the frame from the queue
     Frame* frame = free_queue.front();
     free_queue.pop();
+    ++frames_in_flight;
 
     // Wait for the presentation to be finished so all frame resources are free
     frame->present_done.Wait();
@@ -155,7 +161,7 @@ void PresentManager::Present(Frame* frame) {
     if (!use_present_thread) {
         scheduler.WaitWorker();
         CopyToSwapchain(frame);
-        free_queue.push(frame);
+        ReleaseRenderFrame(frame);
         return;
     }
 
@@ -274,16 +280,13 @@ void PresentManager::PresentThread(std::stop_token token) {
 
         CopyToSwapchain(frame);
 
-        // Free the frame for reuse
-        std::scoped_lock fl{free_mutex};
-        free_queue.push(frame);
-        free_cv.notify_one();
+        ReleaseRenderFrame(frame);
     }
 }
 
 void PresentManager::RecreateSwapchain(Frame* frame) {
     swapchain.Create(*surface, frame->width, frame->height);
-    SetImageCount();
+    UpdateFramePipelineLimit();
 }
 
 void PresentManager::SetImageCount() {
@@ -291,13 +294,27 @@ void PresentManager::SetImageCount() {
     // FRAMES_IN_FLIGHT is 8, and the cache TICKS_TO_DESTROY is 8.
     // Mali drivers will give us 6.
     image_count = std::min<size_t>(swapchain.GetImageCount(), 7);
+}
+
+void PresentManager::UpdateFramePipelineLimit() {
+    {
+        std::scoped_lock lock{free_mutex};
 #ifdef ANDROID
-    // Mailbox already replaces stale compositor frames. Keep at most one additional frame in the
-    // application's async present pipeline so old frames do not queue before reaching Mailbox.
-    if (use_present_thread && swapchain.IsMailbox()) {
-        image_count = std::min<size_t>(image_count, 2);
-    }
+        limit_mailbox_frames = use_present_thread && swapchain.IsMailbox();
+#else
+        limit_mailbox_frames = false;
 #endif
+    }
+    free_cv.notify_all();
+}
+
+void PresentManager::ReleaseRenderFrame(Frame* frame) {
+    {
+        std::scoped_lock lock{free_mutex};
+        free_queue.push(frame);
+        --frames_in_flight;
+    }
+    free_cv.notify_one();
 }
 
 void PresentManager::CopyToSwapchain(Frame* frame) {

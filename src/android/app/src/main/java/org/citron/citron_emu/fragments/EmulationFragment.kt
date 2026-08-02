@@ -1409,6 +1409,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
             if (state != State.PAUSED) {
                 Log.debug("[EmulationFragment] Pausing emulation.")
 
+                InputHandler.releaseAllInputs()
                 NativeLibrary.pauseEmulation()
 
                 state = State.PAUSED
