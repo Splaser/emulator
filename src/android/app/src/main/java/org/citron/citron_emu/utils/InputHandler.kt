@@ -18,6 +18,11 @@ object InputHandler {
     private var changedAxesScratch = IntArray(16)
     private var changedValuesScratch = FloatArray(16)
 
+    /** Returns whether Android currently exposes a physical game controller. */
+    fun hasPhysicalController(): Boolean = InputDevice.getDeviceIds().any { deviceId ->
+        InputDevice.getDevice(deviceId)?.isGameController() == true
+    }
+
     fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val dispatchStartNs = inputTimingStartNs()
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0) {
@@ -141,9 +146,7 @@ object InputHandler {
         deviceIds.forEach { deviceId ->
             InputDevice.getDevice(deviceId)?.apply {
                 // Verify that the device has gamepad buttons, control sticks, or both.
-                if (sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD ||
-                    sources and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK
-                ) {
+                if (isGameController()) {
                     if (!gameControllerDeviceIds.contains(controllerNumber)) {
                         gameControllerDeviceIds[controllerNumber] = CitronPhysicalDevice(
                             this,
@@ -176,6 +179,10 @@ object InputHandler {
     }
 
     fun InputDevice.getGUID(): String = String.format("%016x%016x", productId, vendorId)
+
+    private fun InputDevice.isGameController(): Boolean =
+        sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD ||
+            sources and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK
 
     private class ControllerInputState {
         private var buttonStates = IntArray(256) { UNKNOWN_BUTTON_STATE }

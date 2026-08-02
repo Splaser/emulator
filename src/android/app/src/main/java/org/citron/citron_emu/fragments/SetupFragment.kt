@@ -33,6 +33,7 @@ import org.citron.citron_emu.R
 import org.citron.citron_emu.CitronApplication
 import org.citron.citron_emu.adapters.SetupAdapter
 import org.citron.citron_emu.databinding.FragmentSetupBinding
+import org.citron.citron_emu.features.settings.model.BooleanSetting
 import org.citron.citron_emu.features.settings.model.Settings
 import org.citron.citron_emu.model.HomeViewModel
 import org.citron.citron_emu.model.SetupCallback
@@ -40,6 +41,7 @@ import org.citron.citron_emu.model.SetupPage
 import org.citron.citron_emu.model.StepState
 import org.citron.citron_emu.ui.main.MainActivity
 import org.citron.citron_emu.utils.DirectoryInitialization
+import org.citron.citron_emu.utils.InputHandler
 import org.citron.citron_emu.utils.NativeConfig
 import org.citron.citron_emu.utils.ViewUtils
 import org.citron.citron_emu.utils.ViewUtils.setVisible
@@ -344,6 +346,14 @@ class SetupFragment : Fragment() {
         }
 
     private fun finishSetup() {
+        // Handheld gaming devices such as the Odin expose their built-in controls as a
+        // gamepad/joystick. Use that to choose a better first-run default while still allowing
+        // the user to turn the overlay back on from the in-game menu later.
+        if (InputHandler.hasPhysicalController()) {
+            BooleanSetting.SHOW_INPUT_OVERLAY.setBoolean(false)
+            NativeConfig.saveGlobalConfig()
+        }
+
         PreferenceManager.getDefaultSharedPreferences(CitronApplication.appContext).edit()
             .putBoolean(Settings.PREF_FIRST_APP_LAUNCH, false)
             .apply()
