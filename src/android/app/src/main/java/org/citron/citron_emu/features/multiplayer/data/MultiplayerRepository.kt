@@ -89,9 +89,9 @@ object MultiplayerRepository {
         )
     }
 
-    suspend fun leaveRoom() = roomMutex.withLock { NativeLibrary.leaveRoom() }
-
-    suspend fun closeRoom() = roomMutex.withLock { NativeLibrary.closeRoom() }
+    suspend fun leaveOrClose(hosting: Boolean) = roomMutex.withLock {
+        if (hosting) NativeLibrary.closeRoom() else NativeLibrary.leaveRoom()
+    }
 
     fun sendChatMessage(message: String): Boolean =
         MultiplayerValidation.isValidChatMessage(message) &&

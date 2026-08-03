@@ -30,9 +30,11 @@ class DirectConnectDialogFragment : DialogFragment() {
     private val multiplayerViewModel: MultiplayerViewModel by activityViewModels()
     private var stateJob: Job? = null
     private var connectJob: Job? = null
+    private var cleanupJob: Job? = null
     private var validationShown = false
     private var awaitingConnection = false
     private var observedConnectionProgress = false
+    private var pendingConnectedResult = false
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         binding = DialogDirectConnectBinding.inflate(layoutInflater)
@@ -62,7 +64,21 @@ class DirectConnectDialogFragment : DialogFragment() {
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                         connect(dialog)
                     }
-                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { disconnect() }
+                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                        disconnect(dialog, dismissWhenComplete = false)
+                    }
+                    dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                        val snapshot = multiplayerViewModel.snapshot.value
+                        if (
+                            awaitingConnection ||
+                            snapshot.connectionState == RoomConnectionState.JOINING ||
+                            cleanupJob?.isActive == true
+                        ) {
+                            disconnect(dialog, dismissWhenComplete = true)
+                        } else {
+                            dismiss()
+                        }
+                    }
                     observeState(dialog)
                     renderState(dialog, multiplayerViewModel.snapshot.value)
                 }
@@ -70,8 +86,21 @@ class DirectConnectDialogFragment : DialogFragment() {
     }
 
     override fun onDismiss(dialog: DialogInterface) {
+        if (awaitingConnection) {
+            awaitingConnection = false
+            pendingConnectedResult = false
+            connectJob?.cancel()
+            cleanupJob = multiplayerViewModel.leaveOrCloseInBackground(
+                multiplayerViewModel.snapshot.value.isHosting
+            )
+        }
         saveForm()
         super.onDismiss(dialog)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        completePendingConnectedTransition()
     }
 
     override fun onDestroy() {
@@ -101,6 +130,7 @@ class DirectConnectDialogFragment : DialogFragment() {
 
         awaitingConnection = true
         observedConnectionProgress = false
+        pendingConnectedResult = false
         isCancelable = false
         showStatus(R.string.direct_connect_connecting)
         renderState(dialog, multiplayerViewModel.snapshot.value)
@@ -133,15 +163,15 @@ class DirectConnectDialogFragment : DialogFragment() {
         if (!awaitingConnection) return
         when {
             snapshot.isConnected -> {
-                awaitingConnection = false
-                dismissAllowingStateLoss()
-                RoomDialogFragment().show(parentFragmentManager, RoomDialogFragment.TAG)
+                pendingConnectedResult = true
+                completePendingConnectedTransition()
             }
             snapshot.connectionState == RoomConnectionState.JOINING -> {
                 observedConnectionProgress = true
             }
             observedConnectionProgress && snapshot.connectionState == RoomConnectionState.IDLE -> {
                 awaitingConnection = false
+                pendingConnectedResult = false
                 isCancelable = true
                 showStatus(snapshot.lastError?.messageId ?: R.string.multiplayer_error_unknown)
                 renderState(dialog, snapshot)
@@ -149,29 +179,60 @@ class DirectConnectDialogFragment : DialogFragment() {
         }
     }
 
-    private fun disconnect() {
+    private fun completePendingConnectedTransition() {
+        if (
+            !pendingConnectedResult ||
+            !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) ||
+            parentFragmentManager.isStateSaved
+        ) {
+            return
+        }
+        pendingConnectedResult = false
+        awaitingConnection = false
+        dismissAllowingStateLoss()
+        if (parentFragmentManager.findFragmentByTag(RoomDialogFragment.TAG) == null) {
+            RoomDialogFragment().show(parentFragmentManager, RoomDialogFragment.TAG)
+        }
+    }
+
+    private fun disconnect(dialog: AlertDialog, dismissWhenComplete: Boolean) {
         val snapshot = multiplayerViewModel.snapshot.value
         awaitingConnection = false
-        isCancelable = true
+        pendingConnectedResult = false
+        isCancelable = false
         connectJob?.cancel()
+        val activeCleanup = cleanupJob?.takeIf { it.isActive }
+        val cleanup = activeCleanup ?: multiplayerViewModel.leaveOrCloseInBackground(
+            snapshot.isHosting
+        ).also { cleanupJob = it }
+        renderState(dialog, snapshot)
         lifecycleScope.launch {
-            multiplayerViewModel.leaveOrClose(hosting = snapshot.isHosting)
+            cleanup.join()
+            if (!isAdded) return@launch
+            cleanupJob = null
+            isCancelable = true
+            if (dismissWhenComplete) {
+                dismissAllowingStateLoss()
+                return@launch
+            }
             showStatus(R.string.direct_connect_disconnected)
+            renderState(dialog, multiplayerViewModel.snapshot.value)
         }
     }
 
     private fun renderState(dialog: AlertDialog, snapshot: MultiplayerSnapshot) {
         val connecting = snapshot.connectionState == RoomConnectionState.JOINING
         val connected = snapshot.isConnected
-        val busy = connecting || connected || awaitingConnection
+        val cleaningUp = cleanupJob?.isActive == true
+        val busy = connecting || connected || awaitingConnection || cleaningUp
         binding.directConnectHost.isEnabled = !busy
         binding.directConnectPort.isEnabled = !busy
         binding.directConnectNickname.isEnabled = !busy
         binding.directConnectPassword.isEnabled = !busy
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = snapshot.canStartConnection &&
-            !awaitingConnection
-        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = connecting || connected ||
-            awaitingConnection
+            !awaitingConnection && !cleaningUp
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = !cleaningUp &&
+            (connecting || connected || awaitingConnection)
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = true
 
         when {

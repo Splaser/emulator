@@ -109,6 +109,9 @@ std::mutex room_snapshot_mutex;
 Network::RoomInformation room_information_snapshot;
 Network::RoomMember::MemberList room_member_snapshot;
 bool room_snapshot_valid{};
+std::atomic_bool pending_local_host_join{};
+std::atomic_bool local_host_join_returned{};
+std::mutex room_cleanup_mutex;
 
 constexpr std::size_t MaxPendingRoomEvents = 200;
 
@@ -133,6 +136,8 @@ bool IsValidRoomIdentifier(const std::string& value) {
 }
 
 void ResetAndroidRoomState() {
+    pending_local_host_join = false;
+    local_host_join_returned = false;
     room_last_error = -1;
     {
         std::scoped_lock event_lock(room_event_mutex);
@@ -143,6 +148,17 @@ void ResetAndroidRoomState() {
         room_information_snapshot = {};
         room_member_snapshot.clear();
         room_snapshot_valid = false;
+    }
+}
+
+void CleanupHostedRoom(const std::shared_ptr<Network::RoomMember>& room_member,
+                       const std::shared_ptr<Network::Room>& room) {
+    std::scoped_lock lock(room_cleanup_mutex);
+    if (room_member) {
+        room_member->Leave();
+    }
+    if (room && room->GetState() == Network::Room::State::Open) {
+        room->Destroy();
     }
 }
 
@@ -217,6 +233,29 @@ EmulationSession::EmulationSession() {
     }
 
     if (const auto room_member = m_system.GetRoomNetwork().GetRoomMember().lock()) {
+        const std::weak_ptr<Network::RoomMember> weak_room_member = room_member;
+        const std::weak_ptr<Network::Room> weak_room =
+            m_system.GetRoomNetwork().GetRoom().lock();
+        room_member->BindOnStateChanged(
+            [weak_room_member, weak_room](const Network::RoomMember::State& state) {
+                if (!pending_local_host_join) {
+                    return;
+                }
+                if (state == Network::RoomMember::State::Joined ||
+                    state == Network::RoomMember::State::Moderator) {
+                    pending_local_host_join = false;
+                    local_host_join_returned = false;
+                    return;
+                }
+                if (state != Network::RoomMember::State::Idle || !local_host_join_returned ||
+                    !pending_local_host_join.exchange(false)) {
+                    return;
+                }
+                local_host_join_returned = false;
+                Common::DetachedTasks::AddTask([weak_room_member, weak_room] {
+                    CleanupHostedRoom(weak_room_member.lock(), weak_room.lock());
+                });
+            });
         room_member->BindOnError([](const Network::RoomMember::Error& error) {
             room_last_error = static_cast<int>(error);
         });
@@ -236,7 +275,6 @@ EmulationSession::EmulationSession() {
                     room_events.pop_front();
                 }
             });
-        std::weak_ptr<Network::RoomMember> weak_room_member = room_member;
         room_member->BindOnRoomInformationChanged(
             [weak_room_member](const Network::RoomInformation& information) {
                 const auto member = weak_room_member.lock();
@@ -1022,11 +1060,23 @@ jboolean Java_org_citron_citron_1emu_NativeLibrary_hostRoom(
         return false;
     }
 
+    pending_local_host_join = true;
+    local_host_join_returned = false;
     room_member->Join(nickname, "127.0.0.1", static_cast<u16>(jport), 0,
                       Network::NoPreferredIP, password);
+    local_host_join_returned = true;
     const auto state = room_member->GetState();
+    if (state == Network::RoomMember::State::Joined ||
+        state == Network::RoomMember::State::Moderator) {
+        pending_local_host_join = false;
+        local_host_join_returned = false;
+        return true;
+    }
     if (state != Network::RoomMember::State::Joining && !room_member->IsConnected()) {
-        room->Destroy();
+        if (pending_local_host_join.exchange(false)) {
+            local_host_join_returned = false;
+            CleanupHostedRoom(room_member, room);
+        }
         if (room_last_error.load() < 0) {
             SetAndroidRoomError(AndroidRoomError::LocalJoinFailed);
         }
@@ -1045,6 +1095,9 @@ jint Java_org_citron_citron_1emu_NativeLibrary_getRoomConnectionState(JNIEnv* en
 }
 
 void Java_org_citron_citron_1emu_NativeLibrary_leaveRoom(JNIEnv* env, jobject jobj) {
+    pending_local_host_join = false;
+    local_host_join_returned = false;
+    std::scoped_lock lock(room_cleanup_mutex);
     const auto room_member =
         EmulationSession::GetInstance().System().GetRoomNetwork().GetRoomMember().lock();
     if (room_member && room_member->GetState() != Network::RoomMember::State::Uninitialized &&
@@ -1055,6 +1108,9 @@ void Java_org_citron_citron_1emu_NativeLibrary_leaveRoom(JNIEnv* env, jobject jo
 }
 
 void Java_org_citron_citron_1emu_NativeLibrary_closeRoom(JNIEnv* env, jobject jobj) {
+    pending_local_host_join = false;
+    local_host_join_returned = false;
+    std::scoped_lock lock(room_cleanup_mutex);
     auto& room_network = EmulationSession::GetInstance().System().GetRoomNetwork();
     if (const auto room_member = room_network.GetRoomMember().lock();
         room_member && room_member->GetState() != Network::RoomMember::State::Uninitialized &&
@@ -1143,7 +1199,7 @@ jobjectArray Java_org_citron_citron_1emu_NativeLibrary_getRoomMembers(JNIEnv* en
     std::vector<std::string> result;
     for (const auto& member : room_member_snapshot) {
         result.insert(result.end(), {member.nickname, member.username, member.game_info.name,
-                                     member.game_info.version});
+                                     std::to_string(member.game_info.id)});
     }
     return ToJStringArray(env, result);
 }

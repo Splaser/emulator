@@ -193,7 +193,7 @@ object NativeLibrary {
     /** Returns name, description, preferred game, member count, capacity, and port. */
     external fun getRoomInfo(): Array<String>
 
-    /** Returns flattened nickname, username, game, and version groups. */
+    /** Returns flattened nickname, username, game name, and game ID groups. */
     external fun getRoomMembers(): Array<String>
 
     /** Returns flattened event type, nickname, username, and payload groups. */

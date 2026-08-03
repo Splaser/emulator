@@ -5,6 +5,7 @@ package org.citron.citron_emu.features.multiplayer.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.citron.citron_emu.features.multiplayer.data.MultiplayerRepository
 import org.citron.citron_emu.features.multiplayer.model.DirectConnectParams
@@ -81,7 +83,12 @@ class MultiplayerViewModel : ViewModel() {
     }
 
     suspend fun leaveOrClose(hosting: Boolean) = withContext(Dispatchers.IO) {
-        if (hosting) repository.closeRoom() else repository.leaveRoom()
+        repository.leaveOrClose(hosting)
+        refreshRequests.tryEmit(Unit)
+    }
+
+    fun leaveOrCloseInBackground(hosting: Boolean): Job = viewModelScope.launch(Dispatchers.IO) {
+        repository.leaveOrClose(hosting)
         refreshRequests.tryEmit(Unit)
     }
 
