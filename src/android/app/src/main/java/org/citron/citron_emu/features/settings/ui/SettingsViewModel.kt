@@ -57,6 +57,12 @@ class SettingsViewModel : ViewModel() {
     private val _shouldShowDirectConnectDialog = MutableStateFlow(false)
     val shouldShowDirectConnectDialog = _shouldShowDirectConnectDialog.asStateFlow()
 
+    private val _shouldShowHostRoomDialog = MutableStateFlow(false)
+    val shouldShowHostRoomDialog = _shouldShowHostRoomDialog.asStateFlow()
+
+    private val _shouldShowRoomDialog = MutableStateFlow(false)
+    val shouldShowRoomDialog = _shouldShowRoomDialog.asStateFlow()
+
     fun setShouldRecreate(value: Boolean) {
         _shouldRecreate.value = value
     }
@@ -108,6 +114,14 @@ class SettingsViewModel : ViewModel() {
 
     fun setShouldShowDirectConnectDialog(value: Boolean) {
         _shouldShowDirectConnectDialog.value = value
+    }
+
+    fun setShouldShowHostRoomDialog(value: Boolean) {
+        _shouldShowHostRoomDialog.value = value
+    }
+
+    fun setShouldShowRoomDialog(value: Boolean) {
+        _shouldShowRoomDialog.value = value
     }
 
     fun getCurrentDeviceParams(defaultParams: ParamPackage): ParamPackage =

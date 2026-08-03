@@ -63,6 +63,8 @@ import org.citron.citron_emu.features.settings.model.IntSetting
 import org.citron.citron_emu.features.settings.model.Settings
 import org.citron.citron_emu.features.settings.model.Settings.EmulationOrientation
 import org.citron.citron_emu.features.settings.model.Settings.EmulationVerticalAlignment
+import org.citron.citron_emu.features.settings.ui.MultiplayerRoomState
+import org.citron.citron_emu.features.settings.ui.RoomDialogFragment
 import org.citron.citron_emu.features.settings.utils.SettingsFile
 import org.citron.citron_emu.model.DriverViewModel
 import org.citron.citron_emu.model.Game
@@ -249,6 +251,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
             override fun onDrawerOpened(drawerView: View) {
                 InputHandler.releaseAllInputs()
                 binding.drawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED)
+                updateMultiplayerRoomMenuVisibility()
                 binding.inGameMenu.requestFocus()
                 emulationViewModel.setDrawerOpen(true)
             }
@@ -286,6 +289,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
                 requireContext().theme
             )
         }
+        updateMultiplayerRoomMenuVisibility()
 
         binding.inGameMenu.setNavigationItemSelectedListener {
             when (it.itemId) {
@@ -352,6 +356,12 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
                 R.id.menu_amiibo -> {
                     showAmiiboMenu()
+                    true
+                }
+
+                R.id.menu_multiplayer_room -> {
+                    binding.drawerLayout.close()
+                    RoomDialogFragment().show(parentFragmentManager, RoomDialogFragment.TAG)
                     true
                 }
 
@@ -518,6 +528,12 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
             emulationState.run(emulationActivity!!.isActivityRecreated, programIndex)
         }
+    }
+
+    private fun updateMultiplayerRoomMenuVisibility() {
+        val state = NativeLibrary.getRoomConnectionState()
+        binding.inGameMenu.menu.findItem(R.id.menu_multiplayer_room).isVisible =
+            MultiplayerRoomState.isConnected(state) || NativeLibrary.isHostingRoom()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {

@@ -456,12 +456,57 @@
     <string name="direct_connect_host">Server address</string>
     <string name="direct_connect_port">Port</string>
     <string name="direct_connect_nickname">Nickname</string>
+    <string name="direct_connect_password">Password (optional)</string>
     <string name="direct_connect_connecting">Connecting…</string>
     <string name="direct_connect_connected">Connected</string>
     <string name="direct_connect_disconnected">Disconnected</string>
     <string name="direct_connect_failed">Unable to connect to the room</string>
     <string name="direct_connect_invalid_input">Enter a server address, port, and 4-20 character nickname.</string>
     <string name="direct_connect_disconnect">Disconnect</string>
+
+    <string name="host_room_unlisted">Create Unlisted Room</string>
+    <string name="host_room_description_setting">Host a room that others join by address</string>
+    <string name="host_room_name">Room name</string>
+    <string name="host_room_description">Room description (optional)</string>
+    <string name="host_room_max_players">Max players</string>
+    <string name="host_room_create">Create</string>
+    <string name="host_room_creating">Creating room…</string>
+    <string name="host_room_create_failed">Unable to create the room. Check that the port is available.</string>
+    <string name="host_room_invalid_input">Enter a 4–50 character room name, a 4–20 character nickname, a valid port, and 2–16 players.</string>
+
+    <string name="room_title">Multiplayer Room</string>
+    <string name="room_open">Open Current Room</string>
+    <string name="room_open_description">View members, room details, and chat</string>
+    <string name="room_summary">%1$s · %2$s/%3$s members</string>
+    <string name="room_no_description">No room description</string>
+    <string name="room_connected_port">Connected on port %1$s</string>
+    <string name="room_connected_game">Playing %1$s · port %2$s</string>
+    <string name="room_members">Members</string>
+    <string name="room_chat">Chat</string>
+    <string name="room_message">Message</string>
+    <string name="room_send">Send</string>
+    <string name="room_leave">Leave Room</string>
+    <string name="room_close_hosted">Close Room</string>
+    <string name="room_chat_line">%1$s: %2$s</string>
+    <string name="room_chat_line_self">You: %1$s</string>
+    <string name="room_member_joined">• %1$s joined</string>
+    <string name="room_member_left">• %1$s left</string>
+    <string name="room_member_kicked">• %1$s was kicked</string>
+    <string name="room_member_banned">• %1$s was banned</string>
+    <string name="room_member_unbanned">• %1$s was unbanned</string>
+
+    <string name="multiplayer_error_lost_connection">Connection to the room was lost.</string>
+    <string name="multiplayer_error_kicked">You were kicked by the room host.</string>
+    <string name="multiplayer_error_name_collision">That nickname is already in use.</string>
+    <string name="multiplayer_error_ip_collision">The assigned network address is already in use.</string>
+    <string name="multiplayer_error_wrong_version">The room uses an incompatible network version.</string>
+    <string name="multiplayer_error_wrong_password">The room password is incorrect.</string>
+    <string name="multiplayer_error_could_not_connect">The room did not respond. Check its address and port.</string>
+    <string name="multiplayer_error_room_full">The room is full.</string>
+    <string name="multiplayer_error_banned">You are banned from this room.</string>
+    <string name="multiplayer_error_permission_denied">You do not have permission to perform that action.</string>
+    <string name="multiplayer_error_no_such_user">That room member no longer exists.</string>
+    <string name="multiplayer_error_unknown">Unable to connect to the room.</string>
 
     <!-- Zep Zone Headers -->
     <string name="memory_layout_header">Memory Layout</string>

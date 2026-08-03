@@ -139,6 +139,28 @@ class SettingsFragment : Fragment() {
                 )
             }
         }
+        settingsViewModel.shouldShowHostRoomDialog.collect(
+            viewLifecycleOwner,
+            resetState = { settingsViewModel.setShouldShowHostRoomDialog(false) }
+        ) {
+            if (it) {
+                HostRoomDialogFragment().show(
+                    parentFragmentManager,
+                    HostRoomDialogFragment.TAG
+                )
+            }
+        }
+        settingsViewModel.shouldShowRoomDialog.collect(
+            viewLifecycleOwner,
+            resetState = { settingsViewModel.setShouldShowRoomDialog(false) }
+        ) {
+            if (it) {
+                RoomDialogFragment().show(
+                    parentFragmentManager,
+                    RoomDialogFragment.TAG
+                )
+            }
+        }
 
         if (args.menuTag == Settings.MenuTag.SECTION_ROOT) {
             binding.toolbarSettings.inflateMenu(R.menu.menu_settings)

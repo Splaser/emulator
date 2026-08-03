@@ -50,6 +50,20 @@
             android:singleLine="true" />
     </com.google.android.material.textfield.TextInputLayout>
 
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:hint="@string/direct_connect_password">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/direct_connect_password"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="textPassword"
+            android:singleLine="true" />
+    </com.google.android.material.textfield.TextInputLayout>
+
     <com.google.android.material.textview.MaterialTextView
         android:id="@+id/direct_connect_status"
         style="@style/TextAppearance.Material3.BodySmall"

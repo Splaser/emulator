@@ -4,12 +4,12 @@ package org.citron.citron_emu.features.settings.ui
 
 import android.app.Dialog
 import android.os.Bundle
+import androidx.appcompat.app.AlertDialog
 import androidx.core.view.isVisible
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceManager
-import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,7 +26,7 @@ import org.citron.citron_emu.databinding.DialogDirectConnectBinding
 class DirectConnectDialogFragment : DialogFragment() {
     private lateinit var binding: DialogDirectConnectBinding
     private var connectionJob: Job? = null
-    private var connectionState = ROOM_IDLE
+    private var connectionState = MultiplayerRoomState.IDLE
 
     private val settingsViewModel: SettingsViewModel by activityViewModels()
 
@@ -54,7 +54,7 @@ class DirectConnectDialogFragment : DialogFragment() {
                     }
                     val state = NativeLibrary.getRoomConnectionState()
                     renderState(dialog, state)
-                    if (state == ROOM_JOINING) {
+                    if (state == MultiplayerRoomState.JOINING) {
                         startObservingConnection(dialog)
                     }
                 }
@@ -69,6 +69,7 @@ class DirectConnectDialogFragment : DialogFragment() {
     private fun connect(dialog: AlertDialog) {
         val host = binding.directConnectHost.text?.toString()?.trim().orEmpty()
         val nickname = binding.directConnectNickname.text?.toString()?.trim().orEmpty()
+        val password = binding.directConnectPassword.text?.toString().orEmpty()
         val port = binding.directConnectPort.text?.toString()?.toIntOrNull()
         if (host.isEmpty() || host.length > MAX_HOST_LENGTH ||
             nickname.length !in MIN_NICKNAME_LENGTH..MAX_NICKNAME_LENGTH ||
@@ -90,11 +91,11 @@ class DirectConnectDialogFragment : DialogFragment() {
         connectionJob?.cancel()
         connectionJob = lifecycleScope.launch {
             val started = withContext(Dispatchers.IO) {
-                NativeLibrary.connectToRoom(nickname, host, portValue)
+                NativeLibrary.connectToRoom(nickname, host, portValue, password)
             }
             if (!started) {
-                showStatus(R.string.direct_connect_failed)
-                renderState(dialog, ROOM_IDLE)
+                showConnectionError()
+                renderState(dialog, MultiplayerRoomState.IDLE)
                 return@launch
             }
             monitorConnection(dialog)
@@ -114,9 +115,12 @@ class DirectConnectDialogFragment : DialogFragment() {
                 NativeLibrary.getRoomConnectionState()
             }
             renderState(dialog, state)
-            if (state != ROOM_JOINING) {
-                if (state != ROOM_JOINED && state != ROOM_MODERATOR) {
-                    showStatus(R.string.direct_connect_failed)
+            if (state != MultiplayerRoomState.JOINING) {
+                if (MultiplayerRoomState.isConnected(state)) {
+                    dismissAllowingStateLoss()
+                    RoomDialogFragment().show(parentFragmentManager, RoomDialogFragment.TAG)
+                } else {
+                    showConnectionError()
                 }
                 return
             }
@@ -129,7 +133,7 @@ class DirectConnectDialogFragment : DialogFragment() {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { NativeLibrary.leaveRoom() }
             showStatus(R.string.direct_connect_disconnected)
-            renderState(dialog, ROOM_IDLE)
+            renderState(dialog, MultiplayerRoomState.IDLE)
         }
     }
 
@@ -139,11 +143,12 @@ class DirectConnectDialogFragment : DialogFragment() {
             settingsViewModel.setShouldReloadSettingsList(true)
         }
 
-        val connecting = state == ROOM_JOINING
-        val connected = state == ROOM_JOINED || state == ROOM_MODERATOR
+        val connecting = state == MultiplayerRoomState.JOINING
+        val connected = MultiplayerRoomState.isConnected(state)
         binding.directConnectHost.isEnabled = !connecting && !connected
         binding.directConnectPort.isEnabled = !connecting && !connected
         binding.directConnectNickname.isEnabled = !connecting && !connected
+        binding.directConnectPassword.isEnabled = !connecting && !connected
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = !connecting && !connected
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = connecting || connected
 
@@ -155,6 +160,14 @@ class DirectConnectDialogFragment : DialogFragment() {
 
     private fun showStatus(stringId: Int) {
         binding.directConnectStatus.setText(stringId)
+        binding.directConnectStatus.isVisible = true
+    }
+
+    private suspend fun showConnectionError() {
+        binding.directConnectStatus.text = multiplayerErrorText(
+            requireContext(),
+            awaitMultiplayerError()
+        )
         binding.directConnectStatus.isVisible = true
     }
 
@@ -170,10 +183,6 @@ class DirectConnectDialogFragment : DialogFragment() {
         private const val MAX_HOST_LENGTH = 253
         private const val MAX_PORT = 65535
         private const val CONNECTION_STATE_POLL_MS = 250L
-        private const val ROOM_IDLE = 1
-        private const val ROOM_JOINING = 2
-        private const val ROOM_JOINED = 3
-        private const val ROOM_MODERATOR = 4
         private val NICKNAME_PATTERN = Regex("[a-zA-Z0-9._ -]+")
     }
 }

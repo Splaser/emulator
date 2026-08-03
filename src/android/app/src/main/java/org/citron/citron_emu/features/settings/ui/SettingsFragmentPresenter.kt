@@ -1034,6 +1034,29 @@ class SettingsFragmentPresenter(
                     settingsViewModel.setShouldShowDirectConnectDialog(true)
                 }
             )
+            add(
+                RunnableSetting(
+                    titleId = R.string.host_room_unlisted,
+                    descriptionId = R.string.host_room_description_setting,
+                    isRunnable = !NativeLibrary.isRunning() &&
+                        NativeLibrary.getRoomConnectionState() == MultiplayerRoomState.IDLE,
+                    iconId = R.drawable.ic_add
+                ) {
+                    settingsViewModel.setShouldShowHostRoomDialog(true)
+                }
+            )
+            if (MultiplayerRoomState.isConnected(NativeLibrary.getRoomConnectionState())) {
+                add(
+                    RunnableSetting(
+                        titleId = R.string.room_open,
+                        descriptionId = R.string.room_open_description,
+                        isRunnable = true,
+                        iconId = R.drawable.ic_share
+                    ) {
+                        settingsViewModel.setShouldShowRoomDialog(true)
+                    }
+                )
+            }
         }
     }
 
