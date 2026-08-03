@@ -100,7 +100,6 @@ class SettingsFragmentPresenter(
             MenuTag.SECTION_INPUT_PLAYER_EIGHT -> addInputPlayer(sl, 7)
             MenuTag.SECTION_THEME -> addThemeSettings(sl)
             MenuTag.SECTION_DEBUG -> addDebugSettings(sl)
-            MenuTag.SECTION_NETWORK -> addNetworkSettings(sl)
             MenuTag.SECTION_ZEP_ZONE -> addZepZoneSettings(sl)
             MenuTag.SECTION_APPLETS_ANDROID -> addAppletsAndroidSettings(sl)
         }
@@ -144,14 +143,6 @@ class SettingsFragmentPresenter(
                     descriptionId = R.string.preferences_debug_description,
                     iconId = R.drawable.ic_code,
                     menuKey = MenuTag.SECTION_DEBUG
-                )
-            )
-            add(
-                SubmenuSetting(
-                    titleId = R.string.preferences_network,
-                    descriptionId = R.string.preferences_network_description,
-                    iconId = R.drawable.ic_settings,
-                    menuKey = MenuTag.SECTION_NETWORK
                 )
             )
             add(
@@ -1010,53 +1001,6 @@ class SettingsFragmentPresenter(
                     customChoice = context.getString(R.string.log_filter_custom)
                 )
             )
-        }
-    }
-
-    private fun addNetworkSettings(sl: ArrayList<SettingsItem>) {
-        sl.apply {
-            add(HeaderSetting(R.string.network_settings_header))
-            add(BooleanSetting.AIRPLANE_MODE.key)
-            add(
-                RunnableSetting(
-                    titleId = R.string.direct_connect,
-                    descriptionString = context.getString(
-                        R.string.direct_connect_status,
-                        when (NativeLibrary.getRoomConnectionState()) {
-                            2 -> context.getString(R.string.direct_connect_connecting)
-                            3, 4 -> context.getString(R.string.direct_connect_connected)
-                            else -> context.getString(R.string.direct_connect_disconnected)
-                        }
-                    ),
-                    isRunnable = !NativeLibrary.isRunning(),
-                    iconId = R.drawable.ic_share
-                ) {
-                    settingsViewModel.setShouldShowDirectConnectDialog(true)
-                }
-            )
-            add(
-                RunnableSetting(
-                    titleId = R.string.host_room_unlisted,
-                    descriptionId = R.string.host_room_description_setting,
-                    isRunnable = !NativeLibrary.isRunning() &&
-                        NativeLibrary.getRoomConnectionState() == MultiplayerRoomState.IDLE,
-                    iconId = R.drawable.ic_add
-                ) {
-                    settingsViewModel.setShouldShowHostRoomDialog(true)
-                }
-            )
-            if (MultiplayerRoomState.isConnected(NativeLibrary.getRoomConnectionState())) {
-                add(
-                    RunnableSetting(
-                        titleId = R.string.room_open,
-                        descriptionId = R.string.room_open_description,
-                        isRunnable = true,
-                        iconId = R.drawable.ic_share
-                    ) {
-                        settingsViewModel.setShouldShowRoomDialog(true)
-                    }
-                )
-            }
         }
     }
 

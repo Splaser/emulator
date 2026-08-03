@@ -63,8 +63,9 @@ import org.citron.citron_emu.features.settings.model.IntSetting
 import org.citron.citron_emu.features.settings.model.Settings
 import org.citron.citron_emu.features.settings.model.Settings.EmulationOrientation
 import org.citron.citron_emu.features.settings.model.Settings.EmulationVerticalAlignment
-import org.citron.citron_emu.features.settings.ui.MultiplayerRoomState
-import org.citron.citron_emu.features.settings.ui.RoomDialogFragment
+import org.citron.citron_emu.features.multiplayer.model.MultiplayerSnapshot
+import org.citron.citron_emu.features.multiplayer.ui.MultiplayerViewModel
+import org.citron.citron_emu.features.multiplayer.ui.RoomDialogFragment
 import org.citron.citron_emu.features.settings.utils.SettingsFile
 import org.citron.citron_emu.model.DriverViewModel
 import org.citron.citron_emu.model.Game
@@ -94,6 +95,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
     private val emulationViewModel: EmulationViewModel by activityViewModels()
     private val driverViewModel: DriverViewModel by activityViewModels()
+    private val multiplayerViewModel: MultiplayerViewModel by activityViewModels()
     private val cheatToggleMutex = Mutex()
 
     private var isInFoldableLayout = false
@@ -516,6 +518,9 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         driverViewModel.isInteractionAllowed.collect(viewLifecycleOwner) {
             if (it) startEmulation()
         }
+        multiplayerViewModel.snapshot.collect(viewLifecycleOwner) {
+            updateMultiplayerRoomMenuVisibility(it)
+        }
     }
 
     private fun startEmulation(programIndex: Int = 0) {
@@ -530,10 +535,11 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         }
     }
 
-    private fun updateMultiplayerRoomMenuVisibility() {
-        val state = NativeLibrary.getRoomConnectionState()
+    private fun updateMultiplayerRoomMenuVisibility(
+        snapshot: MultiplayerSnapshot = multiplayerViewModel.snapshot.value
+    ) {
         binding.inGameMenu.menu.findItem(R.id.menu_multiplayer_room).isVisible =
-            MultiplayerRoomState.isConnected(state) || NativeLibrary.isHostingRoom()
+            snapshot.isConnected || snapshot.isHosting
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {

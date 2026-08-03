@@ -54,15 +54,6 @@ class SettingsViewModel : ViewModel() {
     private val _shouldShowResetInputDialog = MutableStateFlow(false)
     val shouldShowResetInputDialog = _shouldShowResetInputDialog.asStateFlow()
 
-    private val _shouldShowDirectConnectDialog = MutableStateFlow(false)
-    val shouldShowDirectConnectDialog = _shouldShowDirectConnectDialog.asStateFlow()
-
-    private val _shouldShowHostRoomDialog = MutableStateFlow(false)
-    val shouldShowHostRoomDialog = _shouldShowHostRoomDialog.asStateFlow()
-
-    private val _shouldShowRoomDialog = MutableStateFlow(false)
-    val shouldShowRoomDialog = _shouldShowRoomDialog.asStateFlow()
-
     fun setShouldRecreate(value: Boolean) {
         _shouldRecreate.value = value
     }
@@ -110,18 +101,6 @@ class SettingsViewModel : ViewModel() {
 
     fun setShouldShowResetInputDialog(value: Boolean) {
         _shouldShowResetInputDialog.value = value
-    }
-
-    fun setShouldShowDirectConnectDialog(value: Boolean) {
-        _shouldShowDirectConnectDialog.value = value
-    }
-
-    fun setShouldShowHostRoomDialog(value: Boolean) {
-        _shouldShowHostRoomDialog.value = value
-    }
-
-    fun setShouldShowRoomDialog(value: Boolean) {
-        _shouldShowRoomDialog.value = value
     }
 
     fun getCurrentDeviceParams(defaultParams: ParamPackage): ParamPackage =

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-package org.citron.citron_emu.fragments
+package org.citron.citron_emu.features.multiplayer.ui
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -15,19 +15,11 @@ import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.citron.citron_emu.NativeLibrary
 import org.citron.citron_emu.R
 import org.citron.citron_emu.databinding.FragmentMultiplayerBinding
-import org.citron.citron_emu.features.settings.ui.DirectConnectDialogFragment
-import org.citron.citron_emu.features.settings.ui.HostRoomDialogFragment
-import org.citron.citron_emu.features.settings.ui.MultiplayerRoomState
-import org.citron.citron_emu.features.settings.ui.RoomDialogFragment
+import org.citron.citron_emu.features.multiplayer.model.MultiplayerSnapshot
+import org.citron.citron_emu.features.multiplayer.model.RoomConnectionState
 import org.citron.citron_emu.model.HomeViewModel
 import org.citron.citron_emu.utils.ViewUtils.updateMargins
 
@@ -35,6 +27,8 @@ class MultiplayerFragment : Fragment() {
     private var _binding: FragmentMultiplayerBinding? = null
     private val binding get() = _binding!!
     private val homeViewModel: HomeViewModel by activityViewModels()
+    private val multiplayerViewModel: MultiplayerViewModel by activityViewModels()
+    private var updatingAirplaneSwitch = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -50,6 +44,11 @@ class MultiplayerFragment : Fragment() {
         homeViewModel.setNavigationVisibility(visible = true, animated = true)
         homeViewModel.setStatusBarShadeVisibility(visible = true)
 
+        binding.multiplayerAirplaneMode.setOnCheckedChangeListener { _, enabled ->
+            if (!updatingAirplaneSwitch) {
+                multiplayerViewModel.setAirplaneModeEnabled(enabled)
+            }
+        }
         binding.multiplayerDirectConnect.setOnClickListener {
             DirectConnectDialogFragment().show(
                 parentFragmentManager,
@@ -65,7 +64,7 @@ class MultiplayerFragment : Fragment() {
         binding.multiplayerLeaveRoom.setOnClickListener { leaveOrCloseRoom() }
 
         setInsets()
-        observeRoomState()
+        observeMultiplayerState()
     }
 
     override fun onDestroyView() {
@@ -73,48 +72,51 @@ class MultiplayerFragment : Fragment() {
         _binding = null
     }
 
-    private fun observeRoomState() {
+    private fun observeMultiplayerState() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                while (currentCoroutineContext().isActive) {
-                    updateRoomState()
-                    delay(ROOM_STATE_POLL_MS)
+                launch {
+                    multiplayerViewModel.snapshot.collect(::renderSnapshot)
+                }
+                launch {
+                    multiplayerViewModel.airplaneMode.collect { enabled ->
+                        if (binding.multiplayerAirplaneMode.isChecked != enabled) {
+                            updatingAirplaneSwitch = true
+                            binding.multiplayerAirplaneMode.isChecked = enabled
+                            updatingAirplaneSwitch = false
+                        }
+                    }
                 }
             }
         }
     }
 
-    private fun updateRoomState() {
-        val state = NativeLibrary.getRoomConnectionState()
-        val hosting = NativeLibrary.isHostingRoom()
-        val connected = MultiplayerRoomState.isConnected(state)
+    private fun renderSnapshot(snapshot: MultiplayerSnapshot) {
         binding.multiplayerStatusText.setText(
             when {
-                hosting && connected -> R.string.multiplayer_status_hosting
-                hosting -> R.string.multiplayer_status_host_disconnected
-                state == MultiplayerRoomState.JOINING -> R.string.multiplayer_status_connecting
-                connected -> R.string.multiplayer_status_connected
+                snapshot.isHosting && snapshot.isConnected -> R.string.multiplayer_status_hosting
+                snapshot.isHosting -> R.string.multiplayer_status_host_disconnected
+                snapshot.connectionState == RoomConnectionState.JOINING ->
+                    R.string.multiplayer_status_connecting
+                snapshot.isConnected -> R.string.multiplayer_status_connected
                 else -> R.string.multiplayer_status_disconnected
             }
         )
 
-        val canStartConnection = state != MultiplayerRoomState.JOINING && !connected && !hosting &&
-            !NativeLibrary.isRunning()
-        binding.multiplayerDirectConnect.isEnabled = canStartConnection
-        binding.multiplayerCreateRoom.isEnabled = canStartConnection
-        binding.multiplayerOpenRoom.isEnabled = connected || hosting
-        binding.multiplayerLeaveRoom.isEnabled = connected || hosting
+        binding.multiplayerDirectConnect.isEnabled = snapshot.canStartConnection
+        binding.multiplayerCreateRoom.isEnabled = snapshot.canStartConnection
+        binding.multiplayerOpenRoom.isEnabled = snapshot.isConnected || snapshot.isHosting
+        binding.multiplayerLeaveRoom.isEnabled = snapshot.isConnected || snapshot.isHosting
+        binding.multiplayerAirplaneMode.isEnabled = snapshot.canStartConnection
         binding.multiplayerLeaveRoom.setText(
-            if (hosting) R.string.room_close_hosted else R.string.room_leave
+            if (snapshot.isHosting) R.string.room_close_hosted else R.string.room_leave
         )
     }
 
     private fun leaveOrCloseRoom() {
-        val hosting = NativeLibrary.isHostingRoom()
+        val hosting = multiplayerViewModel.snapshot.value.isHosting
         viewLifecycleOwner.lifecycleScope.launch {
-            withContext(Dispatchers.IO) {
-                if (hosting) NativeLibrary.closeRoom() else NativeLibrary.leaveRoom()
-            }
+            multiplayerViewModel.leaveOrClose(hosting)
             Toast.makeText(
                 requireContext(),
                 if (hosting) {
@@ -124,7 +126,6 @@ class MultiplayerFragment : Fragment() {
                 },
                 Toast.LENGTH_SHORT
             ).show()
-            updateRoomState()
         }
     }
 
@@ -150,9 +151,5 @@ class MultiplayerFragment : Fragment() {
             binding.multiplayerContent.updatePadding(right = spacingNavigationRail + contentPadding)
         }
         windowInsets
-    }
-
-    companion object {
-        private const val ROOM_STATE_POLL_MS = 500L
     }
 }

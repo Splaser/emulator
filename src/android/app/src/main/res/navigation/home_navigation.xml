@@ -51,7 +51,7 @@
 
     <fragment
         android:id="@+id/multiplayerFragment"
-        android:name="org.citron.citron_emu.fragments.MultiplayerFragment"
+        android:name="org.citron.citron_emu.features.multiplayer.ui.MultiplayerFragment"
         android:label="MultiplayerFragment" />
 
     <fragment

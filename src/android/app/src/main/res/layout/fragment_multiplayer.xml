@@ -56,6 +56,21 @@
                     android:layout_marginTop="4dp"
                     android:text="@string/multiplayer_status_disconnected" />
 
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/multiplayer_airplane_mode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="@string/airplane_mode" />
+
+                <com.google.android.material.textview.MaterialTextView
+                    style="@style/TextAppearance.Material3.BodySmall"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/airplane_mode_multiplayer_description"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
