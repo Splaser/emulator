@@ -16,6 +16,7 @@
 #include <iterator>
 #include <limits>
 #include <mutex>
+#include <regex>
 
 #ifdef ARCHITECTURE_arm64
 #include <adrenotools/driver.h>
@@ -123,6 +124,11 @@ enum class AndroidRoomError : int {
 
 void SetAndroidRoomError(AndroidRoomError error) {
     room_last_error = static_cast<int>(error);
+}
+
+bool IsValidRoomIdentifier(const std::string& value) {
+    static const std::regex identifier_regex("^[ a-zA-Z0-9._-]{4,20}$");
+    return std::regex_match(value, identifier_regex);
 }
 
 void ResetAndroidRoomState() {
@@ -928,7 +934,7 @@ jboolean Java_org_citron_citron_1emu_NativeLibrary_connectToRoom(
     const auto nickname = Common::Android::GetJString(env, jnickname);
     const auto host = Common::Android::GetJString(env, jhost);
     const auto password = Common::Android::GetJString(env, jpassword);
-    if (nickname.empty() || nickname.size() > 20 || host.empty() || host.size() > 253) {
+    if (!IsValidRoomIdentifier(nickname) || host.empty() || host.size() > 253) {
         SetAndroidRoomError(AndroidRoomError::InvalidArguments);
         return false;
     }
@@ -977,7 +983,7 @@ jboolean Java_org_citron_citron_1emu_NativeLibrary_hostRoom(
     const auto name = Common::Android::GetJString(env, jname);
     const auto description = Common::Android::GetJString(env, jdescription);
     const auto password = Common::Android::GetJString(env, jpassword);
-    if (nickname.empty() || nickname.size() > 20 || name.empty() || name.size() > 50) {
+    if (!IsValidRoomIdentifier(nickname) || !IsValidRoomIdentifier(name)) {
         SetAndroidRoomError(AndroidRoomError::InvalidArguments);
         return false;
     }

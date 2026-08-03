@@ -7,6 +7,7 @@ import android.content.DialogInterface
 import android.os.Bundle
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.isVisible
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
@@ -28,6 +29,7 @@ class DirectConnectDialogFragment : DialogFragment() {
     private lateinit var binding: DialogDirectConnectBinding
     private var connectionJob: Job? = null
     private var connectionState = MultiplayerRoomState.IDLE
+    private var validationShown = false
 
     private val settingsViewModel: SettingsViewModel by activityViewModels()
 
@@ -37,6 +39,22 @@ class DirectConnectDialogFragment : DialogFragment() {
         binding.directConnectHost.setText(preferences.getString(PREF_HOST, ""))
         binding.directConnectPort.setText(preferences.getInt(PREF_PORT, DEFAULT_PORT).toString())
         binding.directConnectNickname.setText(preferences.getString(PREF_NICKNAME, ""))
+        binding.directConnectHost.doAfterTextChanged {
+            if (validationShown) {
+                binding.directConnectHostLayout.error = hostError(it?.toString()?.trim().orEmpty())
+            }
+        }
+        binding.directConnectPort.doAfterTextChanged {
+            if (validationShown) {
+                binding.directConnectPortLayout.error = portError(it?.toString()?.toIntOrNull())
+            }
+        }
+        binding.directConnectNickname.doAfterTextChanged {
+            if (validationShown) {
+                binding.directConnectNicknameLayout.error =
+                    identifierError(it?.toString()?.trim().orEmpty())
+            }
+        }
 
         return MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.direct_connect)
@@ -78,10 +96,7 @@ class DirectConnectDialogFragment : DialogFragment() {
         val password = binding.directConnectPassword.text?.toString().orEmpty()
         val port = binding.directConnectPort.text?.toString()?.toIntOrNull()
         saveForm()
-        if (host.isEmpty() || host.length > MAX_HOST_LENGTH ||
-            nickname.length !in MIN_NICKNAME_LENGTH..MAX_NICKNAME_LENGTH ||
-            !nickname.matches(NICKNAME_PATTERN) || port !in 1..MAX_PORT
-        ) {
+        if (!validateForm(host, nickname, port)) {
             showStatus(R.string.direct_connect_invalid_input)
             return
         }
@@ -186,6 +201,38 @@ class DirectConnectDialogFragment : DialogFragment() {
         }
         editor.apply()
     }
+
+    private fun validateForm(host: String, nickname: String, port: Int?): Boolean {
+        validationShown = true
+        binding.directConnectHostLayout.error = hostError(host)
+        binding.directConnectPortLayout.error = portError(port)
+        binding.directConnectNicknameLayout.error = identifierError(nickname)
+        return binding.directConnectHostLayout.error == null &&
+            binding.directConnectPortLayout.error == null &&
+            binding.directConnectNicknameLayout.error == null
+    }
+
+    private fun hostError(host: String): String? =
+        if (host.isEmpty() || host.length > MAX_HOST_LENGTH) {
+            getString(R.string.multiplayer_invalid_host)
+        } else {
+            null
+        }
+
+    private fun portError(port: Int?): String? = if (port !in 1..MAX_PORT) {
+        getString(R.string.multiplayer_invalid_port)
+    } else {
+        null
+    }
+
+    private fun identifierError(nickname: String): String? =
+        if (nickname.length !in MIN_NICKNAME_LENGTH..MAX_NICKNAME_LENGTH ||
+            !nickname.matches(NICKNAME_PATTERN)
+        ) {
+            getString(R.string.multiplayer_invalid_identifier)
+        } else {
+            null
+        }
 
     companion object {
         const val TAG = "DirectConnectDialog"

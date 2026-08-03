@@ -30,6 +30,7 @@
     <!-- Home strings -->
     <string name="home_games">Games</string>
     <string name="home_search">Search</string>
+    <string name="home_multiplayer">Multiplayer</string>
     <string name="home_settings">Settings</string>
     <string name="empty_gamelist">No files were found or no game directory has been selected yet.</string>
     <string name="search_and_filter_games">Search and filter games</string>
@@ -461,8 +462,13 @@
     <string name="direct_connect_connected">Connected</string>
     <string name="direct_connect_disconnected">Disconnected</string>
     <string name="direct_connect_failed">Unable to connect to the room</string>
-    <string name="direct_connect_invalid_input">Enter a server address, port, and 4-20 character nickname.</string>
+    <string name="direct_connect_invalid_input">Enter a server address, valid port, and 4–20 character ASCII nickname.</string>
     <string name="direct_connect_disconnect">Disconnect</string>
+    <string name="multiplayer_ascii_identifier_hint">4–20 ASCII letters, numbers, spaces, or . _ - only</string>
+    <string name="multiplayer_invalid_identifier">Use 4–20 ASCII letters, numbers, spaces, or . _ -</string>
+    <string name="multiplayer_invalid_host">Enter a valid server address.</string>
+    <string name="multiplayer_invalid_port">Enter a port from 1 to 65535.</string>
+    <string name="multiplayer_invalid_player_count">Enter 2 to 16 players.</string>
 
     <string name="host_room_unlisted">Create Unlisted Room</string>
     <string name="host_room_description_setting">Host a room that others join by address</string>
@@ -472,10 +478,19 @@
     <string name="host_room_create">Create</string>
     <string name="host_room_creating">Creating room…</string>
     <string name="host_room_create_failed">Unable to create the room. Check that the port is available.</string>
-    <string name="host_room_invalid_input">Enter a 4–50 character room name, a 4–20 character nickname, a valid port, and 2–16 players.</string>
+    <string name="host_room_invalid_input">Use 4–20 ASCII characters for the room name and nickname, a valid port, and 2–16 players.</string>
     <string name="host_room_airplane_mode_disabled">Airplane Mode was turned off to create the room.</string>
 
     <string name="room_title">Multiplayer Room</string>
+    <string name="multiplayer_status">Status</string>
+    <string name="multiplayer_status_disconnected">Not connected</string>
+    <string name="multiplayer_status_connecting">Connecting…</string>
+    <string name="multiplayer_status_connected">Connected to a room</string>
+    <string name="multiplayer_status_hosting">Hosting a room</string>
+    <string name="multiplayer_status_host_disconnected">Hosting; local connection was lost</string>
+    <string name="multiplayer_actions_description">Create or join a room before starting a game. Room names and nicknames are protocol identifiers and only support ASCII; descriptions and chat support international text.</string>
+    <string name="multiplayer_leave_complete">Left the multiplayer room.</string>
+    <string name="multiplayer_close_complete">Closed the multiplayer room.</string>
     <string name="room_open">Open Current Room</string>
     <string name="room_open_description">View members, room details, and chat</string>
     <string name="room_summary">%1$s · %2$s/%3$s members</string>

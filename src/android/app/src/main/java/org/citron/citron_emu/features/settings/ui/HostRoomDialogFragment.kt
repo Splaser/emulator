@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.isVisible
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
@@ -29,6 +30,7 @@ import org.citron.citron_emu.features.settings.model.BooleanSetting
 class HostRoomDialogFragment : DialogFragment() {
     private lateinit var binding: DialogHostRoomBinding
     private var hostJob: Job? = null
+    private var validationShown = false
     private val settingsViewModel: SettingsViewModel by activityViewModels()
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
@@ -39,6 +41,28 @@ class HostRoomDialogFragment : DialogFragment() {
         binding.hostRoomDescription.setText(preferences.getString(PREF_DESCRIPTION, ""))
         binding.hostRoomPort.setText(preferences.getInt(PREF_PORT, DEFAULT_PORT).toString())
         binding.hostRoomMaxPlayers.setText(preferences.getInt(PREF_MAX_PLAYERS, 8).toString())
+        binding.hostRoomName.doAfterTextChanged {
+            if (validationShown) {
+                binding.hostRoomNameLayout.error = identifierError(it?.toString()?.trim().orEmpty())
+            }
+        }
+        binding.hostRoomNickname.doAfterTextChanged {
+            if (validationShown) {
+                binding.hostRoomNicknameLayout.error =
+                    identifierError(it?.toString()?.trim().orEmpty())
+            }
+        }
+        binding.hostRoomPort.doAfterTextChanged {
+            if (validationShown) {
+                binding.hostRoomPortLayout.error = portError(it?.toString()?.toIntOrNull())
+            }
+        }
+        binding.hostRoomMaxPlayers.doAfterTextChanged {
+            if (validationShown) {
+                binding.hostRoomMaxPlayersLayout.error =
+                    playerCountError(it?.toString()?.toIntOrNull())
+            }
+        }
 
         return MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.host_room_unlisted)
@@ -73,11 +97,7 @@ class HostRoomDialogFragment : DialogFragment() {
         val port = binding.hostRoomPort.text?.toString()?.toIntOrNull()
         val maxPlayers = binding.hostRoomMaxPlayers.text?.toString()?.toIntOrNull()
         saveForm()
-        if (roomName.length !in MIN_ROOM_NAME_LENGTH..MAX_ROOM_NAME_LENGTH ||
-            nickname.length !in MIN_NICKNAME_LENGTH..MAX_NICKNAME_LENGTH ||
-            !nickname.matches(NICKNAME_PATTERN) || port !in 1..MAX_PORT ||
-            maxPlayers !in 2..16
-        ) {
+        if (!validateForm(roomName, nickname, port, maxPlayers)) {
             showError(getString(R.string.host_room_invalid_input))
             return
         }
@@ -175,6 +195,44 @@ class HostRoomDialogFragment : DialogFragment() {
         editor.apply()
     }
 
+    private fun validateForm(
+        roomName: String,
+        nickname: String,
+        port: Int?,
+        maxPlayers: Int?
+    ): Boolean {
+        validationShown = true
+        binding.hostRoomNameLayout.error = identifierError(roomName)
+        binding.hostRoomNicknameLayout.error = identifierError(nickname)
+        binding.hostRoomPortLayout.error = portError(port)
+        binding.hostRoomMaxPlayersLayout.error = playerCountError(maxPlayers)
+        return binding.hostRoomNameLayout.error == null &&
+            binding.hostRoomNicknameLayout.error == null &&
+            binding.hostRoomPortLayout.error == null &&
+            binding.hostRoomMaxPlayersLayout.error == null
+    }
+
+    private fun identifierError(value: String): String? =
+        if (value.length !in MIN_ROOM_NAME_LENGTH..MAX_ROOM_NAME_LENGTH ||
+            !value.matches(IDENTIFIER_PATTERN)
+        ) {
+            getString(R.string.multiplayer_invalid_identifier)
+        } else {
+            null
+        }
+
+    private fun portError(port: Int?): String? = if (port !in 1..MAX_PORT) {
+        getString(R.string.multiplayer_invalid_port)
+    } else {
+        null
+    }
+
+    private fun playerCountError(maxPlayers: Int?): String? = if (maxPlayers !in 2..16) {
+        getString(R.string.multiplayer_invalid_player_count)
+    } else {
+        null
+    }
+
     companion object {
         const val TAG = "HostRoomDialog"
 
@@ -185,11 +243,9 @@ class HostRoomDialogFragment : DialogFragment() {
         private const val PREF_MAX_PLAYERS = "HostRoomMaxPlayers"
         private const val DEFAULT_PORT = 24872
         private const val MIN_ROOM_NAME_LENGTH = 4
-        private const val MAX_ROOM_NAME_LENGTH = 50
-        private const val MIN_NICKNAME_LENGTH = 4
-        private const val MAX_NICKNAME_LENGTH = 20
+        private const val MAX_ROOM_NAME_LENGTH = 20
         private const val MAX_PORT = 65535
         private const val CONNECTION_STATE_POLL_MS = 250L
-        private val NICKNAME_PATTERN = Regex("[a-zA-Z0-9._ -]+")
+        private val IDENTIFIER_PATTERN = Regex("[a-zA-Z0-9._ -]+")
     }
 }
