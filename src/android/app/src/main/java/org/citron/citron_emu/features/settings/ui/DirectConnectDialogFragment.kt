@@ -3,6 +3,7 @@
 package org.citron.citron_emu.features.settings.ui
 
 import android.app.Dialog
+import android.content.DialogInterface
 import android.os.Bundle
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.isVisible
@@ -66,11 +67,17 @@ class DirectConnectDialogFragment : DialogFragment() {
         super.onDestroyView()
     }
 
+    override fun onDismiss(dialog: DialogInterface) {
+        saveForm()
+        super.onDismiss(dialog)
+    }
+
     private fun connect(dialog: AlertDialog) {
         val host = binding.directConnectHost.text?.toString()?.trim().orEmpty()
         val nickname = binding.directConnectNickname.text?.toString()?.trim().orEmpty()
         val password = binding.directConnectPassword.text?.toString().orEmpty()
         val port = binding.directConnectPort.text?.toString()?.toIntOrNull()
+        saveForm()
         if (host.isEmpty() || host.length > MAX_HOST_LENGTH ||
             nickname.length !in MIN_NICKNAME_LENGTH..MAX_NICKNAME_LENGTH ||
             !nickname.matches(NICKNAME_PATTERN) || port !in 1..MAX_PORT
@@ -79,12 +86,6 @@ class DirectConnectDialogFragment : DialogFragment() {
             return
         }
         val portValue = port ?: return
-
-        PreferenceManager.getDefaultSharedPreferences(CitronApplication.appContext).edit()
-            .putString(PREF_HOST, host)
-            .putInt(PREF_PORT, portValue)
-            .putString(PREF_NICKNAME, nickname)
-            .apply()
 
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
         showStatus(R.string.direct_connect_connecting)
@@ -169,6 +170,21 @@ class DirectConnectDialogFragment : DialogFragment() {
             awaitMultiplayerError()
         )
         binding.directConnectStatus.isVisible = true
+    }
+
+    private fun saveForm() {
+        val editor = PreferenceManager
+            .getDefaultSharedPreferences(CitronApplication.appContext)
+            .edit()
+            .putString(PREF_HOST, binding.directConnectHost.text?.toString()?.trim().orEmpty())
+            .putString(
+                PREF_NICKNAME,
+                binding.directConnectNickname.text?.toString()?.trim().orEmpty()
+            )
+        binding.directConnectPort.text?.toString()?.toIntOrNull()?.let {
+            if (it in 1..MAX_PORT) editor.putInt(PREF_PORT, it)
+        }
+        editor.apply()
     }
 
     companion object {

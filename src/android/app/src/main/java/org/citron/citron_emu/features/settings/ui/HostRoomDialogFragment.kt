@@ -3,7 +3,9 @@
 package org.citron.citron_emu.features.settings.ui
 
 import android.app.Dialog
+import android.content.DialogInterface
 import android.os.Bundle
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.isVisible
 import androidx.fragment.app.DialogFragment
@@ -22,6 +24,7 @@ import org.citron.citron_emu.CitronApplication
 import org.citron.citron_emu.NativeLibrary
 import org.citron.citron_emu.R
 import org.citron.citron_emu.databinding.DialogHostRoomBinding
+import org.citron.citron_emu.features.settings.model.BooleanSetting
 
 class HostRoomDialogFragment : DialogFragment() {
     private lateinit var binding: DialogHostRoomBinding
@@ -57,6 +60,11 @@ class HostRoomDialogFragment : DialogFragment() {
         super.onDestroyView()
     }
 
+    override fun onDismiss(dialog: DialogInterface) {
+        saveForm()
+        super.onDismiss(dialog)
+    }
+
     private fun host(dialog: AlertDialog) {
         val roomName = binding.hostRoomName.text?.toString()?.trim().orEmpty()
         val nickname = binding.hostRoomNickname.text?.toString()?.trim().orEmpty()
@@ -64,24 +72,27 @@ class HostRoomDialogFragment : DialogFragment() {
         val password = binding.hostRoomPassword.text?.toString().orEmpty()
         val port = binding.hostRoomPort.text?.toString()?.toIntOrNull()
         val maxPlayers = binding.hostRoomMaxPlayers.text?.toString()?.toIntOrNull()
+        saveForm()
         if (roomName.length !in MIN_ROOM_NAME_LENGTH..MAX_ROOM_NAME_LENGTH ||
             nickname.length !in MIN_NICKNAME_LENGTH..MAX_NICKNAME_LENGTH ||
             !nickname.matches(NICKNAME_PATTERN) || port !in 1..MAX_PORT ||
             maxPlayers !in 2..16
         ) {
-            showStatus(getString(R.string.host_room_invalid_input))
+            showError(getString(R.string.host_room_invalid_input))
             return
         }
         val portValue = port ?: return
         val maxPlayersValue = maxPlayers ?: return
 
-        PreferenceManager.getDefaultSharedPreferences(CitronApplication.appContext).edit()
-            .putString(PREF_ROOM_NAME, roomName)
-            .putString(PREF_NICKNAME, nickname)
-            .putString(PREF_DESCRIPTION, description)
-            .putInt(PREF_PORT, portValue)
-            .putInt(PREF_MAX_PLAYERS, maxPlayersValue)
-            .apply()
+        if (BooleanSetting.AIRPLANE_MODE.getBoolean()) {
+            BooleanSetting.AIRPLANE_MODE.setBoolean(false)
+            settingsViewModel.setShouldReloadSettingsList(true)
+            Toast.makeText(
+                requireContext(),
+                R.string.host_room_airplane_mode_disabled,
+                Toast.LENGTH_LONG
+            ).show()
+        }
 
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
         showStatus(getString(R.string.host_room_creating))
@@ -99,7 +110,7 @@ class HostRoomDialogFragment : DialogFragment() {
             }
             if (!started) {
                 val error = awaitMultiplayerError()
-                showStatus(
+                showError(
                     if (error >= 0) {
                         multiplayerErrorText(requireContext(), error)
                     } else {
@@ -125,7 +136,7 @@ class HostRoomDialogFragment : DialogFragment() {
             if (state != MultiplayerRoomState.JOINING) {
                 val error = awaitMultiplayerError()
                 withContext(Dispatchers.IO) { NativeLibrary.closeRoom() }
-                showStatus(
+                showError(
                     multiplayerErrorText(requireContext(), error)
                 )
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
@@ -138,6 +149,30 @@ class HostRoomDialogFragment : DialogFragment() {
     private fun showStatus(message: String) {
         binding.hostRoomStatus.text = message
         binding.hostRoomStatus.isVisible = true
+    }
+
+    private fun showError(message: String) {
+        showStatus(message)
+        Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show()
+    }
+
+    private fun saveForm() {
+        val editor = PreferenceManager
+            .getDefaultSharedPreferences(CitronApplication.appContext)
+            .edit()
+            .putString(PREF_ROOM_NAME, binding.hostRoomName.text?.toString()?.trim().orEmpty())
+            .putString(PREF_NICKNAME, binding.hostRoomNickname.text?.toString()?.trim().orEmpty())
+            .putString(
+                PREF_DESCRIPTION,
+                binding.hostRoomDescription.text?.toString()?.trim().orEmpty()
+            )
+        binding.hostRoomPort.text?.toString()?.toIntOrNull()?.let {
+            if (it in 1..MAX_PORT) editor.putInt(PREF_PORT, it)
+        }
+        binding.hostRoomMaxPlayers.text?.toString()?.toIntOrNull()?.let {
+            if (it in 2..16) editor.putInt(PREF_MAX_PLAYERS, it)
+        }
+        editor.apply()
     }
 
     companion object {

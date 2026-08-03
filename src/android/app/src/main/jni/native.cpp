@@ -110,6 +110,21 @@ bool room_snapshot_valid{};
 
 constexpr std::size_t MaxPendingRoomEvents = 200;
 
+enum class AndroidRoomError : int {
+    NetworkNotInitialized = 100,
+    InvalidArguments,
+    NoNetworkInterface,
+    RoomUnavailable,
+    RoomAlreadyOpen,
+    MemberBusy,
+    CouldNotCreateRoom,
+    LocalJoinFailed,
+};
+
+void SetAndroidRoomError(AndroidRoomError error) {
+    room_last_error = static_cast<int>(error);
+}
+
 void ResetAndroidRoomState() {
     room_last_error = -1;
     {
@@ -900,7 +915,13 @@ jboolean Java_org_citron_citron_1emu_NativeLibrary_isPaused(JNIEnv* env, jclass 
 jboolean Java_org_citron_citron_1emu_NativeLibrary_connectToRoom(
     JNIEnv* env, jobject jobj, jstring jnickname, jstring jhost, jint jport, jstring jpassword) {
     auto& session = EmulationSession::GetInstance();
-    if (!session.IsNetworkInitialized() || jport <= 0 || jport > std::numeric_limits<u16>::max()) {
+    ResetAndroidRoomState();
+    if (!session.IsNetworkInitialized()) {
+        SetAndroidRoomError(AndroidRoomError::NetworkNotInitialized);
+        return false;
+    }
+    if (jport <= 0 || jport > std::numeric_limits<u16>::max()) {
+        SetAndroidRoomError(AndroidRoomError::InvalidArguments);
         return false;
     }
 
@@ -908,6 +929,7 @@ jboolean Java_org_citron_citron_1emu_NativeLibrary_connectToRoom(
     const auto host = Common::Android::GetJString(env, jhost);
     const auto password = Common::Android::GetJString(env, jpassword);
     if (nickname.empty() || nickname.size() > 20 || host.empty() || host.size() > 253) {
+        SetAndroidRoomError(AndroidRoomError::InvalidArguments);
         return false;
     }
 
@@ -915,16 +937,21 @@ jboolean Java_org_citron_citron_1emu_NativeLibrary_connectToRoom(
         Network::SelectFirstNetworkInterface();
     }
     if (!Network::GetSelectedNetworkInterface()) {
+        SetAndroidRoomError(AndroidRoomError::NoNetworkInterface);
         return false;
     }
 
     const auto room_member = session.System().GetRoomNetwork().GetRoomMember().lock();
-    if (!room_member || room_member->GetState() == Network::RoomMember::State::Joining ||
+    if (!room_member) {
+        SetAndroidRoomError(AndroidRoomError::RoomUnavailable);
+        return false;
+    }
+    if (room_member->GetState() == Network::RoomMember::State::Joining ||
         room_member->IsConnected()) {
+        SetAndroidRoomError(AndroidRoomError::MemberBusy);
         return false;
     }
 
-    ResetAndroidRoomState();
     room_member->Join(nickname, host.c_str(), static_cast<u16>(jport), 0,
                       Network::NoPreferredIP, password);
     const auto state = room_member->GetState();
@@ -935,8 +962,14 @@ jboolean Java_org_citron_citron_1emu_NativeLibrary_hostRoom(
     JNIEnv* env, jobject jobj, jstring jnickname, jstring jname, jstring jdescription, jint jport,
     jstring jpassword, jint jmax_players) {
     auto& session = EmulationSession::GetInstance();
-    if (!session.IsNetworkInitialized() || jport <= 0 || jport > std::numeric_limits<u16>::max() ||
-        jmax_players < 2 || jmax_players > 16) {
+    ResetAndroidRoomState();
+    if (!session.IsNetworkInitialized()) {
+        SetAndroidRoomError(AndroidRoomError::NetworkNotInitialized);
+        return false;
+    }
+    if (jport <= 0 || jport > std::numeric_limits<u16>::max() || jmax_players < 2 ||
+        jmax_players > 16) {
+        SetAndroidRoomError(AndroidRoomError::InvalidArguments);
         return false;
     }
 
@@ -945,6 +978,7 @@ jboolean Java_org_citron_citron_1emu_NativeLibrary_hostRoom(
     const auto description = Common::Android::GetJString(env, jdescription);
     const auto password = Common::Android::GetJString(env, jpassword);
     if (nickname.empty() || nickname.size() > 20 || name.empty() || name.size() > 50) {
+        SetAndroidRoomError(AndroidRoomError::InvalidArguments);
         return false;
     }
 
@@ -952,23 +986,32 @@ jboolean Java_org_citron_citron_1emu_NativeLibrary_hostRoom(
         Network::SelectFirstNetworkInterface();
     }
     if (!Network::GetSelectedNetworkInterface()) {
+        SetAndroidRoomError(AndroidRoomError::NoNetworkInterface);
         return false;
     }
 
     auto& room_network = session.System().GetRoomNetwork();
     const auto room = room_network.GetRoom().lock();
     const auto room_member = room_network.GetRoomMember().lock();
-    if (!room || !room_member || room->GetState() == Network::Room::State::Open ||
-        room_member->GetState() == Network::RoomMember::State::Joining ||
+    if (!room || !room_member) {
+        SetAndroidRoomError(AndroidRoomError::RoomUnavailable);
+        return false;
+    }
+    if (room->GetState() == Network::Room::State::Open) {
+        SetAndroidRoomError(AndroidRoomError::RoomAlreadyOpen);
+        return false;
+    }
+    if (room_member->GetState() == Network::RoomMember::State::Joining ||
         room_member->IsConnected()) {
+        SetAndroidRoomError(AndroidRoomError::MemberBusy);
         return false;
     }
 
-    ResetAndroidRoomState();
     const bool created = room->Create(
         name, description, "", static_cast<u16>(jport), password, static_cast<u32>(jmax_players),
         "", {}, std::make_unique<Network::VerifyUser::NullBackend>());
     if (!created) {
+        SetAndroidRoomError(AndroidRoomError::CouldNotCreateRoom);
         return false;
     }
 
@@ -977,6 +1020,9 @@ jboolean Java_org_citron_citron_1emu_NativeLibrary_hostRoom(
     const auto state = room_member->GetState();
     if (state != Network::RoomMember::State::Joining && !room_member->IsConnected()) {
         room->Destroy();
+        if (room_last_error.load() < 0) {
+            SetAndroidRoomError(AndroidRoomError::LocalJoinFailed);
+        }
         return false;
     }
     return true;

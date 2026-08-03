@@ -473,6 +473,7 @@
     <string name="host_room_creating">Creating room…</string>
     <string name="host_room_create_failed">Unable to create the room. Check that the port is available.</string>
     <string name="host_room_invalid_input">Enter a 4–50 character room name, a 4–20 character nickname, a valid port, and 2–16 players.</string>
+    <string name="host_room_airplane_mode_disabled">Airplane Mode was turned off to create the room.</string>
 
     <string name="room_title">Multiplayer Room</string>
     <string name="room_open">Open Current Room</string>
@@ -506,6 +507,14 @@
     <string name="multiplayer_error_banned">You are banned from this room.</string>
     <string name="multiplayer_error_permission_denied">You do not have permission to perform that action.</string>
     <string name="multiplayer_error_no_such_user">That room member no longer exists.</string>
+    <string name="multiplayer_error_network_not_initialized">Room networking is not initialized. Restart Citron and try again.</string>
+    <string name="multiplayer_error_invalid_arguments">The room settings are invalid.</string>
+    <string name="multiplayer_error_no_network_interface">No usable network interface is available. Check Wi-Fi or mobile data.</string>
+    <string name="multiplayer_error_room_unavailable">The room networking service is unavailable. Restart Citron and try again.</string>
+    <string name="multiplayer_error_room_already_open">A room is already being hosted. Close it before creating another.</string>
+    <string name="multiplayer_error_member_busy">A room connection is already active or in progress.</string>
+    <string name="multiplayer_error_could_not_create_room">Unable to open the room port. Choose another port or close the app using it.</string>
+    <string name="multiplayer_error_local_join_failed">The room opened, but the host could not join it locally.</string>
     <string name="multiplayer_error_unknown">Unable to connect to the room.</string>
 
     <!-- Zep Zone Headers -->

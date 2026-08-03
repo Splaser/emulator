@@ -30,6 +30,14 @@ internal fun multiplayerErrorText(context: Context, error: Int): String =
             9 -> R.string.multiplayer_error_banned
             10 -> R.string.multiplayer_error_permission_denied
             11 -> R.string.multiplayer_error_no_such_user
+            100 -> R.string.multiplayer_error_network_not_initialized
+            101 -> R.string.multiplayer_error_invalid_arguments
+            102 -> R.string.multiplayer_error_no_network_interface
+            103 -> R.string.multiplayer_error_room_unavailable
+            104 -> R.string.multiplayer_error_room_already_open
+            105 -> R.string.multiplayer_error_member_busy
+            106 -> R.string.multiplayer_error_could_not_create_room
+            107 -> R.string.multiplayer_error_local_join_failed
             else -> R.string.multiplayer_error_unknown
         }
     )
