@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 import org.citron.citron_emu.features.multiplayer.data.MultiplayerRepository
@@ -36,16 +37,19 @@ class MultiplayerViewModel : ViewModel() {
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
-            repository.getSnapshot()
+            MultiplayerSnapshot()
         )
 
     val roomContent: StateFlow<RoomContent> = pollingTicks(ROOM_CONTENT_POLL_MS)
         .map {
-            if (repository.getSnapshot().isConnected) {
+            if (snapshot.value.isConnected) {
                 repository.getRoomContent()
             } else {
-                RoomContent()
+                null
             }
+        }
+        .scan(RoomContent()) { accumulated, current ->
+            current?.copy(events = accumulated.events + current.events) ?: RoomContent()
         }
         .flowOn(Dispatchers.IO)
         .stateIn(

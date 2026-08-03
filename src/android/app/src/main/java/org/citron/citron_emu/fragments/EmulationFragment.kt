@@ -363,7 +363,9 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
                 R.id.menu_multiplayer_room -> {
                     binding.drawerLayout.close()
-                    RoomDialogFragment().show(parentFragmentManager, RoomDialogFragment.TAG)
+                    if (parentFragmentManager.findFragmentByTag(RoomDialogFragment.TAG) == null) {
+                        RoomDialogFragment().show(parentFragmentManager, RoomDialogFragment.TAG)
+                    }
                     true
                 }
 

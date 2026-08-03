@@ -150,11 +150,12 @@ class DirectConnectDialogFragment : DialogFragment() {
     }
 
     private fun disconnect() {
+        val snapshot = multiplayerViewModel.snapshot.value
         awaitingConnection = false
         isCancelable = true
         connectJob?.cancel()
         lifecycleScope.launch {
-            multiplayerViewModel.leaveOrClose(hosting = false)
+            multiplayerViewModel.leaveOrClose(hosting = snapshot.isHosting)
             showStatus(R.string.direct_connect_disconnected)
         }
     }
@@ -169,8 +170,9 @@ class DirectConnectDialogFragment : DialogFragment() {
         binding.directConnectPassword.isEnabled = !busy
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = snapshot.canStartConnection &&
             !awaitingConnection
-        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = connecting || connected
-        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = !awaitingConnection
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = connecting || connected ||
+            awaitingConnection
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = true
 
         when {
             connecting -> showStatus(R.string.direct_connect_connecting)

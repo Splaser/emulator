@@ -67,6 +67,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
+                android:accessibilityLiveRegion="polite"
                 android:background="?attr/colorSurfaceContainerLow"
                 android:minHeight="160dp"
                 android:padding="8dp"
@@ -94,7 +95,6 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:imeOptions="actionSend"
-                android:maxLength="500"
                 android:singleLine="true" />
         </com.google.android.material.textfield.TextInputLayout>
 

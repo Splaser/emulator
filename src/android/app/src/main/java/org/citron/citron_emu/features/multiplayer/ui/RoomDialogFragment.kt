@@ -29,6 +29,7 @@ class RoomDialogFragment : DialogFragment() {
     private var contentJob: Job? = null
     private val chatLines = ArrayDeque<String>()
     private var wasConnected = false
+    private var renderedEventCount = 0
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         binding = DialogMultiplayerRoomBinding.inflate(layoutInflater)
@@ -48,7 +49,9 @@ class RoomDialogFragment : DialogFragment() {
                     dialog.window?.setSoftInputMode(
                         WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
                     )
-                    dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                    val disconnectButton = dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
+                    disconnectButton.setOnClickListener {
+                        disconnectButton.isEnabled = false
                         disconnect(multiplayerViewModel.snapshot.value.isHosting)
                     }
                     binding.roomSend.setOnClickListener { sendMessage() }
@@ -146,7 +149,9 @@ class RoomDialogFragment : DialogFragment() {
                 else -> "$displayName — ${member.gameName} (${member.gameId})"
             }
         }
-        content.events.forEach(::appendEvent)
+        if (content.events.size < renderedEventCount) renderedEventCount = 0
+        content.events.drop(renderedEventCount).forEach(::appendEvent)
+        renderedEventCount = content.events.size
     }
 
     private fun appendEvent(event: RoomEvent) {

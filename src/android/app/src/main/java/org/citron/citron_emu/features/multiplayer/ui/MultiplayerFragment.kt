@@ -50,16 +50,22 @@ class MultiplayerFragment : Fragment() {
             }
         }
         binding.multiplayerDirectConnect.setOnClickListener {
-            DirectConnectDialogFragment().show(
-                parentFragmentManager,
-                DirectConnectDialogFragment.TAG
-            )
+            if (parentFragmentManager.findFragmentByTag(DirectConnectDialogFragment.TAG) == null) {
+                DirectConnectDialogFragment().show(
+                    parentFragmentManager,
+                    DirectConnectDialogFragment.TAG
+                )
+            }
         }
         binding.multiplayerCreateRoom.setOnClickListener {
-            HostRoomDialogFragment().show(parentFragmentManager, HostRoomDialogFragment.TAG)
+            if (parentFragmentManager.findFragmentByTag(HostRoomDialogFragment.TAG) == null) {
+                HostRoomDialogFragment().show(parentFragmentManager, HostRoomDialogFragment.TAG)
+            }
         }
         binding.multiplayerOpenRoom.setOnClickListener {
-            RoomDialogFragment().show(parentFragmentManager, RoomDialogFragment.TAG)
+            if (parentFragmentManager.findFragmentByTag(RoomDialogFragment.TAG) == null) {
+                RoomDialogFragment().show(parentFragmentManager, RoomDialogFragment.TAG)
+            }
         }
         binding.multiplayerLeaveRoom.setOnClickListener { leaveOrCloseRoom() }
 

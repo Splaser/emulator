@@ -80,6 +80,9 @@ class HostRoomDialogFragment : DialogFragment() {
     }
 
     override fun onDismiss(dialog: DialogInterface) {
+        hostJob?.cancel()
+        awaitingConnection = false
+        isCancelable = true
         saveForm()
         super.onDismiss(dialog)
     }
@@ -185,7 +188,7 @@ class HostRoomDialogFragment : DialogFragment() {
         binding.hostRoomMaxPlayers.isEnabled = !busy
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = snapshot.canStartConnection &&
             !awaitingConnection
-        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = !awaitingConnection
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = true
     }
 
     private fun currentParams() = HostRoomParams(

@@ -2,6 +2,8 @@
 
 package org.citron.citron_emu.features.multiplayer.model
 
+import org.citron.citron_emu.NativeLibrary
+
 enum class RoomConnectionState(val nativeValue: Int) {
     UNINITIALIZED(0),
     IDLE(1),
@@ -19,32 +21,34 @@ enum class RoomConnectionState(val nativeValue: Int) {
     }
 }
 
-enum class MultiplayerError(val nativeValue: Int) {
-    LOST_CONNECTION(0),
-    KICKED(1),
-    NAME_COLLISION(3),
-    IP_COLLISION(4),
-    WRONG_VERSION(5),
-    WRONG_PASSWORD(6),
-    COULD_NOT_CONNECT(7),
-    ROOM_FULL(8),
-    BANNED(9),
-    PERMISSION_DENIED(10),
-    NO_SUCH_USER(11),
-    NETWORK_NOT_INITIALIZED(100),
-    INVALID_ARGUMENTS(101),
-    NO_NETWORK_INTERFACE(102),
-    ROOM_UNAVAILABLE(103),
-    ROOM_ALREADY_OPEN(104),
-    MEMBER_BUSY(105),
-    COULD_NOT_CREATE_ROOM(106),
-    LOCAL_JOIN_FAILED(107),
-    UNKNOWN(Int.MIN_VALUE);
+enum class MultiplayerError {
+    LOST_CONNECTION,
+    KICKED,
+    NAME_COLLISION,
+    IP_COLLISION,
+    WRONG_VERSION,
+    WRONG_PASSWORD,
+    COULD_NOT_CONNECT,
+    ROOM_FULL,
+    BANNED,
+    PERMISSION_DENIED,
+    NO_SUCH_USER,
+    NETWORK_NOT_INITIALIZED,
+    INVALID_ARGUMENTS,
+    NO_NETWORK_INTERFACE,
+    ROOM_UNAVAILABLE,
+    ROOM_ALREADY_OPEN,
+    MEMBER_BUSY,
+    COULD_NOT_CREATE_ROOM,
+    LOCAL_JOIN_FAILED,
+    UNKNOWN;
 
     companion object {
+        private val nativeValues by lazy(NativeLibrary::getMultiplayerErrorValues)
+
         fun fromNative(value: Int): MultiplayerError? {
             if (value < 0) return null
-            return entries.firstOrNull { it.nativeValue == value } ?: UNKNOWN
+            return entries.getOrNull(nativeValues.indexOf(value)) ?: UNKNOWN
         }
     }
 }
@@ -135,7 +139,7 @@ object MultiplayerValidation {
     const val MAX_PORT = 65535
     const val MIN_PLAYERS = 2
     const val MAX_PLAYERS = 16
-    const val MAX_CHAT_MESSAGE_BYTES = 500
+    val maxChatMessageBytes by lazy(NativeLibrary::getMaxRoomChatMessageBytes)
 
     val identifierPattern = Regex("[a-zA-Z0-9._ -]+")
 
@@ -147,5 +151,5 @@ object MultiplayerValidation {
     fun isValidPort(value: Int?): Boolean = value != null && value in 1..MAX_PORT
     fun isValidPlayerCount(value: Int?): Boolean = value != null && value in MIN_PLAYERS..MAX_PLAYERS
     fun isValidChatMessage(value: String): Boolean =
-        value.isNotEmpty() && value.toByteArray(Charsets.UTF_8).size <= MAX_CHAT_MESSAGE_BYTES
+        value.isNotEmpty() && value.toByteArray(Charsets.UTF_8).size <= maxChatMessageBytes
 }

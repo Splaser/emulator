@@ -184,6 +184,12 @@ object NativeLibrary {
     /** Returns the most recent RoomMember.Error ordinal, or -1 when no error is pending. */
     external fun getRoomLastError(): Int
 
+    /** Returns RoomMember.Error and Android-specific room error values in Kotlin enum order. */
+    external fun getMultiplayerErrorValues(): IntArray
+
+    /** Returns Network::MaxMessageSize. */
+    external fun getMaxRoomChatMessageBytes(): Int
+
     /** Returns name, description, preferred game, member count, capacity, and port. */
     external fun getRoomInfo(): Array<String>
 

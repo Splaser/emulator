@@ -51,6 +51,7 @@
                 android:id="@+id/host_room_description"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:inputType="textMultiLine"
                 android:maxLines="3" />
         </com.google.android.material.textfield.TextInputLayout>
 
@@ -58,7 +59,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:hint="@string/direct_connect_password">
+            android:hint="@string/direct_connect_password"
+            app:endIconMode="password_toggle">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/host_room_password"

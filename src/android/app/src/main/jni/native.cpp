@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <codecvt>
 #include <deque>
@@ -1077,6 +1078,40 @@ jint Java_org_citron_citron_1emu_NativeLibrary_getRoomLastError(JNIEnv* env, job
     return room_last_error.load();
 }
 
+jintArray Java_org_citron_citron_1emu_NativeLibrary_getMultiplayerErrorValues(JNIEnv* env,
+                                                                              jobject jobj) {
+    const std::array values{
+        static_cast<jint>(Network::RoomMember::Error::LostConnection),
+        static_cast<jint>(Network::RoomMember::Error::HostKicked),
+        static_cast<jint>(Network::RoomMember::Error::NameCollision),
+        static_cast<jint>(Network::RoomMember::Error::IpCollision),
+        static_cast<jint>(Network::RoomMember::Error::WrongVersion),
+        static_cast<jint>(Network::RoomMember::Error::WrongPassword),
+        static_cast<jint>(Network::RoomMember::Error::CouldNotConnect),
+        static_cast<jint>(Network::RoomMember::Error::RoomIsFull),
+        static_cast<jint>(Network::RoomMember::Error::HostBanned),
+        static_cast<jint>(Network::RoomMember::Error::PermissionDenied),
+        static_cast<jint>(Network::RoomMember::Error::NoSuchUser),
+        static_cast<jint>(AndroidRoomError::NetworkNotInitialized),
+        static_cast<jint>(AndroidRoomError::InvalidArguments),
+        static_cast<jint>(AndroidRoomError::NoNetworkInterface),
+        static_cast<jint>(AndroidRoomError::RoomUnavailable),
+        static_cast<jint>(AndroidRoomError::RoomAlreadyOpen),
+        static_cast<jint>(AndroidRoomError::MemberBusy),
+        static_cast<jint>(AndroidRoomError::CouldNotCreateRoom),
+        static_cast<jint>(AndroidRoomError::LocalJoinFailed),
+    };
+    const auto size = static_cast<jsize>(values.size());
+    auto result = env->NewIntArray(size);
+    env->SetIntArrayRegion(result, 0, size, values.data());
+    return result;
+}
+
+jint Java_org_citron_citron_1emu_NativeLibrary_getMaxRoomChatMessageBytes(JNIEnv* env,
+                                                                          jobject jobj) {
+    return static_cast<jint>(Network::MaxMessageSize);
+}
+
 jobjectArray Java_org_citron_citron_1emu_NativeLibrary_getRoomInfo(JNIEnv* env, jobject jobj) {
     const auto room_member =
         EmulationSession::GetInstance().System().GetRoomNetwork().GetRoomMember().lock();
@@ -1136,7 +1171,21 @@ jboolean Java_org_citron_citron_1emu_NativeLibrary_sendRoomChatMessage(
     if (!room_member || !room_member->IsConnected() || message.empty()) {
         return false;
     }
-    room_member->SendChatMessage(message.substr(0, Network::MaxMessageSize));
+    auto truncated_message = message.substr(0, Network::MaxMessageSize);
+    if (truncated_message.size() < message.size() && !truncated_message.empty()) {
+        auto codepoint_start = truncated_message.size() - 1;
+        while (codepoint_start > 0 &&
+               (static_cast<unsigned char>(truncated_message[codepoint_start]) & 0xC0) == 0x80) {
+            --codepoint_start;
+        }
+        const auto lead = static_cast<unsigned char>(truncated_message[codepoint_start]);
+        const std::size_t codepoint_size =
+            lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+        if (codepoint_start + codepoint_size > truncated_message.size()) {
+            truncated_message.resize(codepoint_start);
+        }
+    }
+    room_member->SendChatMessage(truncated_message);
     return true;
 }
 
