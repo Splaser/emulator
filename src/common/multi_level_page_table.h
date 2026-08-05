@@ -44,6 +44,7 @@ public:
         return *this;
     }
 
+    /// Reserve every first-level allocation intersecting [start, start + size).
     void ReserveRange(u64 start, std::size_t size);
 
     [[nodiscard]] BaseAddr* TryGet(std::size_t index) noexcept;
