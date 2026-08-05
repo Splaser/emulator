@@ -336,6 +336,7 @@ inline u64 HashDescriptorBlock(const DescriptorUpdateEntry* data, size_t entry_c
 struct BindlessCacheEntry {
     GPUVAddr key_addr{0};
     u32 key_count{0};
+    u32 key_size_shift{0};
     u64 key_image_table_generation{};
     bool valid{false};
     boost::container::small_vector<VideoCommon::ImageViewInOut, 16> cached_views;
@@ -346,9 +347,10 @@ constexpr size_t BINDLESS_CACHE_SIZE = 16;
 using BindlessCache = std::array<BindlessCacheEntry, BINDLESS_CACHE_SIZE>;
 
 inline BindlessCacheEntry* FindBindlessEntry(BindlessCache& cache, GPUVAddr addr, u32 count,
-                                             u64 image_table_generation) {
+                                             u32 size_shift, u64 image_table_generation) {
     for (auto& entry : cache) {
         if (entry.valid && entry.key_addr == addr && entry.key_count == count &&
+            entry.key_size_shift == size_shift &&
             entry.key_image_table_generation == image_table_generation) {
             return &entry;
         }
@@ -357,23 +359,26 @@ inline BindlessCacheEntry* FindBindlessEntry(BindlessCache& cache, GPUVAddr addr
 }
 
 inline BindlessCacheEntry& AcquireBindlessEntry(BindlessCache& cache, size_t& round_robin,
-                                                GPUVAddr addr, u32 count,
+                                                GPUVAddr addr, u32 count, u32 size_shift,
                                                 u64 image_table_generation) {
-    if (auto* found = FindBindlessEntry(cache, addr, count, image_table_generation)) {
+    if (auto* found = FindBindlessEntry(cache, addr, count, size_shift,
+                                        image_table_generation)) {
         return *found;
     }
     auto& slot = cache[round_robin];
     round_robin = (round_robin + 1) % BINDLESS_CACHE_SIZE;
     slot.key_addr = addr;
     slot.key_count = count;
+    slot.key_size_shift = size_shift;
     slot.key_image_table_generation = image_table_generation;
     slot.valid = false;
     return slot;
 }
 inline BindlessCacheEntry& FindOrAcquireBindlessEntry(BindlessCache& cache, size_t& round_robin,
-                                                      GPUVAddr addr, u32 count,
+                                                      GPUVAddr addr, u32 count, u32 size_shift,
                                                       u64 image_table_generation) {
-    return AcquireBindlessEntry(cache, round_robin, addr, count, image_table_generation);
+    return AcquireBindlessEntry(cache, round_robin, addr, count, size_shift,
+                                image_table_generation);
 }
 
 } // namespace Vulkan
