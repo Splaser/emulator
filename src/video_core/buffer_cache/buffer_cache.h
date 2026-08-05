@@ -661,9 +661,6 @@ bool BufferCache<P>::IsRegionRegistered(DAddr addr, size_t size) {
     const DAddr end_addr = addr + size;
     const u64 page_end = Common::DivCeil(end_addr, CACHING_PAGESIZE);
     for (u64 page = addr >> CACHING_PAGEBITS; page < page_end;) {
-        if (page >= CACHING_PAGE_COUNT) {
-            return false;
-        }
         const BufferId buffer_id = GetPageBufferId(page);
         if (!buffer_id) {
             ++page;
@@ -1292,9 +1289,6 @@ BufferId BufferCache<P>::FindBuffer(DAddr device_addr, u32 size) {
         return NULL_BUFFER_ID;
     }
     const u64 page = device_addr >> CACHING_PAGEBITS;
-    if (page >= CACHING_PAGE_COUNT) {
-        return NULL_BUFFER_ID;
-    }
     const BufferId buffer_id = GetPageBufferId(page);
     if (!buffer_id) {
         return CreateBuffer(device_addr, size);
@@ -1344,9 +1338,6 @@ typename BufferCache<P>::OverlapResult BufferCache<P>::ResolveOverlaps(DAddr dev
     for (; device_addr >> CACHING_PAGEBITS < Common::DivCeil(end, CACHING_PAGESIZE);
          device_addr += CACHING_PAGESIZE) {
         const u64 page = device_addr >> CACHING_PAGEBITS;
-        if (page >= CACHING_PAGE_COUNT) {
-            break;
-        }
         const BufferId overlap_id = GetPageBufferId(page);
         if (!overlap_id) {
             continue;
@@ -1482,9 +1473,6 @@ void BufferCache<P>::ChangeRegister(BufferId buffer_id) {
     const u64 page_begin = device_addr_begin / CACHING_PAGESIZE;
     const u64 page_end = Common::DivCeil(device_addr_end, CACHING_PAGESIZE);
     for (u64 page = page_begin; page != page_end; ++page) {
-        if (page >= CACHING_PAGE_COUNT) {
-            break;
-        }
         if constexpr (insert) {
             SetPageBufferId(page, buffer_id);
         } else {
