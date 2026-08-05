@@ -216,8 +216,25 @@ u32 DynamicSampledTextureCap(const Info& info, const HostTranslateInfo& host_inf
                                   : 0};
     const u32 sampled_cap{sampled_budget / dynamic_arrays};
     const u32 resource_cap{resource_budget / dynamic_arrays};
-    return std::max(1U,
-                    std::min({BINDLESS_ARRAY_LENGTH, sampled_cap, resource_cap}));
+    return std::min({BINDLESS_ARRAY_LENGTH, sampled_cap, resource_cap});
+}
+
+bool IsSampledImageOpcode(IR::Opcode opcode) {
+    switch (opcode) {
+    case IR::Opcode::ImageSampleImplicitLod:
+    case IR::Opcode::ImageSampleExplicitLod:
+    case IR::Opcode::ImageSampleDrefImplicitLod:
+    case IR::Opcode::ImageSampleDrefExplicitLod:
+    case IR::Opcode::ImageGather:
+    case IR::Opcode::ImageGatherDref:
+    case IR::Opcode::ImageFetch:
+    case IR::Opcode::ImageQueryDimensions:
+    case IR::Opcode::ImageQueryLod:
+    case IR::Opcode::ImageGradient:
+        return true;
+    default:
+        return false;
+    }
 }
 
 bool IsBindless(const IR::Inst& inst) {
@@ -666,8 +683,12 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
         program.info.texture_descriptors,
         program.info.image_descriptors,
     };
-    const u32 sampled_dynamic_cap{DynamicSampledTextureCap(
-        program.info, host_info, DynamicSampledTextureArrayCount(to_replace))};
+    const u32 sampled_dynamic_arrays{DynamicSampledTextureArrayCount(to_replace)};
+    const u32 sampled_dynamic_cap{
+        DynamicSampledTextureCap(program.info, host_info, sampled_dynamic_arrays)};
+    if (sampled_dynamic_arrays != 0 && sampled_dynamic_cap == 0) {
+        throw RuntimeError("Descriptor limits leave no sampled-image capacity");
+    }
     for (TextureInst& texture_inst : to_replace) {
         // TODO: Handle arrays
         IR::Inst* const inst{texture_inst.inst};
@@ -811,6 +832,36 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
             if (IsPixelFormatSNorm(pixel_format)) {
                 PatchTexelFetch(*texture_inst.block, *texture_inst.inst, pixel_format);
             }
+        }
+    }
+}
+
+void ClampDynamicSampledTextureDescriptors(IR::Program& program, u32 max_count) {
+    auto& descriptors{program.info.texture_descriptors};
+    boost::container::small_vector<u32, 12> old_counts;
+    old_counts.reserve(descriptors.size());
+    for (auto& desc : descriptors) {
+        old_counts.push_back(desc.count);
+        if (desc.count > 1) {
+            desc.count = std::min(desc.count, max_count);
+        }
+    }
+    for (IR::Block* const block : program.post_order_blocks) {
+        for (IR::Inst& inst : block->Instructions()) {
+            if (!IsSampledImageOpcode(inst.GetOpcode())) {
+                continue;
+            }
+            const auto flags{inst.Flags<IR::TextureInstInfo>()};
+            const u32 descriptor_index{flags.descriptor_index};
+            if (flags.type == TextureType::Buffer || descriptor_index >= old_counts.size() ||
+                old_counts[descriptor_index] <= descriptors[descriptor_index].count) {
+                continue;
+            }
+            IR::Inst* const clamp{inst.Arg(0).InstRecursive()};
+            if (!clamp || clamp->GetOpcode() != IR::Opcode::UMin32) {
+                throw LogicError("Dynamic sampled-image index is missing its bounds clamp");
+            }
+            clamp->SetArg(1, IR::Value{descriptors[descriptor_index].count - 1});
         }
     }
 }
