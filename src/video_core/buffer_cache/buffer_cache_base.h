@@ -341,9 +341,6 @@ private:
         }
         const u64 page_end = Common::DivCeil(device_addr + size, CACHING_PAGESIZE);
         for (u64 page = device_addr >> CACHING_PAGEBITS; page < page_end;) {
-            if (page >= CACHING_PAGE_COUNT) {
-                return;
-            }
             const BufferId buffer_id = GetPageBufferId(page);
             if (!buffer_id) {
                 ++page;
