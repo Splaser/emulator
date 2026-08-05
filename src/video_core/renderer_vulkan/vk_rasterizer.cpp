@@ -323,6 +323,11 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
     }
 }
 
+#if CITRON_ARM64_REGISTER_GUARD_SUPPORTED
+// The complete draw boundary restores driver-corrupted x29. The inner Configure guard cannot
+// repair a caller canary that was already overwritten while x29 held the invalid value.
+__attribute__((no_stack_protector))
+#endif
 void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
     PrepareDraw(is_indexed, [this, is_indexed, instance_count] {
         const auto& draw_state = maxwell3d->draw_manager->GetDrawState();
@@ -341,6 +346,10 @@ void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
     });
 }
 
+#if CITRON_ARM64_REGISTER_GUARD_SUPPORTED
+// Indirect draws share PrepareDraw and are enclosed by the same complete register guard.
+__attribute__((no_stack_protector))
+#endif
 void RasterizerVulkan::DrawIndirect() {
     const auto& params = maxwell3d->draw_manager->GetIndirectParams();
     buffer_cache.SetDrawIndirect(&params);
