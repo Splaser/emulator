@@ -186,15 +186,16 @@ void ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
             const GPUVAddr cbuf_addr =
                 cbufs[desc.cbuf_index].Address() + desc.cbuf_offset;
 
-            const size_t byte_size = static_cast<size_t>(desc.count) << desc.size_shift;
-            // Single scan: (addr, count, image_table_generation) match returns the
+            const size_t byte_size =
+                (static_cast<size_t>(desc.count - 1) << desc.size_shift) + sizeof(u32);
+            // Single scan: (addr, count, size_shift, image_table_generation) match returns the
             // existing valid entry (hit); otherwise an invalid slot claimed for
             // filling below (miss).
             // image_table_generation increments on every TIC table invalidation,
             // a generation hit implies the cached views are still valid and no
             // ReadBlockUnsafe is needed.
             BindlessCacheEntry& entry = FindOrAcquireBindlessEntry(
-                bindless_cache, bindless_cache_rr, cbuf_addr, desc.count,
+                bindless_cache, bindless_cache_rr, cbuf_addr, desc.count, desc.size_shift,
                 image_table_generation);
             if (entry.valid) {
                 views.insert(views.end(), entry.cached_views.begin(), entry.cached_views.end());
