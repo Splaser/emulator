@@ -191,13 +191,23 @@ Id BindlessArrayIndex(EmitContext& ctx, const IR::Value& index, bool supported);
 Id Texture(EmitContext& ctx, IR::TextureInstInfo info, const IR::Value& index) {
     const TextureDefinition& def{ctx.textures.at(info.descriptor_index)};
     if (def.count > 1) {
+        const bool is_non_uniform{
+            !index.IsImmediate() &&
+            ctx.profile.support_sampled_image_array_non_uniform_indexing};
         const Id idx{index.IsImmediate()
                          ? ctx.Const(index.U32())
                          : BindlessArrayIndex(
                                ctx, index,
                                ctx.profile.support_sampled_image_array_non_uniform_indexing)};
         const Id pointer{ctx.OpAccessChain(def.pointer_type, def.id, idx)};
-        return ctx.OpLoad(def.sampled_type, pointer);
+        if (is_non_uniform) {
+            ctx.Decorate(pointer, spv::Decoration::NonUniformEXT);
+        }
+        const Id object{ctx.OpLoad(def.sampled_type, pointer)};
+        if (is_non_uniform) {
+            ctx.Decorate(object, spv::Decoration::NonUniformEXT);
+        }
+        return object;
     } else {
         return ctx.OpLoad(def.sampled_type, def.id);
     }
@@ -220,6 +230,9 @@ Id TextureImage(EmitContext& ctx, IR::TextureInstInfo info, const IR::Value& ind
     } else {
         const TextureDefinition& def{ctx.textures.at(info.descriptor_index)};
         if (def.count > 1) {
+            const bool is_non_uniform{
+                !index.IsImmediate() &&
+                ctx.profile.support_sampled_image_array_non_uniform_indexing};
             const Id idx{
                 index.IsImmediate()
                     ? ctx.Const(index.U32())
@@ -227,7 +240,18 @@ Id TextureImage(EmitContext& ctx, IR::TextureInstInfo info, const IR::Value& ind
                           ctx, index,
                           ctx.profile.support_sampled_image_array_non_uniform_indexing)};
             const Id ptr{ctx.OpAccessChain(def.pointer_type, def.id, idx)};
-            return ctx.OpImage(def.image_type, ctx.OpLoad(def.sampled_type, ptr));
+            if (is_non_uniform) {
+                ctx.Decorate(ptr, spv::Decoration::NonUniformEXT);
+            }
+            const Id object{ctx.OpLoad(def.sampled_type, ptr)};
+            if (is_non_uniform) {
+                ctx.Decorate(object, spv::Decoration::NonUniformEXT);
+            }
+            const Id image{ctx.OpImage(def.image_type, object)};
+            if (is_non_uniform) {
+                ctx.Decorate(image, spv::Decoration::NonUniformEXT);
+            }
+            return image;
         }
         return ctx.OpImage(def.image_type, ctx.OpLoad(def.sampled_type, def.id));
     }
