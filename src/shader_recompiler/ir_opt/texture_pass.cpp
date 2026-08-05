@@ -150,27 +150,6 @@ IR::Opcode IndexedInstruction(const IR::Inst& inst) {
     }
 }
 
-bool IsStorageImageOpcode(IR::Opcode opcode) {
-    switch (opcode) {
-    case IR::Opcode::ImageRead:
-    case IR::Opcode::ImageAtomicIAdd32:
-    case IR::Opcode::ImageAtomicSMin32:
-    case IR::Opcode::ImageAtomicUMin32:
-    case IR::Opcode::ImageAtomicSMax32:
-    case IR::Opcode::ImageAtomicUMax32:
-    case IR::Opcode::ImageAtomicInc32:
-    case IR::Opcode::ImageAtomicDec32:
-    case IR::Opcode::ImageAtomicAnd32:
-    case IR::Opcode::ImageAtomicOr32:
-    case IR::Opcode::ImageAtomicXor32:
-    case IR::Opcode::ImageAtomicExchange32:
-    case IR::Opcode::ImageWrite:
-        return true;
-    default:
-        return false;
-    }
-}
-
 template <typename DescriptorContainer>
 u32 StaticDescriptorCount(const DescriptorContainer& descriptors) {
     u32 count{};
