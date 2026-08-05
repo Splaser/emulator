@@ -769,6 +769,7 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
     }
     boost::container::small_vector<Shader::IR::Program*, 5> active_programs;
     u64 fixed_sampled_descriptors{};
+    u64 uniform_texel_buffer_descriptors{};
     u32 dynamic_sampled_arrays{};
     for (size_t index = uses_vertex_a && uses_vertex_b ? 1 : 0;
          index < Tegra::Engines::Maxwell3D::Regs::MaxShaderProgram; ++index) {
@@ -780,7 +781,7 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         }
         Shader::IR::Program& program{programs[index]};
         active_programs.push_back(&program);
-        fixed_sampled_descriptors +=
+        uniform_texel_buffer_descriptors +=
             Shader::NumDescriptors(program.info.texture_buffer_descriptors);
         for (const auto& desc : program.info.texture_descriptors) {
             if (desc.count > 1) {
@@ -789,6 +790,13 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
                 fixed_sampled_descriptors += desc.count;
             }
         }
+    }
+    const u64 uniform_texel_buffer_set_limit{device.GetMaxDescriptorSetUniformTexelBuffers()};
+    if (uniform_texel_buffer_descriptors > uniform_texel_buffer_set_limit) {
+        LOG_ERROR(Render_Vulkan,
+                  "Graphics pipeline requires {} uniform texel buffer descriptors, limit is {}",
+                  uniform_texel_buffer_descriptors, uniform_texel_buffer_set_limit);
+        return nullptr;
     }
     const u64 sampled_set_limit{host_info.max_descriptor_set_sampled_images};
     const u64 minimum_sampled_descriptors{fixed_sampled_descriptors + dynamic_sampled_arrays};
