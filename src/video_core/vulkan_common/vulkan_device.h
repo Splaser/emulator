@@ -316,6 +316,10 @@ public:
         return properties.properties.limits.maxDescriptorSetSampledImages;
     }
 
+    u32 GetMaxDescriptorSetUniformTexelBuffers() const {
+        return properties.properties.limits.maxDescriptorSetUniformTexelBuffers;
+    }
+
     /// Returns the maximum size for shared memory.
     u32 GetMaxComputeSharedMemorySize() const {
         return properties.properties.limits.maxComputeSharedMemorySize;
