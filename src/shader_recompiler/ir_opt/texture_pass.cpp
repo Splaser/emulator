@@ -183,8 +183,8 @@ u32 DynamicSampledTextureCap(const Info& info, const HostTranslateInfo& host_inf
             ? host_info.max_per_stage_descriptor_sampled_images - per_stage_sampled_count
             : 0};
     const u32 descriptor_set_sampled_budget{
-        host_info.max_descriptor_set_sampled_images > sampled_static_count
-            ? host_info.max_descriptor_set_sampled_images - sampled_static_count
+        host_info.max_descriptor_set_sampled_images > per_stage_sampled_count
+            ? host_info.max_descriptor_set_sampled_images - per_stage_sampled_count
             : 0};
     const u32 sampled_budget{std::min(per_stage_sampled_budget, descriptor_set_sampled_budget)};
     const u32 resource_budget{host_info.max_per_stage_resources > resource_static_count

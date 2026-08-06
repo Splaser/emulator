@@ -782,6 +782,8 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         }
         Shader::IR::Program& program{programs[index]};
         active_programs.push_back(&program);
+        fixed_sampled_descriptors +=
+            Shader::NumDescriptors(program.info.texture_buffer_descriptors);
         for (const auto& desc : program.info.texture_descriptors) {
             if (desc.count > 1) {
                 ++dynamic_sampled_arrays;
