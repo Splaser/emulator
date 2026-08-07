@@ -1015,6 +1015,9 @@ class SettingsFragmentPresenter(
 
             add(HeaderSetting(R.string.advanced_graphics_header))
             add(IntSetting.EXTENDED_DYNAMIC_STATE.key)
+            if (IntSetting.EXTENDED_DYNAMIC_STATE.getInt() == 3) {
+                add(BooleanSetting.RENDERER_VERTEX_INPUT_DYNAMIC_STATE.key)
+            }
             add(BooleanSetting.USE_CONDITIONAL_RENDERING.key)
             add(BooleanSetting.ANDROID_ARM64_REGISTER_GUARDS.key)
 

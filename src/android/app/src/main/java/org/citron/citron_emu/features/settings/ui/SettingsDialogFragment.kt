@@ -18,6 +18,7 @@ import org.citron.citron_emu.databinding.DialogEditTextBinding
 import org.citron.citron_emu.databinding.DialogSliderBinding
 import org.citron.citron_emu.features.input.NativeInput
 import org.citron.citron_emu.features.input.model.AnalogDirection
+import org.citron.citron_emu.features.settings.model.IntSetting
 import org.citron.citron_emu.features.settings.model.view.AnalogInputSetting
 import org.citron.citron_emu.features.settings.model.view.ButtonInputSetting
 import org.citron.citron_emu.features.settings.model.view.IntSingleChoiceSetting
@@ -220,6 +221,9 @@ class SettingsDialogFragment : DialogFragment(), DialogInterface.OnClickListener
                 val scSetting = settingsViewModel.clickedItem as SingleChoiceSetting
                 val value = getValueForSingleChoiceSelection(scSetting, which)
                 scSetting.setSelectedValue(value)
+                if (scSetting.setting.key == IntSetting.EXTENDED_DYNAMIC_STATE.key) {
+                    settingsViewModel.setShouldReloadSettingsList(true)
+                }
             }
 
             is StringSingleChoiceSetting -> {
