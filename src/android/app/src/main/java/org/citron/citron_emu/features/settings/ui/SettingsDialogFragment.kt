@@ -96,7 +96,11 @@ class SettingsDialogFragment : DialogFragment(), DialogInterface.OnClickListener
                             }
 
                             else -> {
-                                settingsViewModel.clickedItem!!.setting.reset()
+                                val setting = settingsViewModel.clickedItem!!.setting
+                                setting.reset()
+                                if (setting.key == IntSetting.EXTENDED_DYNAMIC_STATE.key) {
+                                    settingsViewModel.setShouldReloadSettingsList(true)
+                                }
                                 settingsViewModel.setAdapterItemChanged(position)
                             }
                         }
