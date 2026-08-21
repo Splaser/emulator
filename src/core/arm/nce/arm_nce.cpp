@@ -204,6 +204,7 @@ void ArmNce::SaveGuestContext(GuestContext* guest_ctx, void* raw_context) {
 bool ArmNce::HandleFailedGuestFault(GuestContext* guest_ctx, void* raw_info, void* raw_context) {
     auto& host_ctx = static_cast<ucontext_t*>(raw_context)->uc_mcontext;
     auto* info = static_cast<siginfo_t*>(raw_info);
+    auto& parent = *guest_ctx->parent;
 
     // We can't handle the access, so determine why we crashed.
     const bool is_prefetch_abort = host_ctx.pc == reinterpret_cast<u64>(info->si_addr);
@@ -211,16 +212,19 @@ bool ArmNce::HandleFailedGuestFault(GuestContext* guest_ctx, void* raw_info, voi
     // For data aborts, skip the instruction and return to guest code.
     // This preserves the historical NCE behavior while branch relocation fallback is tested.
     if (!is_prefetch_abort) {
-        if (!guest_ctx->parent->m_logged_unhandled_data_abort.exchange(
-                true, std::memory_order_relaxed)) {
+        parent.m_failed_data_abort_pc = host_ctx.pc;
+        parent.m_failed_data_abort_lr = host_ctx.regs[30];
+        parent.m_failed_data_abort_x0 = host_ctx.regs[0];
+
+        if (!parent.m_logged_unhandled_data_abort.exchange(true, std::memory_order_relaxed)) {
             LOG_CRITICAL(Core_ARM,
                          "First unhandled NCE data abort: pc={:#x}, fault_addr={:#x}",
                          host_ctx.pc, reinterpret_cast<u64>(info->si_addr));
-            const auto* const running_thread = guest_ctx->parent->m_running_thread;
+            const auto* const running_thread = parent.m_running_thread;
             LOG_CRITICAL(Core_ARM,
                          "NCE data abort context: core={}, thread_id={:#x}, sp={:#x}, lr={:#x}, "
                          "pstate={:#x}",
-                         guest_ctx->parent->m_core_index,
+                         parent.m_core_index,
                          running_thread != nullptr ? running_thread->GetThreadId() : 0, host_ctx.sp,
                          host_ctx.regs[30], static_cast<u64>(host_ctx.pstate));
             LOG_CRITICAL(Core_ARM,
@@ -256,14 +260,39 @@ bool ArmNce::HandleFailedGuestFault(GuestContext* guest_ctx, void* raw_info, voi
         return true;
     }
 
+    // A skipped data abort can leave a failed object operation running with invalid state. If
+    // that same operation immediately returns through a null function target, fail the operation
+    // at its original call boundary instead of suspending the entire emulated core.
+    const bool can_recover_failed_operation =
+        host_ctx.pc == 0 && parent.m_failed_data_abort_lr >= 0x1000 &&
+        host_ctx.regs[30] == parent.m_failed_data_abort_lr &&
+        host_ctx.regs[0] == parent.m_failed_data_abort_x0;
+    if (can_recover_failed_operation) {
+        LOG_WARNING(Core_ARM,
+                    "Recovered NCE operation after data abort: data_pc={:#x}, lr={:#x}, "
+                    "x0={:#x}, sp={:#x}",
+                    parent.m_failed_data_abort_pc, parent.m_failed_data_abort_lr,
+                    parent.m_failed_data_abort_x0, host_ctx.sp);
+        host_ctx.regs[0] = 0;
+        host_ctx.pc = parent.m_failed_data_abort_lr;
+        parent.m_failed_data_abort_pc = 0;
+        parent.m_failed_data_abort_lr = 0;
+        parent.m_failed_data_abort_x0 = 0;
+        return true;
+    }
+
+    parent.m_failed_data_abort_pc = 0;
+    parent.m_failed_data_abort_lr = 0;
+    parent.m_failed_data_abort_x0 = 0;
+
     // This is a prefetch abort.
     LOG_CRITICAL(Core_ARM, "Unhandled NCE prefetch abort: pc={:#x}, fault_addr={:#x}",
                  host_ctx.pc, reinterpret_cast<u64>(info->si_addr));
-    const auto* const running_thread = guest_ctx->parent->m_running_thread;
+    const auto* const running_thread = parent.m_running_thread;
     LOG_CRITICAL(Core_ARM,
                  "NCE prefetch abort context: core={}, thread_id={:#x}, sp={:#x}, lr={:#x}, "
                  "pstate={:#x}",
-                 guest_ctx->parent->m_core_index,
+                 parent.m_core_index,
                  running_thread != nullptr ? running_thread->GetThreadId() : 0, host_ctx.sp,
                  host_ctx.regs[30], static_cast<u64>(host_ctx.pstate));
     LOG_CRITICAL(Core_ARM,
@@ -363,6 +392,11 @@ HaltReason ArmNce::RunThread(Kernel::KThread* thread) {
     if (True(hr)) {
         return hr;
     }
+
+    // Recovery state is only valid within one uninterrupted guest run.
+    m_failed_data_abort_pc = 0;
+    m_failed_data_abort_lr = 0;
+    m_failed_data_abort_x0 = 0;
 
     // Get the thread context.
     auto* thread_params = &thread->GetNativeExecutionParameters();

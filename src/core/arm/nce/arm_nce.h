@@ -89,6 +89,9 @@ public:
     GuestContext m_guest_ctx{};
     Kernel::KThread* m_running_thread{};
     std::atomic_bool m_logged_unhandled_data_abort{};
+    u64 m_failed_data_abort_pc{};
+    u64 m_failed_data_abort_lr{};
+    u64 m_failed_data_abort_x0{};
 
     // Stack for signal processing.
     std::unique_ptr<u8[]> m_stack{};
