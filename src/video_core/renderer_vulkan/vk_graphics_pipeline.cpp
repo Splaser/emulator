@@ -11,6 +11,9 @@
 #include "video_core/renderer_vulkan/pipeline_helper.h"
 
 #include "common/bit_field.h"
+#include "common/logging.h"
+#include "common/settings.h"
+#include "video_core/arm64_register_guard.h"
 #include "video_core/renderer_vulkan/maxwell_to_vk.h"
 #include "video_core/renderer_vulkan/pipeline_statistics.h"
 #include "video_core/renderer_vulkan/vk_buffer_cache.h"
@@ -31,6 +34,10 @@
 
 namespace Vulkan {
 namespace {
+#if CITRON_ARM64_REGISTER_GUARD_SUPPORTED
+struct DescriptorTemplateUpdateCorruptionTag;
+#endif
+
 using Shader::ImageBufferDescriptor;
 using Shader::Backend::SPIRV::RENDERAREA_LAYOUT_OFFSET;
 using Shader::Backend::SPIRV::RESCALING_LAYOUT_DOWN_FACTOR_OFFSET;
@@ -591,7 +598,25 @@ void GraphicsPipeline::ConfigureDraw(const RescalingPushConstant& rescaling,
                 }
             }
             const VkDescriptorSet fresh = alloc.Commit();
+#if CITRON_ARM64_REGISTER_GUARD_SUPPORTED
+            if (Settings::values.android_arm64_register_guards.GetValue()) {
+                const u32 update_corruption{
+                    dev.UpdateDescriptorSetGuarded(fresh, *tpl, descriptor_data)};
+                if (update_corruption != 0 &&
+                    VideoCore::IsFirstArm64RegisterCorruption<15,
+                                                              DescriptorTemplateUpdateCorruptionTag>(
+                        update_corruption)) {
+                    LOG_ERROR(Render_Vulkan,
+                              "ARM64 vkUpdateDescriptorSetWithTemplate corrupted callee-saved "
+                              "state mask={:#x}",
+                              update_corruption);
+                }
+            } else {
+                dev.UpdateDescriptorSet(fresh, *tpl, descriptor_data);
+            }
+#else
             dev.UpdateDescriptorSet(fresh, *tpl, descriptor_data);
+#endif
             for (auto& e : descriptor_set_cache) {
                 if (e.set == fresh) {
                     e.set = VK_NULL_HANDLE;

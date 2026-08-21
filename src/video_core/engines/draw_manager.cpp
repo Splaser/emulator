@@ -44,7 +44,8 @@ CitronRasterizerDrawThunk(VideoCore::RasterizerInterface* rasterizer, bool draw_
 }
 
 // Contain AArch64 ABI violations at the complete rasterizer draw boundary. Bits 0-9 report
-// x19-x28 respectively; bits 10-11 report lower/upper guard damage; bit 12 reports x29.
+// x19-x28 respectively; bits 10-11 report lower/upper guard damage; bit 12 reports x29;
+// bits 13-14 report saved-link-register damage/no majority.
 extern "C" __attribute__((naked, noinline)) u32
 CitronRasterizerDrawPreservingRegisters(VideoCore::RasterizerInterface*, bool, u32) {
     CITRON_ARM64_PRESERVE_REGISTERS(CitronRasterizerDrawThunk);
@@ -336,7 +337,7 @@ void DrawManager::ProcessDraw(bool draw_indexed, u32 instance_count) {
             const std::exception_ptr draw_exception = rasterizer_draw_exception;
             rasterizer_draw_exception = {};
             if (draw_corruption != 0 &&
-                VideoCore::IsFirstArm64RegisterCorruption<13, DrawCorruptionTag>(
+                VideoCore::IsFirstArm64RegisterCorruption<15, DrawCorruptionTag>(
                     draw_corruption)) {
                 LOG_ERROR(
                     HW_GPU,
@@ -373,7 +374,7 @@ void DrawManager::ProcessDrawIndirect() {
             const std::exception_ptr draw_exception = rasterizer_draw_exception;
             rasterizer_draw_exception = {};
             if (draw_corruption != 0 &&
-                VideoCore::IsFirstArm64RegisterCorruption<13, DrawIndirectCorruptionTag>(
+                VideoCore::IsFirstArm64RegisterCorruption<15, DrawIndirectCorruptionTag>(
                     draw_corruption)) {
                 LOG_ERROR(HW_GPU,
                           "ARM64 RasterizerInterface::DrawIndirect corrupted callee-saved state "

@@ -15,6 +15,29 @@
 
 namespace Vulkan::vk {
 
+#if CITRON_ARM64_REGISTER_GUARD_SUPPORTED
+extern "C" __attribute__((naked, noinline, used)) void
+CitronVkUpdateDescriptorSetWithTemplateThunk(PFN_vkUpdateDescriptorSetWithTemplate, VkDevice,
+                                              VkDescriptorSet, VkDescriptorUpdateTemplate,
+                                              const void*) noexcept {
+    // Tail-call the driver so its return lands directly in the preserving assembly. No C++
+    // frame can consume corrupted callee-saved registers between the driver and the guard.
+    asm volatile("mov x16, x0\n"
+                 "mov x0, x1\n"
+                 "mov x1, x2\n"
+                 "mov x2, x3\n"
+                 "mov x3, x4\n"
+                 "br x16\n");
+}
+
+extern "C" __attribute__((naked, noinline)) u32
+CitronVkUpdateDescriptorSetWithTemplatePreservingRegisters(
+    PFN_vkUpdateDescriptorSetWithTemplate, VkDevice, VkDescriptorSet, VkDescriptorUpdateTemplate,
+    const void*) noexcept {
+    CITRON_ARM64_PRESERVE_REGISTERS(CitronVkUpdateDescriptorSetWithTemplateThunk);
+}
+#endif
+
 namespace {
 
 template <typename Func>
