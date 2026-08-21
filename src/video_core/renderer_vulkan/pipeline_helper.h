@@ -339,6 +339,7 @@ struct BindlessCacheEntry {
     u32 key_size_shift{0};
     u64 key_image_table_generation{};
     bool valid{false};
+    boost::container::small_vector<u8, 256> last_bytes;
     boost::container::small_vector<VideoCommon::ImageViewInOut, 16> cached_views;
     boost::container::small_vector<VideoCommon::SamplerId, 16> cached_samplers;
 };
