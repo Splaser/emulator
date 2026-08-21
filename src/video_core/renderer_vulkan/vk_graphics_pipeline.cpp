@@ -422,16 +422,16 @@ void GraphicsPipeline::ConfigureImpl(bool is_indexed) {
 
                 const size_t byte_size =
                     (static_cast<size_t>(desc.count - 1) << desc.size_shift) + sizeof(u32);
-                // Single scan: (addr, count, size_shift, image_table_generation) match returns
-                // the existing valid entry (hit); otherwise an invalid slot claimed
-                // for filling below (miss).
-                // image_table_generation increments on every TIC table invalidation,
-                // a generation hit implies the cached views are still valid and
-                // no ReadBlockUnsafe is needed.
+                bindless_scratch.resize(byte_size);
+                gpu_memory->ReadBlockUnsafe(cbuf_addr, bindless_scratch.data(), byte_size,
+                                            "Vulkan.GraphicsPipeline.bindless_cbuf");
                 BindlessCacheEntry& entry = FindOrAcquireBindlessEntry(
                     bindless_cache, bindless_cache_rr, cbuf_addr, desc.count, desc.size_shift,
                     image_table_generation);
-                if (entry.valid) {
+                const bool hit = entry.valid && entry.last_bytes.size() == byte_size &&
+                                 std::memcmp(entry.last_bytes.data(), bindless_scratch.data(),
+                                             byte_size) == 0;
+                if (hit) {
                     views.insert(views.end(), entry.cached_views.begin(),
                                  entry.cached_views.end());
                     samplers.insert(samplers.end(), entry.cached_samplers.begin(),
@@ -439,10 +439,6 @@ void GraphicsPipeline::ConfigureImpl(bool is_indexed) {
                     continue;
                 }
 
-                // Miss: read cbuf, resolve views, populate cache entry.
-                bindless_scratch.resize(byte_size);
-                gpu_memory->ReadBlockUnsafe(cbuf_addr, bindless_scratch.data(), byte_size,
-                                            "Vulkan.GraphicsPipeline.bindless_cbuf");
                 const size_t views_start = views.size();
                 const size_t samplers_start = samplers.size();
                 for (u32 index = 0; index < desc.count; ++index) {
@@ -463,6 +459,7 @@ void GraphicsPipeline::ConfigureImpl(bool is_indexed) {
                 for (auto& view : resolved_views) {
                     view.id_cached = true;
                 }
+                entry.last_bytes.assign(bindless_scratch.begin(), bindless_scratch.end());
                 entry.cached_views.assign(views.data() + views_start,
                                           views.data() + views.size());
                 entry.cached_samplers.assign(samplers.data() + samplers_start,
