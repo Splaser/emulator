@@ -244,6 +244,10 @@ public:
         return samples;
     }
 
+    [[nodiscard]] bool SupportsDepthComparison() const noexcept {
+        return supports_depth_comparison;
+    }
+
     [[nodiscard]] GPUVAddr GpuAddr() const noexcept {
         return gpu_addr;
     }
@@ -279,6 +283,7 @@ private:
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
     u32 buffer_size = 0;
     VideoCommon::ImageType physical_image_type = VideoCommon::ImageType::e2D;
+    bool supports_depth_comparison = false;
 };
 
 class ImageAlloc : public VideoCommon::ImageAllocBase {};
@@ -307,10 +312,19 @@ public:
         return static_cast<bool>(sampler_nearest);
     }
 
+    [[nodiscard]] VkSampler HandleWithoutDepthComparison() const noexcept {
+        return *sampler_noncompare;
+    }
+
+    [[nodiscard]] bool HasDepthComparison() const noexcept {
+        return static_cast<bool>(sampler_noncompare);
+    }
+
 private:
     vk::Sampler sampler;
     vk::Sampler sampler_default_anisotropy;
     vk::Sampler sampler_nearest;
+    vk::Sampler sampler_noncompare;
 };
 
 class Framebuffer {
