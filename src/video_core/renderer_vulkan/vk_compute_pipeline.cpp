@@ -178,9 +178,7 @@ void ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
         for (u32 index = 0; index < desc.count; ++index) {
             const auto handle{read_handle(desc, index)};
             views.push_back({handle.first});
-            samplers.push_back(handle.first == 0
-                                   ? VideoCommon::NULL_SAMPLER_ID
-                                   : texture_cache.GetComputeSamplerId(handle.second));
+            samplers.push_back(texture_cache.GetComputeSamplerId(handle.second));
         }
     }
     for (const auto& desc : info.image_descriptors) {
