@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <cinttypes>
 #include <cstring>
 #include <memory>
@@ -212,9 +213,11 @@ bool ArmNce::HandleFailedGuestFault(GuestContext* guest_ctx, void* raw_info, voi
     // For data aborts, skip the instruction and return to guest code.
     // This preserves the historical NCE behavior while branch relocation fallback is tested.
     if (!is_prefetch_abort) {
-        parent.m_failed_data_abort_pc = host_ctx.pc;
-        parent.m_failed_data_abort_lr = host_ctx.regs[30];
-        parent.m_failed_data_abort_x0 = host_ctx.regs[0];
+        auto& failed_abort = parent.m_failed_data_aborts[parent.m_failed_data_abort_index++ %
+                                                         parent.m_failed_data_aborts.size()];
+        failed_abort.pc = host_ctx.pc;
+        failed_abort.lr = host_ctx.regs[30];
+        failed_abort.x0 = host_ctx.regs[0];
 
         if (!parent.m_logged_unhandled_data_abort.exchange(true, std::memory_order_relaxed)) {
             LOG_CRITICAL(Core_ARM,
@@ -263,27 +266,27 @@ bool ArmNce::HandleFailedGuestFault(GuestContext* guest_ctx, void* raw_info, voi
     // A skipped data abort can leave a failed object operation running with invalid state. If
     // that same operation immediately returns through a null function target, fail the operation
     // at its original call boundary instead of suspending the entire emulated core.
-    const bool can_recover_failed_operation =
-        host_ctx.pc == 0 && parent.m_failed_data_abort_lr >= 0x1000 &&
-        host_ctx.regs[30] == parent.m_failed_data_abort_lr &&
-        host_ctx.regs[0] == parent.m_failed_data_abort_x0;
-    if (can_recover_failed_operation) {
+    const auto failed_abort =
+        std::find_if(parent.m_failed_data_aborts.begin(), parent.m_failed_data_aborts.end(),
+                     [&](const FailedDataAbort& candidate) {
+                         return host_ctx.pc == 0 && candidate.lr >= 0x1000 &&
+                                host_ctx.regs[30] == candidate.lr &&
+                                host_ctx.regs[0] == candidate.x0;
+                     });
+    if (failed_abort != parent.m_failed_data_aborts.end()) {
         LOG_WARNING(Core_ARM,
                     "Recovered NCE operation after data abort: data_pc={:#x}, lr={:#x}, "
                     "x0={:#x}, sp={:#x}",
-                    parent.m_failed_data_abort_pc, parent.m_failed_data_abort_lr,
-                    parent.m_failed_data_abort_x0, host_ctx.sp);
+                    failed_abort->pc, failed_abort->lr, failed_abort->x0, host_ctx.sp);
         host_ctx.regs[0] = 0;
-        host_ctx.pc = parent.m_failed_data_abort_lr;
-        parent.m_failed_data_abort_pc = 0;
-        parent.m_failed_data_abort_lr = 0;
-        parent.m_failed_data_abort_x0 = 0;
+        host_ctx.pc = failed_abort->lr;
+        parent.m_failed_data_aborts = {};
+        parent.m_failed_data_abort_index = 0;
         return true;
     }
 
-    parent.m_failed_data_abort_pc = 0;
-    parent.m_failed_data_abort_lr = 0;
-    parent.m_failed_data_abort_x0 = 0;
+    parent.m_failed_data_aborts = {};
+    parent.m_failed_data_abort_index = 0;
 
     // This is a prefetch abort.
     LOG_CRITICAL(Core_ARM, "Unhandled NCE prefetch abort: pc={:#x}, fault_addr={:#x}",
@@ -392,11 +395,6 @@ HaltReason ArmNce::RunThread(Kernel::KThread* thread) {
     if (True(hr)) {
         return hr;
     }
-
-    // Recovery state is only valid within one uninterrupted guest run.
-    m_failed_data_abort_pc = 0;
-    m_failed_data_abort_lr = 0;
-    m_failed_data_abort_x0 = 0;
 
     // Get the thread context.
     auto* thread_params = &thread->GetNativeExecutionParameters();

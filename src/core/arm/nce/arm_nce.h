@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <mutex>
 
@@ -19,6 +20,12 @@ class System;
 
 class ArmNce final : public ArmInterface {
 public:
+    struct FailedDataAbort {
+        u64 pc{};
+        u64 lr{};
+        u64 x0{};
+    };
+
     ArmNce(System& system, bool uses_wall_clock, std::size_t core_index);
     ~ArmNce() override;
 
@@ -89,9 +96,8 @@ public:
     GuestContext m_guest_ctx{};
     Kernel::KThread* m_running_thread{};
     std::atomic_bool m_logged_unhandled_data_abort{};
-    u64 m_failed_data_abort_pc{};
-    u64 m_failed_data_abort_lr{};
-    u64 m_failed_data_abort_x0{};
+    std::array<FailedDataAbort, 4> m_failed_data_aborts{};
+    std::size_t m_failed_data_abort_index{};
 
     // Stack for signal processing.
     std::unique_ptr<u8[]> m_stack{};
