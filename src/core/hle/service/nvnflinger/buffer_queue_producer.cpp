@@ -4,6 +4,8 @@
 // Parts of this implementation were based on:
 // https://cs.android.com/android/platform/superproject/+/android-5.1.1_r38:frameworks/native/libs/gui/BufferQueueProducer.cpp
 
+#include <algorithm>
+
 #include "common/assert.h"
 #include "common/settings.h"
 #include "core/hle/kernel/k_event.h"
@@ -831,6 +833,20 @@ void BufferQueueProducer::Transact(u32 code, std::span<const u8> parcel_data,
         Fence fence{};
 
         status = DequeueBuffer(&slot, &fence, is_async, width, height, pixel_format, usage);
+
+        if (fence.num_fences == 0) {
+            Service::Nvidia::RecordNvFenceTrace(
+                Service::Nvidia::NvFenceTraceSource::BufferQueueDequeue,
+                Service::Nvidia::NvFence{.id = -1, .value = 0});
+        } else {
+            const u32 num_fences =
+                std::min(fence.num_fences, static_cast<u32>(fence.fences.size()));
+            for (u32 index = 0; index < num_fences; ++index) {
+                Service::Nvidia::RecordNvFenceTrace(
+                    Service::Nvidia::NvFenceTraceSource::BufferQueueDequeue,
+                    fence.fences[index]);
+            }
+        }
 
         parcel_out.Write(slot);
         parcel_out.WriteFlattenedObject(&fence);

@@ -915,6 +915,7 @@ add_library(core STATIC
     hle/service/nvdrv/devices/nvhost_vic.h
     hle/service/nvdrv/devices/nvmap.cpp
     hle/service/nvdrv/devices/nvmap.h
+    hle/service/nvdrv/nvdata.cpp
     hle/service/nvdrv/nvdata.h
     hle/service/nvdrv/nvdrv.cpp
     hle/service/nvdrv/nvdrv.h

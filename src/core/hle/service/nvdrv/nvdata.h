@@ -22,6 +22,18 @@ struct NvFence {
 };
 static_assert(sizeof(NvFence) == 8, "NvFence has wrong size");
 
+enum class NvFenceTraceSource : u32 {
+    AllocGpfifo,
+    SubmitGpfifo,
+    EventWait,
+    BufferQueueDequeue,
+};
+
+/// Keep a bounded, lock-free history so NCE signal diagnostics can correlate a packed
+/// {syncpoint id, value} with the HLE boundary that most recently produced or consumed it.
+void RecordNvFenceTrace(NvFenceTraceSource source, NvFence fence);
+void LogRecentNvFenceTrace();
+
 enum class NvResult : u32 {
     Success = 0x0,
     NotImplemented = 0x1,

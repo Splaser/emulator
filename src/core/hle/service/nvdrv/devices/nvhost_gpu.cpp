@@ -182,6 +182,7 @@ NvResult nvhost_gpu::SetupGPFIFOChannel(IoctlAllocGpfifoEx& params, DeviceFD fd)
 
     channel_state->program_id = program_id;
     params.fence_out = syncpoint_manager.GetSyncpointFence(channel_syncpoint);
+    RecordNvFenceTrace(NvFenceTraceSource::AllocGpfifo, params.fence_out);
 
     // When the address space hasn't been bound yet, record the program_id and
     // let the channel be materialized lazily on the first GPFIFO submission.
@@ -343,6 +344,7 @@ NvResult nvhost_gpu::SubmitGPFIFOImpl(IoctlSubmitGpfifo& params, Tegra::CommandL
     u32 increment{(flags.fence_increment.Value() != 0 ? 2 : 0) +
                   (flags.increment_value.Value() != 0 ? params.fence.value : 0)};
     params.fence.value = syncpoint_manager.IncrementSyncpointMaxExt(channel_syncpoint, increment);
+    RecordNvFenceTrace(NvFenceTraceSource::SubmitGpfifo, params.fence);
     gpu.PushGPUEntries(bind_id, std::move(entries));
 
     if (flags.fence_increment.Value()) {

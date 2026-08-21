@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <mutex>
 
 #include "core/arm/arm_interface.h"
@@ -87,6 +88,7 @@ public:
     // Core context.
     GuestContext m_guest_ctx{};
     Kernel::KThread* m_running_thread{};
+    std::atomic_bool m_logged_unhandled_data_abort{};
 
     // Stack for signal processing.
     std::unique_ptr<u8[]> m_stack{};

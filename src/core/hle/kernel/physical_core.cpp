@@ -114,18 +114,14 @@ void PhysicalCore::RunThread(Kernel::KThread* thread) {
                 interface->RewindBreakpointInstruction();
             }
 
-            // Enhanced crash handling for Nintendo SDK crashes
-            bool should_continue = false;
-            if (!system.DebuggerEnabled()) {
-                //???
-            } else {
+            if (system.DebuggerEnabled()) {
                 system.GetDebugger().NotifyThreadStopped(thread);
+            } else {
+                interface->LogBacktrace(process);
             }
 
-            if (!should_continue) {
-                thread->RequestSuspend(SuspendType::Debug);
-                return;
-            }
+            thread->RequestSuspend(SuspendType::Debug);
+            return;
         }
 
         // Notify the debugger and go to sleep on data abort.
