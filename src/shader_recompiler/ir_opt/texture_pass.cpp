@@ -539,6 +539,7 @@ public:
         })};
         // TODO: Read this from TIC
         texture_descriptors[index].is_multisample |= desc.is_multisample;
+        texture_descriptors[index].is_integer |= desc.is_integer;
         return index;
     }
 
@@ -765,10 +766,12 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
                     .size_shift = size_shift,
                 });
             } else {
+                const bool is_integer{IsTexturePixelFormatInteger(env, cbuf)};
                 index = descriptors.Add(TextureDescriptor{
                     .type = flags.type,
                     .is_depth = flags.is_depth != 0,
                     .is_multisample = is_multisample,
+                    .is_integer = is_integer,
                     .has_secondary = cbuf.has_secondary,
                     .cbuf_index = cbuf.index,
                     .cbuf_offset = cbuf.offset,
@@ -779,6 +782,7 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
                     .count = count,
                     .size_shift = size_shift,
                 });
+                flags.is_integer.Assign(is_integer ? 1 : 0);
             }
             break;
         }
