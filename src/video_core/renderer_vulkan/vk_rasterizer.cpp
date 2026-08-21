@@ -81,7 +81,7 @@ CitronGraphicsPipelineConfigureThunk(GraphicsPipeline* pipeline, bool is_indexed
 // registers modified. Isolate GraphicsPipeline::Configure so a damaged RasterizerVulkan
 // pointer cannot be consumed by UpdateDynamicStates before the outer macro guard returns.
 // Bits 0-9 report x19-x28 respectively; bits 10-11 report lower/upper guard damage; bit 12
-// reports x29.
+// reports x29; bits 13-14 report saved-link-register damage/no majority.
 extern "C" __attribute__((naked, noinline)) u32
 CitronGraphicsPipelineConfigurePreservingRegisters(GraphicsPipeline*, bool) {
     CITRON_ARM64_PRESERVE_REGISTERS(CitronGraphicsPipelineConfigureThunk);
@@ -295,7 +295,7 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
             configure_exception = pipeline_configure_exception;
             pipeline_configure_exception = {};
             if (configure_corruption != 0 &&
-                VideoCore::IsFirstArm64RegisterCorruption<13, ConfigureCorruptionTag>(
+                VideoCore::IsFirstArm64RegisterCorruption<15, ConfigureCorruptionTag>(
                     configure_corruption)) {
                 LOG_ERROR(
                     Render_Vulkan,
