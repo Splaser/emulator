@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
-#include <cstring>
-#include <vector>
 
 #include <boost/container/small_vector.hpp>
 #include <boost/container/static_vector.hpp>
@@ -138,10 +136,6 @@ void ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
     thread_local boost::container::small_vector<VideoCommon::SamplerId, 64> samplers;
     views.clear();
     samplers.clear();
-    thread_local BindlessCache bindless_cache;
-    thread_local size_t bindless_cache_rr{0};
-    thread_local std::vector<u8> bindless_scratch;
-
     const auto& qmd{kepler_compute.launch_description};
     const auto& cbufs{qmd.const_buffer_config};
     const bool via_header_index{qmd.linked_tsc != 0};
@@ -180,57 +174,7 @@ void ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
     for (const auto& desc : info.image_buffer_descriptors) {
         add_image(desc, false);
     }
-    const u64 image_table_generation = texture_cache.ComputeImageTableGeneration();
     for (const auto& desc : info.texture_descriptors) {
-        if (desc.count > 1 && !desc.has_secondary) {
-            const GPUVAddr cbuf_addr =
-                cbufs[desc.cbuf_index].Address() + desc.cbuf_offset;
-
-            const size_t byte_size =
-                (static_cast<size_t>(desc.count - 1) << desc.size_shift) + sizeof(u32);
-            bindless_scratch.resize(byte_size);
-            gpu_memory.ReadBlockUnsafe(cbuf_addr, bindless_scratch.data(), byte_size,
-                                       "Vulkan.ComputePipeline.bindless_cbuf");
-            BindlessCacheEntry& entry = FindOrAcquireBindlessEntry(
-                bindless_cache, bindless_cache_rr, cbuf_addr, desc.count, desc.size_shift,
-                image_table_generation);
-            const bool hit = entry.valid && entry.last_bytes.size() == byte_size &&
-                             std::memcmp(entry.last_bytes.data(), bindless_scratch.data(),
-                                         byte_size) == 0;
-            if (hit) {
-                views.insert(views.end(), entry.cached_views.begin(), entry.cached_views.end());
-                samplers.insert(samplers.end(), entry.cached_samplers.begin(),
-                                entry.cached_samplers.end());
-                continue;
-            }
-
-            const size_t views_start = views.size();
-            const size_t samplers_start = samplers.size();
-            for (u32 index = 0; index < desc.count; ++index) {
-                const size_t slot_offset =
-                    static_cast<size_t>(index) << desc.size_shift;
-                u32 raw;
-                std::memcpy(&raw, bindless_scratch.data() + slot_offset, sizeof(u32));
-                const auto handle = TexturePair(raw, via_header_index);
-                views.push_back({handle.first});
-                samplers.push_back(handle.first == 0
-                                       ? VideoCommon::NULL_SAMPLER_ID
-                                       : texture_cache.GetComputeSamplerId(handle.second));
-            }
-            auto resolved_views =
-                std::span(views.data() + views_start, views.size() - views_start);
-            texture_cache.FillComputeImageViews(resolved_views);
-            for (auto& view : resolved_views) {
-                view.id_cached = true;
-            }
-            entry.last_bytes.assign(bindless_scratch.begin(), bindless_scratch.end());
-            entry.cached_views.assign(views.data() + views_start,
-                                      views.data() + views.size());
-            entry.cached_samplers.assign(samplers.data() + samplers_start,
-                                         samplers.data() + samplers.size());
-            entry.valid = true;
-            continue;
-        }
         for (u32 index = 0; index < desc.count; ++index) {
             const auto handle{read_handle(desc, index)};
             views.push_back({handle.first});
