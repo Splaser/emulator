@@ -907,13 +907,12 @@ TextureCacheRuntime::TextureCacheRuntime(const Device& device_, Scheduler& sched
     for (size_t index_a = 0; index_a < VideoCore::Surface::MaxPixelFormat; index_a++) {
         const auto image_format = static_cast<PixelFormat>(index_a);
         if (IsPixelFormatASTC(image_format) && !device.IsOptimalAstcSupported()) {
-            view_formats[index_a].push_back(VK_FORMAT_R8G8B8A8_UNORM);
-            view_formats[index_a].push_back(VK_FORMAT_R8G8B8A8_SRGB);
+            view_formats[index_a].push_back(VK_FORMAT_A8B8G8R8_UNORM_PACK32);
         }
         if (IsPixelFormatETC2(image_format) && !device.IsOptimalEtc2Supported()) {
             const bool is_srgb = VideoCore::Surface::IsPixelFormatSRGB(image_format);
-            view_formats[index_a].push_back(is_srgb ? VK_FORMAT_R8G8B8A8_SRGB
-                                                    : VK_FORMAT_R8G8B8A8_UNORM);
+            view_formats[index_a].push_back(is_srgb ? VK_FORMAT_A8B8G8R8_SRGB_PACK32
+                                                    : VK_FORMAT_A8B8G8R8_UNORM_PACK32);
         }
         for (size_t index_b = 0; index_b < VideoCore::Surface::MaxPixelFormat; index_b++) {
             const auto view_format = static_cast<PixelFormat>(index_b);
@@ -1495,7 +1494,7 @@ Image::Image(TextureCacheRuntime& runtime_, const ImageInfo& info_, GPUVAddr gpu
         const auto& device = runtime->device.GetLogical();
         for (s32 level = 0; level < info.resources.levels; ++level) {
             storage_image_views[level] =
-                MakeStorageView(device, level, *original_image, VK_FORMAT_R8G8B8A8_UNORM);
+                MakeStorageView(device, level, *original_image, VK_FORMAT_A8B8G8R8_UNORM_PACK32);
         }
     }
 }
