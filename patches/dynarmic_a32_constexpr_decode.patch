@@ -76,10 +76,16 @@ index 6aa64f9e..e826fce7 100644
 diff --git a/src/dynarmic/backend/arm64/address_space.cpp b/src/dynarmic/backend/arm64/address_space.cpp
 --- a/src/dynarmic/backend/arm64/address_space.cpp
 +++ b/src/dynarmic/backend/arm64/address_space.cpp
-@@ -85,0 +86,2 @@ void AddressSpace::InvalidateBasicBlocks(const ankerl::unordered_dense::set<IR:
+@@ -84,10 +84,27 @@ void AddressSpace::InvalidateBasicBlocks(const ankerl::unordered_dense::set<IR:
+             continue;
+         }
+ 
 +        const CodePtr entry_point = iter->second;
 +
-@@ -89,0 +92,15 @@ void AddressSpace::InvalidateBasicBlocks(const ankerl::unordered_dense::set<IR:
+         // Unlink before removal because InvalidateBasicBlocks can be called within a fastmem callback,
+         // and the currently executing block may have references to itself which need to be unlinked.
+         RelinkForDescriptor(descriptor, nullptr);
+ 
 +        // Invalidated blocks are emitted at a new address if they are recompiled. Stop retaining their
 +        // old entry points as sources for future relinks, otherwise frequently invalidated code makes
 +        // block_references grow without bound and every subsequent relink scans all historical blocks.
@@ -95,3 +101,6 @@ diff --git a/src/dynarmic/backend/arm64/address_space.cpp b/src/dynarmic/backend
 +            }
 +        }
 +
+         block_entries.erase(iter);
+     }
+ 
