@@ -775,10 +775,7 @@ std::pair<typename P::ImageView*, bool> TextureCache<P>::TryFindFramebufferImage
     }();
 
     const auto GetImageViewForFramebuffer = [&](ImageId image_id) {
-        const PixelFormat image_format = slot_images[image_id].info.format;
-        const PixelFormat actual_format = VideoCore::Surface::IsPixelFormatSRGB(image_format)
-            ? image_format : view_format;
-        ImageViewInfo info{ImageViewType::e2D, actual_format};
+        ImageViewInfo info{ImageViewType::e2D, view_format};
         if (config.blending == Tegra::BlendMode::Opaque) {
             info.x_source = static_cast<u8>(SwizzleSource::R);
             info.y_source = static_cast<u8>(SwizzleSource::G);
@@ -1881,17 +1878,6 @@ ImageViewId TextureCache<P>::FindRenderTargetView(const ImageInfo& info, GPUVAdd
         return NULL_IMAGE_VIEW_ID;
     }
     Image& image = slot_images[image_id];
-    if (VideoCore::Surface::IsPixelFormatSRGB(info.format) !=
-        VideoCore::Surface::IsPixelFormatSRGB(image.info.format)) {
-        LOG_WARNING(Render_Vulkan,
-                    "RT format mismatch: requested={} (sRGB={}), image={} (sRGB={}), "
-                    "size={}x{}, gpu_addr={:#x}",
-                    static_cast<u32>(info.format),
-                    VideoCore::Surface::IsPixelFormatSRGB(info.format),
-                    static_cast<u32>(image.info.format),
-                    VideoCore::Surface::IsPixelFormatSRGB(image.info.format),
-                    info.size.width, info.size.height, gpu_addr);
-    }
     const ImageViewType view_type = RenderTargetImageViewType(info);
     SubresourceBase base;
     if (image.info.type == ImageType::Linear) {
