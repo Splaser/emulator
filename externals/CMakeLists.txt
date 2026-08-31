@@ -42,6 +42,35 @@ endif()
 # Dynarmic
 if ((ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64) AND NOT TARGET dynarmic::dynarmic)
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dynarmic/CMakeLists.txt")
+        set(DYNARMIC_A32_DECODER_PATCH
+            "${CMAKE_SOURCE_DIR}/patches/dynarmic_a32_constexpr_decode.patch")
+        execute_process(
+            COMMAND git apply --check --ignore-whitespace "${DYNARMIC_A32_DECODER_PATCH}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/dynarmic"
+            RESULT_VARIABLE DYNARMIC_A32_PATCH_APPLICABLE
+            OUTPUT_QUIET ERROR_QUIET
+        )
+        if (DYNARMIC_A32_PATCH_APPLICABLE EQUAL 0)
+            execute_process(
+                COMMAND git apply --ignore-whitespace "${DYNARMIC_A32_DECODER_PATCH}"
+                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/dynarmic"
+                RESULT_VARIABLE DYNARMIC_A32_PATCH_RESULT
+            )
+            if (NOT DYNARMIC_A32_PATCH_RESULT EQUAL 0)
+                message(FATAL_ERROR "Failed to apply Dynarmic A32 decoder patch")
+            endif()
+        else()
+            execute_process(
+                COMMAND git apply --reverse --check --ignore-whitespace
+                        "${DYNARMIC_A32_DECODER_PATCH}"
+                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/dynarmic"
+                RESULT_VARIABLE DYNARMIC_A32_PATCH_PRESENT
+                OUTPUT_QUIET ERROR_QUIET
+            )
+            if (NOT DYNARMIC_A32_PATCH_PRESENT EQUAL 0)
+                message(FATAL_ERROR "Dynarmic A32 decoder patch does not match the pinned source")
+            endif()
+        endif()
         set(DYNARMIC_IGNORE_ASSERTS ON)
         add_subdirectory(dynarmic)
         add_library(dynarmic::dynarmic ALIAS dynarmic)

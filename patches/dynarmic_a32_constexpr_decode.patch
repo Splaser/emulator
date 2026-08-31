@@ -1,0 +1,75 @@
+diff --git a/src/dynarmic/frontend/A32/decoder/arm.h b/src/dynarmic/frontend/A32/decoder/arm.h
+index cb35e682..048e1bc2 100644
+--- a/src/dynarmic/frontend/A32/decoder/arm.h
++++ b/src/dynarmic/frontend/A32/decoder/arm.h
+@@ -41,7 +41,9 @@ static std::optional<ReturnType> DecodeArm(V& visitor, u32 instruction) noexcept
+         for (size_t i = 0; i < t.size(); ++i) {
+ #define INST(fn, name, bitstring) \
+     do { \
+-        auto const [mask, expect] = DYNARMIC_DECODER_GET_MATCHER(ArmMatcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
++        constexpr auto match = DYNARMIC_DECODER_GET_MATCHER(ArmMatcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
++        constexpr auto mask = std::get<0>(match); \
++        constexpr auto expect = std::get<1>(match); \
+         if ((i & make_fast_index(mask)) == make_fast_index(expect)) { \
+             t[i].emplace_back([](V& visitor, u32 instruction) -> bool { \
+                 return DYNARMIC_DECODER_GET_MATCHER_FUNCTION(ArmMatcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
+diff --git a/src/dynarmic/frontend/A32/decoder/asimd.h b/src/dynarmic/frontend/A32/decoder/asimd.h
+index 18eae6b6..e54e4e2d 100644
+--- a/src/dynarmic/frontend/A32/decoder/asimd.h
++++ b/src/dynarmic/frontend/A32/decoder/asimd.h
+@@ -30,7 +30,9 @@ template<typename V, typename ReturnType>
+ static std::optional<ReturnType> DecodeASIMD(V& visitor, u32 instruction) noexcept {
+ #define INST(fn, name, bitstring) \
+     do { \
+-        auto const [mask, expect] = DYNARMIC_DECODER_GET_MATCHER(ASIMDMatcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
++        constexpr auto match = DYNARMIC_DECODER_GET_MATCHER(ASIMDMatcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
++        constexpr auto mask = std::get<0>(match); \
++        constexpr auto expect = std::get<1>(match); \
+         if ((instruction & mask) == expect) return DYNARMIC_DECODER_GET_MATCHER_FUNCTION(ASIMDMatcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
+     } while (0);
+ #include "./asimd.inc"
+diff --git a/src/dynarmic/frontend/A32/decoder/thumb16.h b/src/dynarmic/frontend/A32/decoder/thumb16.h
+index 448de5b5..7b8be765 100644
+--- a/src/dynarmic/frontend/A32/decoder/thumb16.h
++++ b/src/dynarmic/frontend/A32/decoder/thumb16.h
+@@ -27,7 +27,9 @@ template<typename V, typename ReturnType>
+ static std::optional<ReturnType> DecodeThumb16(V& visitor, u16 instruction) {
+ #define INST(fn, name, bitstring) \
+     do { \
+-        auto const [mask, expect] = DYNARMIC_DECODER_GET_MATCHER(Thumb16Matcher, fn, name, Decoder::detail::StringToArray<16>(bitstring)); \
++        constexpr auto match = DYNARMIC_DECODER_GET_MATCHER(Thumb16Matcher, fn, name, Decoder::detail::StringToArray<16>(bitstring)); \
++        constexpr auto mask = std::get<0>(match); \
++        constexpr auto expect = std::get<1>(match); \
+         if ((instruction & mask) == expect) return DYNARMIC_DECODER_GET_MATCHER_FUNCTION(Thumb16Matcher, fn, name, Decoder::detail::StringToArray<16>(bitstring)); \
+     } while (0);
+ #include "./thumb16.inc"
+diff --git a/src/dynarmic/frontend/A32/decoder/thumb32.h b/src/dynarmic/frontend/A32/decoder/thumb32.h
+index 8a49c1b7..69c969fd 100644
+--- a/src/dynarmic/frontend/A32/decoder/thumb32.h
++++ b/src/dynarmic/frontend/A32/decoder/thumb32.h
+@@ -26,7 +26,9 @@ template<typename V, typename ReturnType>
+ static std::optional<ReturnType> DecodeThumb32(V& visitor, u32 instruction) {
+ #define INST(fn, name, bitstring) \
+     do { \
+-        auto const [mask, expect] = DYNARMIC_DECODER_GET_MATCHER(Thumb32Matcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
++        constexpr auto match = DYNARMIC_DECODER_GET_MATCHER(Thumb32Matcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
++        constexpr auto mask = std::get<0>(match); \
++        constexpr auto expect = std::get<1>(match); \
+         if ((instruction & mask) == expect) return DYNARMIC_DECODER_GET_MATCHER_FUNCTION(Thumb32Matcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
+     } while (0);
+ #include "./thumb32.inc"
+diff --git a/src/dynarmic/frontend/A32/decoder/vfp.h b/src/dynarmic/frontend/A32/decoder/vfp.h
+index 6aa64f9e..e826fce7 100644
+--- a/src/dynarmic/frontend/A32/decoder/vfp.h
++++ b/src/dynarmic/frontend/A32/decoder/vfp.h
+@@ -28,7 +28,9 @@ static std::optional<ReturnType> DecodeVFP(V& visitor, u32 instruction) {
+     bool const i_uncond = (instruction & 0xF0000000) == 0xF0000000;
+ #define INST(fn, name, bitstring) \
+     do { \
+-        auto const [mask, expect] = DYNARMIC_DECODER_GET_MATCHER(VFPMatcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
++        constexpr auto match = DYNARMIC_DECODER_GET_MATCHER(VFPMatcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
++        constexpr auto mask = std::get<0>(match); \
++        constexpr auto expect = std::get<1>(match); \
+         bool const m_uncond = (mask & 0xF0000000) == 0xF0000000; \
+         if ((instruction & mask) == expect && m_uncond == i_uncond) return DYNARMIC_DECODER_GET_MATCHER_FUNCTION(VFPMatcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
+     } while (0);
