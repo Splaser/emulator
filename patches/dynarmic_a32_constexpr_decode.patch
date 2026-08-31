@@ -73,3 +73,25 @@ index 6aa64f9e..e826fce7 100644
          bool const m_uncond = (mask & 0xF0000000) == 0xF0000000; \
          if ((instruction & mask) == expect && m_uncond == i_uncond) return DYNARMIC_DECODER_GET_MATCHER_FUNCTION(VFPMatcher, fn, name, Decoder::detail::StringToArray<32>(bitstring)); \
      } while (0);
+diff --git a/src/dynarmic/backend/arm64/address_space.cpp b/src/dynarmic/backend/arm64/address_space.cpp
+--- a/src/dynarmic/backend/arm64/address_space.cpp
++++ b/src/dynarmic/backend/arm64/address_space.cpp
+@@ -85,0 +86,2 @@ void AddressSpace::InvalidateBasicBlocks(const ankerl::unordered_dense::set<IR:
++        const CodePtr entry_point = iter->second;
++
+@@ -89,0 +92,15 @@ void AddressSpace::InvalidateBasicBlocks(const ankerl::unordered_dense::set<IR:
++        // Invalidated blocks are emitted at a new address if they are recompiled. Stop retaining their
++        // old entry points as sources for future relinks, otherwise frequently invalidated code makes
++        // block_references grow without bound and every subsequent relink scans all historical blocks.
++        if (const auto info_iter = block_infos.find(entry_point); info_iter != block_infos.end()) {
++            for (const auto& relocation : info_iter->second.block_relocations) {
++                const auto references_iter = block_references.find(relocation.first);
++                if (references_iter != block_references.end()) {
++                    references_iter->second.erase(entry_point);
++                    if (references_iter->second.empty()) {
++                        block_references.erase(references_iter);
++                    }
++                }
++            }
++        }
++
