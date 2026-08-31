@@ -19,6 +19,7 @@ import androidx.navigation.findNavController
 import androidx.navigation.fragment.navArgs
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.transition.MaterialSharedAxis
+import org.citron.citron_emu.NativeLibrary
 import org.citron.citron_emu.R
 import org.citron.citron_emu.databinding.FragmentSettingsBinding
 import org.citron.citron_emu.features.input.NativeInput
@@ -27,7 +28,6 @@ import org.citron.citron_emu.fragments.MessageDialogFragment
 import org.citron.citron_emu.utils.DirectoryInitialization
 import org.citron.citron_emu.utils.ViewUtils.updateMargins
 import org.citron.citron_emu.utils.collect
-import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -168,18 +168,22 @@ class SettingsFragment : Fragment() {
             descriptionId = R.string.clear_all_shader_caches_warning_description,
             positiveAction = {
                 viewLifecycleOwner.lifecycleScope.launch {
-                    val cleared = withContext(Dispatchers.IO) {
-                        val userDirectory = DirectoryInitialization.userDirectory
-                        userDirectory != null && File(userDirectory, "cache/shader").let {
-                            !it.exists() || it.deleteRecursively()
+                    val result = withContext(Dispatchers.IO) {
+                        when {
+                            DirectoryInitialization.userDirectory == null ->
+                                SHADER_CACHE_CLEAR_FILESYSTEM_FAILURE
+                            NativeLibrary.isRunning() -> SHADER_CACHE_CLEAR_EMULATION_ACTIVE
+                            else -> NativeLibrary.clearShaderCache()
                         }
                     }
                     Toast.makeText(
                         requireContext(),
-                        if (cleared) {
-                            R.string.cleared_all_shader_caches_successfully
-                        } else {
-                            R.string.clear_all_shader_caches_failed
+                        when (result) {
+                            SHADER_CACHE_CLEAR_SUCCESS ->
+                                R.string.cleared_all_shader_caches_successfully
+                            SHADER_CACHE_CLEAR_EMULATION_ACTIVE ->
+                                R.string.clear_all_shader_caches_emulation_active
+                            else -> R.string.clear_all_shader_caches_failed
                         },
                         Toast.LENGTH_SHORT
                     ).show()
@@ -218,5 +222,11 @@ class SettingsFragment : Fragment() {
             binding.appbarSettings.updateMargins(left = leftInsets, right = rightInsets)
             windowInsets
         }
+    }
+
+    companion object {
+        private const val SHADER_CACHE_CLEAR_SUCCESS = 0
+        private const val SHADER_CACHE_CLEAR_EMULATION_ACTIVE = 1
+        private const val SHADER_CACHE_CLEAR_FILESYSTEM_FAILURE = 2
     }
 }
