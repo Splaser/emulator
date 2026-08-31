@@ -769,45 +769,6 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
             layer_source_program = &programs[index];
         }
     }
-    boost::container::small_vector<Shader::IR::Program*, 5> active_programs;
-    u64 fixed_sampled_descriptors{};
-    u32 dynamic_sampled_arrays{};
-    for (size_t index = uses_vertex_a && uses_vertex_b ? 1 : 0;
-         index < Tegra::Engines::Maxwell3D::Regs::MaxShaderProgram; ++index) {
-        const bool is_emulated_stage =
-            layer_source_program != nullptr &&
-            index == static_cast<u32>(Tegra::Engines::Maxwell3D::Regs::ShaderType::Geometry);
-        if (key.unique_hashes[index] == 0 && !is_emulated_stage) {
-            continue;
-        }
-        Shader::IR::Program& program{programs[index]};
-        active_programs.push_back(&program);
-        fixed_sampled_descriptors +=
-            Shader::NumDescriptors(program.info.texture_buffer_descriptors);
-        for (const auto& desc : program.info.texture_descriptors) {
-            if (desc.count > 1) {
-                ++dynamic_sampled_arrays;
-            } else {
-                fixed_sampled_descriptors += desc.count;
-            }
-        }
-    }
-    const u64 sampled_set_limit{host_info.max_descriptor_set_sampled_images};
-    const u64 minimum_sampled_descriptors{fixed_sampled_descriptors + dynamic_sampled_arrays};
-    if (minimum_sampled_descriptors > sampled_set_limit) {
-        LOG_ERROR(Render_Vulkan,
-                  "Graphics pipeline requires at least {} sampled-image descriptors, limit is {}",
-                  minimum_sampled_descriptors, sampled_set_limit);
-        return nullptr;
-    }
-    if (dynamic_sampled_arrays != 0) {
-        const u32 aggregate_dynamic_cap{static_cast<u32>(
-            (sampled_set_limit - fixed_sampled_descriptors) / dynamic_sampled_arrays)};
-        for (Shader::IR::Program* const program : active_programs) {
-            Shader::Optimization::ClampDynamicSampledTextureDescriptors(
-                *program, aggregate_dynamic_cap);
-        }
-    }
     std::array<const Shader::Info*, Tegra::Engines::Maxwell3D::Regs::MaxShaderStage> infos{};
     std::array<vk::ShaderModule, Tegra::Engines::Maxwell3D::Regs::MaxShaderStage> modules;
 
