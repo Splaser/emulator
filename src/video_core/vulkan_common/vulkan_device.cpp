@@ -841,6 +841,9 @@ void Device::LoadStaticPipelineCache() {
         create(0, nullptr);
         return;
     }
+
+    constexpr size_t MAX_STATIC_PIPELINE_CACHE_SIZE = 256 * 1024 * 1024;
+
     std::vector<char> data;
     try {
         std::ifstream file(filename, std::ios::binary | std::ios::ate);
@@ -848,27 +851,48 @@ void Device::LoadStaticPipelineCache() {
             create(0, nullptr);
             return;
         }
+
         file.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+
         const size_t total = static_cast<size_t>(file.tellg());
         file.seekg(0, std::ios::beg);
+
         std::array<char, 8> magic{};
         u32 version{};
-        if (total < magic.size() + sizeof(version)) {
+
+        const size_t header_size = magic.size() + sizeof(version);
+        if (total < header_size) {
             create(0, nullptr);
             return;
         }
+
         file.read(magic.data(), magic.size())
             .read(reinterpret_cast<char*>(&version), sizeof(version));
+
         if (magic != STATIC_CACHE_MAGIC_NUMBER || version != STATIC_CACHE_VERSION) {
             create(0, nullptr);
             return;
         }
-        data.resize(total - magic.size() - sizeof(version));
+
+        const size_t payload_size = total - header_size;
+        if (payload_size > MAX_STATIC_PIPELINE_CACHE_SIZE) {
+            create(0, nullptr);
+            return;
+        }
+
+        data.resize(payload_size);
         file.read(data.data(), static_cast<std::streamsize>(data.size()));
-    } catch (const std::ios_base::failure& e) {
+    } catch (const std::ios_base::failure&) {
+        create(0, nullptr);
+        return;
+    } catch (const std::bad_alloc&) {
+        create(0, nullptr);
+        return;
+    } catch (const std::length_error&) {
         create(0, nullptr);
         return;
     }
+
     create(data.size(), data.empty() ? nullptr : data.data());
 }
 
@@ -880,25 +904,33 @@ void Device::SaveStaticPipelineCache() const {
     if (filename.empty()) {
         return;
     }
+
     size_t size = 0;
     std::vector<char> data;
     if (static_pipeline_cache.Read(&size, nullptr) != VK_SUCCESS || size == 0) {
         return;
     }
+
     data.resize(size);
     if (static_pipeline_cache.Read(&size, data.data()) != VK_SUCCESS) {
         return;
     }
+
     try {
         std::ofstream file(filename, std::ios::binary | std::ios::trunc);
-        file.exceptions(std::ofstream::failbit);
+        file.exceptions(std::ofstream::failbit | std::ofstream::badbit);
+
         if (!file.is_open()) {
             return;
         }
+
         file.write(STATIC_CACHE_MAGIC_NUMBER.data(), STATIC_CACHE_MAGIC_NUMBER.size())
             .write(reinterpret_cast<const char*>(&STATIC_CACHE_VERSION),
                    sizeof(STATIC_CACHE_VERSION))
             .write(data.data(), static_cast<std::streamsize>(size));
+
+        file.flush();
+        file.close();
     } catch (const std::ios_base::failure& e) {
         LOG_ERROR(Render_Vulkan, "Failed to save static pipeline cache: {}", e.what());
         if (!Common::FS::RemoveFile(filename)) {
