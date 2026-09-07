@@ -854,7 +854,12 @@ void Device::LoadStaticPipelineCache() {
 
         file.exceptions(std::ifstream::failbit | std::ifstream::badbit);
 
-        const size_t total = static_cast<size_t>(file.tellg());
+        const auto end = file.tellg();
+        if (end < 0) {
+            create(0, nullptr);
+            return;
+        }
+        const size_t total = static_cast<size_t>(end);
         file.seekg(0, std::ios::beg);
 
         std::array<char, 8> magic{};
@@ -917,16 +922,13 @@ void Device::SaveStaticPipelineCache() const {
     }
 
     try {
-        std::ofstream file(filename, std::ios::binary | std::ios::trunc);
+        std::ofstream file;
         file.exceptions(std::ofstream::failbit | std::ofstream::badbit);
-
-        if (!file.is_open()) {
-            return;
-        }
+        file.open(filename, std::ios::binary | std::ios::trunc);
 
         file.write(STATIC_CACHE_MAGIC_NUMBER.data(), STATIC_CACHE_MAGIC_NUMBER.size())
             .write(reinterpret_cast<const char*>(&STATIC_CACHE_VERSION),
-                   sizeof(STATIC_CACHE_VERSION))
+                sizeof(STATIC_CACHE_VERSION))
             .write(data.data(), static_cast<std::streamsize>(size));
 
         file.flush();
