@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // SPDX-FileCopyrightText: Copyright 2019 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -297,7 +300,7 @@ ComputePass::ComputePass(const Device& device_, DescriptorPool& descriptor_pool,
         .layout = *layout,
         .basePipelineHandle = nullptr,
         .basePipelineIndex = 0,
-    });
+    }, device.StaticPipelineCache());
 }
 
 ComputePass::~ComputePass() = default;
@@ -666,7 +669,7 @@ MSAACopyPass::MSAACopyPass(const Device& device_, Scheduler& scheduler_,
             .layout = *layout,
             .basePipelineHandle = nullptr,
             .basePipelineIndex = 0,
-        });
+        }, device.StaticPipelineCache());
     };
     make_msaa_pipeline(0, CONVERT_NON_MSAA_TO_MSAA_COMP_SPV);
     make_msaa_pipeline(1, CONVERT_MSAA_TO_NON_MSAA_COMP_SPV);
