@@ -1,6 +1,3 @@
-// SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 // SPDX-FileCopyrightText: Copyright 2024 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -491,7 +488,7 @@ static vk::Pipeline CreateWrappedPipelineImpl(
         .subpass = 0,
         .basePipelineHandle = 0,
         .basePipelineIndex = 0,
-    }, device.StaticPipelineCache());
+    });
 }
 
 vk::Pipeline CreateWrappedPipeline(const Device& device, vk::RenderPass& renderpass,
