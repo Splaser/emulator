@@ -21,6 +21,7 @@ struct HostTranslateInfo {
     u32 max_per_stage_descriptor_storage_images{1024}; ///< Maximum storage descriptors per stage
     u32 max_per_stage_resources{4096};                 ///< Maximum resources per stage
     u32 max_descriptor_set_sampled_images{1024};       ///< Maximum sampled descriptors per set
+    u32 max_descriptor_set_storage_images{1024};       ///< Maximum storage descriptors per set
     bool support_geometry_shader_passthrough{}; ///< True when the device supports geometry
                                                 ///< passthrough shaders
     bool support_conditional_barrier{}; ///< True when the device supports barriers in conditional

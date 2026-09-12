@@ -325,6 +325,14 @@ public:
         return properties.properties.limits.maxDescriptorSetSampledImages;
     }
 
+    u32 GetMaxDescriptorSetStorageImages() const {
+        return properties.properties.limits.maxDescriptorSetStorageImages;
+    }
+
+    u32 GetMaxDescriptorSetUpdateAfterBindStorageImages() const {
+        return properties.descriptor_indexing.maxDescriptorSetUpdateAfterBindStorageImages;
+    }
+
     /// Returns the maximum size for shared memory.
     u32 GetMaxComputeSharedMemorySize() const {
         return properties.properties.limits.maxComputeSharedMemorySize;
