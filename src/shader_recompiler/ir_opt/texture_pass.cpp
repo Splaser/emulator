@@ -161,23 +161,41 @@ u32 StaticDescriptorCount(const DescriptorContainer& descriptors) {
     return count;
 }
 
-u32 DynamicResourceCap(const Info& info, const HostTranslateInfo& host_info, u32 dynamic_arrays) {
+u32 ActiveFragmentColorAttachmentCount(const IR::Program& program) {
+    if (program.stage != Stage::Fragment) {
+        return 0;
+    }
+    std::array<bool, 8> active_attachments{};
+    for (const IR::Block* const block : program.post_order_blocks) {
+        for (const IR::Inst& inst : block->Instructions()) {
+            if (inst.GetOpcode() == IR::Opcode::SetFragColor) {
+                active_attachments.at(inst.Arg(0).U32()) = true;
+            }
+        }
+    }
+    return static_cast<u32>(std::ranges::count(active_attachments, true));
+}
+
+u32 DynamicResourceCap(const IR::Program& program, const HostTranslateInfo& host_info,
+                       u32 dynamic_arrays) {
     const u32 resource_limit{std::max(1U, host_info.max_per_stage_resources)};
     if (dynamic_arrays == 0) {
         return std::min(DESCRIPTOR_MAX_COUNT, resource_limit);
     }
+    const Info& info{program.info};
     const u32 resource_static_count{
         NumDescriptors(info.constant_buffer_descriptors) +
         NumDescriptors(info.storage_buffers_descriptors) +
         StaticDescriptorCount(info.texture_buffer_descriptors) +
         StaticDescriptorCount(info.texture_descriptors) +
         StaticDescriptorCount(info.image_buffer_descriptors) +
-        StaticDescriptorCount(info.image_descriptors)};
+        StaticDescriptorCount(info.image_descriptors) + ActiveFragmentColorAttachmentCount(program)};
     return SaturatingSub(resource_limit, resource_static_count) / dynamic_arrays;
 }
 
-u32 DynamicSampledTextureCap(const Info& info, const HostTranslateInfo& host_info,
+u32 DynamicSampledTextureCap(const IR::Program& program, const HostTranslateInfo& host_info,
                              u32 sampled_dynamic_arrays, u32 total_dynamic_arrays) {
+    const Info& info{program.info};
     const u32 sampled_limit{std::max(1U, std::min(host_info.max_per_stage_descriptor_sampled_images,
                                                   host_info.max_descriptor_set_sampled_images))};
     const u32 sampled_static_count{StaticDescriptorCount(info.texture_buffer_descriptors) +
@@ -186,20 +204,23 @@ u32 DynamicSampledTextureCap(const Info& info, const HostTranslateInfo& host_inf
     const u32 sampled_cap{sampled_dynamic_arrays == 0
                               ? sampled_limit
                               : sampled_budget / sampled_dynamic_arrays};
-    const u32 resource_cap{DynamicResourceCap(info, host_info, total_dynamic_arrays)};
+    const u32 resource_cap{DynamicResourceCap(program, host_info, total_dynamic_arrays)};
     return std::min(sampled_cap, resource_cap);
 }
 
-u32 DynamicStorageTextureCap(const Info& info, const HostTranslateInfo& host_info,
+u32 DynamicStorageTextureCap(const IR::Program& program, const HostTranslateInfo& host_info,
                              u32 storage_dynamic_arrays, u32 total_dynamic_arrays) {
-    const u32 storage_limit{std::max(1U, host_info.max_per_stage_descriptor_storage_images)};
+    const Info& info{program.info};
+    const u32 storage_limit{std::max(
+        1U, std::min(host_info.max_per_stage_descriptor_storage_images,
+                     host_info.max_descriptor_set_storage_images))};
     const u32 storage_static_count{StaticDescriptorCount(info.image_buffer_descriptors) +
                                    StaticDescriptorCount(info.image_descriptors)};
     const u32 storage_budget{SaturatingSub(storage_limit, storage_static_count)};
     const u32 storage_cap{storage_dynamic_arrays == 0
                               ? storage_limit
                               : storage_budget / storage_dynamic_arrays};
-    const u32 resource_cap{DynamicResourceCap(info, host_info, total_dynamic_arrays)};
+    const u32 resource_cap{DynamicResourceCap(program, host_info, total_dynamic_arrays)};
     return std::min(storage_cap, resource_cap);
 }
 
@@ -901,15 +922,53 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
         DynamicDescriptorArrayCount(program.info.image_buffer_descriptors) +
         DynamicDescriptorArrayCount(program.info.image_descriptors)};
     const u32 total_dynamic_arrays{sampled_dynamic_arrays + storage_dynamic_arrays};
-    const u32 sampled_dynamic_cap{DynamicSampledTextureCap(
-        program.info, host_info, sampled_dynamic_arrays, total_dynamic_arrays)};
-    const u32 storage_dynamic_cap{DynamicStorageTextureCap(
-        program.info, host_info, storage_dynamic_arrays, total_dynamic_arrays)};
+    const u32 sampled_dynamic_cap{
+        DynamicSampledTextureCap(program, host_info, sampled_dynamic_arrays, total_dynamic_arrays)};
+    const u32 storage_dynamic_cap{
+        DynamicStorageTextureCap(program, host_info, storage_dynamic_arrays, total_dynamic_arrays)};
     if ((sampled_dynamic_arrays != 0 && sampled_dynamic_cap == 0) ||
         (storage_dynamic_arrays != 0 && storage_dynamic_cap == 0)) {
         throw RuntimeError("Descriptor limits leave no dynamic texture capacity");
     }
     ClampDynamicTextureDescriptors(program, to_replace, sampled_dynamic_cap, storage_dynamic_cap);
+}
+
+void ClampDynamicStorageTextureDescriptors(IR::Program& program, u32 max_count) {
+    auto clamp_descriptors = [max_count](auto& descriptors) {
+        boost::container::small_vector<u32, 12> old_counts;
+        old_counts.reserve(descriptors.size());
+        for (auto& desc : descriptors) {
+            old_counts.push_back(desc.count);
+            if (desc.count > 1) {
+                desc.count = std::min(desc.count, max_count);
+            }
+        }
+        return old_counts;
+    };
+    const auto old_image_buffer_counts = clamp_descriptors(program.info.image_buffer_descriptors);
+    const auto old_image_counts = clamp_descriptors(program.info.image_descriptors);
+
+    for (IR::Block* const block : program.post_order_blocks) {
+        for (IR::Inst& inst : block->Instructions()) {
+            if (!IsStorageImageOpcode(inst.GetOpcode())) {
+                continue;
+            }
+            const auto flags{inst.Flags<IR::TextureInstInfo>()};
+            const u32 index{flags.descriptor_index};
+            const bool is_buffer{flags.type == TextureType::Buffer};
+            const auto& old_counts{is_buffer ? old_image_buffer_counts : old_image_counts};
+            const u32 new_count{is_buffer ? program.info.image_buffer_descriptors.at(index).count
+                                          : program.info.image_descriptors.at(index).count};
+            if (old_counts.at(index) <= new_count) {
+                continue;
+            }
+            IR::Inst* const clamp{inst.Arg(0).InstRecursive()};
+            if (!clamp || clamp->GetOpcode() != IR::Opcode::UMin32) {
+                throw LogicError("Dynamic storage texture index is missing its bounds clamp");
+            }
+            clamp->SetArg(1, IR::Value{new_count - 1});
+        }
+    }
 }
 
 void JoinTextureInfo(Info& base, Info& source) {
