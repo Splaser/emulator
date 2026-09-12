@@ -1146,8 +1146,12 @@ ImageViewId TextureCache<P>::CreateImageView(const TICEntry& config) {
         const PixelFormat depth_format = info.format == PixelFormat::R32_FLOAT
                                              ? PixelFormat::D32_FLOAT
                                              : PixelFormat::D16_UNORM;
+        ImageInfo depth_info = info;
+        depth_info.format = depth_format;
         std::optional<DAddr> cpu_addr = gpu_memory->GpuToCpuAddress(image_gpu_addr);
         if (cpu_addr) {
+            const bool broken_views = runtime.HasBrokenTextureViewFormats();
+            const bool native_bgr = runtime.HasNativeBgr();
             ImageId depth_image_id;
             ForEachImageInRegion(
                 *cpu_addr, CalculateGuestSizeInBytes(info),
@@ -1156,6 +1160,8 @@ ImageViewId TextureCache<P>::CreateImageView(const TICEntry& config) {
                         existing.gpu_addr == image_gpu_addr &&
                         existing.info.size.width == info.size.width &&
                         existing.info.size.height == info.size.height &&
+                        IsSubresource(depth_info, existing, image_gpu_addr, RelaxedOptions{},
+                                      broken_views, native_bgr) &&
                         !True(existing.flags & ImageFlagBits::Remapped)) {
                         depth_image_id = existing_id;
                         return true;

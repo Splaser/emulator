@@ -128,6 +128,16 @@ constexpr VkBorderColor ConvertBorderColor(const std::array<float, 4>& color) {
     return usage;
 }
 
+[[nodiscard]] u32 PhysicalMipLevels(const ImageInfo& info) {
+    const auto [samples_x, samples_y] = VideoCommon::SamplesLog2(info.num_samples);
+    const u32 width = info.size.width >> samples_x;
+    const u32 height = info.size.height >> samples_y;
+    const u32 depth = info.size.depth;
+    const u32 max_dim = std::max({width, height, depth});
+    const u32 max_mips = max_dim > 0 ? static_cast<u32>(std::floor(std::log2(max_dim))) + 1 : 1;
+    return std::min(static_cast<u32>(info.resources.levels), max_mips);
+}
+
 [[nodiscard]] VkImageCreateInfo MakeImageCreateInfo(const Device& device, const ImageInfo& info) {
     const auto format_info =
         MaxwellToVK::SurfaceFormat(device, FormatType::Optimal, false, info.format);
@@ -143,9 +153,6 @@ constexpr VkBorderColor ConvertBorderColor(const std::array<float, 4>& color) {
     const u32 width = info.size.width >> samples_x;
     const u32 height = info.size.height >> samples_y;
     const u32 depth = info.size.depth;
-    const u32 max_dim = std::max({width, height, depth});
-    const u32 max_mips = max_dim > 0 ? static_cast<u32>(std::floor(std::log2(max_dim))) + 1 : 1;
-    const u32 mip_levels = std::min(static_cast<u32>(info.resources.levels), max_mips);
     return VkImageCreateInfo{
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext = nullptr,
@@ -157,7 +164,7 @@ constexpr VkBorderColor ConvertBorderColor(const std::array<float, 4>& color) {
             .height = height,
             .depth = depth,
         },
-        .mipLevels = mip_levels,
+        .mipLevels = PhysicalMipLevels(info),
         .arrayLayers = static_cast<u32>(info.resources.layers),
         .samples = ConvertSampleCount(info.num_samples),
         .tiling = VK_IMAGE_TILING_OPTIMAL,
@@ -748,6 +755,7 @@ void BlitScale(Scheduler& scheduler, VkImage src_image, VkImage dst_image, const
                bool up_scaling = true) {
     const bool is_2d = info.type == ImageType::e2D;
     const auto resources = info.resources;
+    const u32 mip_levels = PhysicalMipLevels(info);
     const VkExtent2D extent{
         .width = info.size.width,
         .height = info.size.height,
@@ -758,8 +766,8 @@ void BlitScale(Scheduler& scheduler, VkImage src_image, VkImage dst_image, const
     const VkFilter vk_filter = is_bilinear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
 
     scheduler.RequestOutsideRenderPassOperationContext();
-    scheduler.Record([dst_image, src_image, extent, resources, aspect_mask, resolution, is_2d,
-                      vk_filter, up_scaling](vk::CommandBuffer cmdbuf) {
+    scheduler.Record([dst_image, src_image, extent, resources, mip_levels, aspect_mask, resolution,
+                      is_2d, vk_filter, up_scaling](vk::CommandBuffer cmdbuf) {
         const VkOffset2D src_size{
             .x = static_cast<s32>(up_scaling ? extent.width : resolution.ScaleUp(extent.width)),
             .y = static_cast<s32>(is_2d && up_scaling ? extent.height
@@ -771,12 +779,12 @@ void BlitScale(Scheduler& scheduler, VkImage src_image, VkImage dst_image, const
                                                       : extent.height),
         };
         boost::container::small_vector<VkImageBlit, 4> regions;
-        regions.reserve(resources.levels);
-        for (s32 level = 0; level < resources.levels; level++) {
+        regions.reserve(mip_levels);
+        for (u32 level = 0; level < mip_levels; level++) {
             regions.push_back({
                 .srcSubresource{
                     .aspectMask = aspect_mask,
-                    .mipLevel = static_cast<u32>(level),
+                    .mipLevel = level,
                     .baseArrayLayer = 0,
                     .layerCount = static_cast<u32>(resources.layers),
                 },
@@ -794,7 +802,7 @@ void BlitScale(Scheduler& scheduler, VkImage src_image, VkImage dst_image, const
                 },
                 .dstSubresource{
                     .aspectMask = aspect_mask,
-                    .mipLevel = static_cast<u32>(level),
+                    .mipLevel = level,
                     .baseArrayLayer = 0,
                     .layerCount = static_cast<u32>(resources.layers),
                 },
@@ -1487,12 +1495,13 @@ Image::Image(TextureCacheRuntime& runtime_, const ImageInfo& info_, GPUVAddr gpu
         original_image.SetObjectNameEXT(VideoCommon::Name(*this).c_str());
     }
     current_image = *original_image;
-    storage_image_views.resize(info.resources.levels);
+    const u32 mip_levels = PhysicalMipLevels(info);
+    storage_image_views.resize(mip_levels);
     if (IsPixelFormatASTC(info.format) && !runtime->device.IsOptimalAstcSupported() &&
         Settings::values.astc_recompression.GetValue() ==
             Settings::AstcRecompression::Uncompressed) {
         const auto& device = runtime->device.GetLogical();
-        for (s32 level = 0; level < info.resources.levels; ++level) {
+        for (u32 level = 0; level < mip_levels; ++level) {
             storage_image_views[level] =
                 MakeStorageView(device, level, *original_image, VK_FORMAT_A8B8G8R8_UNORM_PACK32);
         }
@@ -1818,14 +1827,15 @@ ImageView::ImageView(TextureCacheRuntime& runtime, const VideoCommon::ImageViewI
         .a = ComponentSwizzle(swizzle[3]),
     };
     view_aspect_mask = aspect_mask;
-    if (device->ApiVersion() >= VK_API_VERSION_1_3) {
+    if (device->IsKhrFormatFeatureFlags2Supported()) {
         const VkFormatProperties3 properties3 =
             device->GetPhysical().GetFormatProperties3(format_info.format);
         supports_depth_comparison =
             (properties3.optimalTilingFeatures &
              VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_DEPTH_COMPARISON_BIT) != 0;
     } else {
-        supports_depth_comparison = true;
+        // The depth-comparison capability has no VkFormatFeatureFlags (32-bit) equivalent.
+        supports_depth_comparison = false;
     }
     const auto image_format_info =
         MaxwellToVK::SurfaceFormat(*device, FormatType::Optimal, false, image.info.format);
