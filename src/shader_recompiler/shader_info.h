@@ -181,6 +181,7 @@ struct StorageBufferDescriptor {
 };
 
 struct TextureBufferDescriptor {
+    bool is_integer;
     bool has_secondary;
     u32 cbuf_index;
     u32 cbuf_offset;

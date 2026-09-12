@@ -434,6 +434,10 @@ PipelineCache::PipelineCache(Tegra::MaxwellDeviceMemoryManager& device_memory_,
         .support_viewport_index_layer = device.IsExtShaderViewportIndexLayerSupported(),
         .min_ssbo_alignment = static_cast<u32>(device.GetStorageBufferAlignment()),
         .max_per_stage_descriptor_sampled_images = device.GetMaxPerStageDescriptorSampledImages(),
+        .max_per_stage_descriptor_storage_images =
+            device.IsDescriptorIndexingSupported()
+                ? device.GetMaxPerStageDescriptorUpdateAfterBindStorageImages()
+                : device.GetMaxPerStageDescriptorStorageImages(),
         .max_per_stage_resources = device.GetMaxPerStageResources(),
         .max_descriptor_set_sampled_images = device.GetMaxDescriptorSetSampledImages(),
         .support_geometry_shader_passthrough = device.IsNvGeometryShaderPassthroughSupported(),

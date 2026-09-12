@@ -249,14 +249,14 @@ Id TextureImage(EmitContext& ctx, IR::TextureInstInfo info, const IR::Value& ind
             const bool is_non_uniform{
                 MarkNonUniform(ctx, idx, index, NonUniformKind::UniformTexelBuffer)};
             const Id ptr{ctx.OpAccessChain(def.pointer_type, def.id, idx)};
-            const Id object{ctx.OpLoad(ctx.image_buffer_type, ptr)};
+            const Id object{ctx.OpLoad(def.image_type, ptr)};
             if (is_non_uniform) {
                 DecorateNonUniform(ctx, ptr);
                 DecorateNonUniform(ctx, object);
             }
             return object;
         }
-        return ctx.OpLoad(ctx.image_buffer_type, def.id);
+        return ctx.OpLoad(def.image_type, def.id);
     } else {
         const TextureDefinition& def{ctx.textures.at(info.descriptor_index)};
         if (def.count > 1) {
@@ -320,7 +320,7 @@ bool IsTextureMsaa(EmitContext& ctx, const IR::TextureInstInfo& info) {
 
 bool IsTextureInteger(EmitContext& ctx, const IR::TextureInstInfo& info) {
     if (info.type == TextureType::Buffer) {
-        return false;
+        return ctx.texture_buffers.at(info.descriptor_index).is_integer;
     }
     return ctx.textures.at(info.descriptor_index).is_integer;
 }
