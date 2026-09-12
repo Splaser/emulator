@@ -7,6 +7,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -62,6 +63,47 @@ using VideoCommon::GraphicsEnvironment;
 constexpr u32 TRANSFERABLE_CACHE_VERSION = 18;
 constexpr u32 VULKAN_PIPELINE_CACHE_VERSION = 15;
 constexpr std::array<char, 8> VULKAN_CACHE_MAGIC_NUMBER{'y', 'u', 'z', 'u', 'v', 'k', 'c', 'h'};
+
+constexpr u32 AggregateDynamicDescriptorCap(std::span<const u32> counts, u64 fixed_descriptors,
+                                            u64 descriptor_limit) {
+    if (counts.empty() || fixed_descriptors + counts.size() > descriptor_limit) {
+        return 0;
+    }
+    u64 actual_descriptors{fixed_descriptors};
+    u32 largest_count{};
+    for (const u32 count : counts) {
+        actual_descriptors += count;
+        largest_count = std::max(largest_count, count);
+    }
+    if (actual_descriptors <= descriptor_limit) {
+        return largest_count;
+    }
+
+    u32 lower_bound{1};
+    u32 upper_bound{largest_count};
+    while (lower_bound < upper_bound) {
+        const u32 candidate{lower_bound + (upper_bound - lower_bound + 1) / 2};
+        u64 candidate_descriptors{fixed_descriptors};
+        for (const u32 count : counts) {
+            candidate_descriptors += std::min(count, candidate);
+        }
+        if (candidate_descriptors <= descriptor_limit) {
+            lower_bound = candidate;
+        } else {
+            upper_bound = candidate - 1;
+        }
+    }
+    return lower_bound;
+}
+
+static_assert([] {
+    constexpr std::array counts{2U, 10U};
+    return AggregateDynamicDescriptorCap(counts, 3, 20) == 10;
+}(), "Unequal dynamic arrays within the limit must remain unchanged");
+static_assert([] {
+    constexpr std::array counts{2U, 10U};
+    return AggregateDynamicDescriptorCap(counts, 3, 10) == 5;
+}(), "Unequal dynamic arrays above the limit must use the largest valid cap");
 
 template <typename Container>
 auto MakeSpan(Container& container) {
@@ -779,8 +821,8 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         }
     }
     boost::container::small_vector<Shader::IR::Program*, 5> active_programs;
+    boost::container::small_vector<u32, 12> dynamic_storage_counts;
     u64 fixed_storage_descriptors{};
-    u32 dynamic_storage_arrays{};
     for (size_t index = uses_vertex_a && uses_vertex_b ? 1 : 0;
          index < Tegra::Engines::Maxwell3D::Regs::MaxShaderProgram; ++index) {
         const bool is_emulated_stage =
@@ -794,7 +836,7 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         const auto account_storage = [&](const auto& descriptors) {
             for (const auto& desc : descriptors) {
                 if (desc.count > 1) {
-                    ++dynamic_storage_arrays;
+                    dynamic_storage_counts.push_back(desc.count);
                 } else {
                     fixed_storage_descriptors += desc.count;
                 }
@@ -804,16 +846,21 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         account_storage(program.info.image_descriptors);
     }
     const u64 storage_set_limit{host_info.max_descriptor_set_storage_images};
-    const u64 minimum_storage_descriptors{fixed_storage_descriptors + dynamic_storage_arrays};
+    const u64 minimum_storage_descriptors{fixed_storage_descriptors +
+                                          dynamic_storage_counts.size()};
     if (minimum_storage_descriptors > storage_set_limit) {
         LOG_ERROR(Render_Vulkan,
                   "Graphics pipeline requires at least {} storage image descriptors, limit is {}",
                   minimum_storage_descriptors, storage_set_limit);
         return nullptr;
     }
-    if (dynamic_storage_arrays != 0) {
-        const u32 aggregate_dynamic_cap{static_cast<u32>(
-            (storage_set_limit - fixed_storage_descriptors) / dynamic_storage_arrays)};
+    u64 actual_storage_descriptors{fixed_storage_descriptors};
+    for (const u32 count : dynamic_storage_counts) {
+        actual_storage_descriptors += count;
+    }
+    if (actual_storage_descriptors > storage_set_limit) {
+        const u32 aggregate_dynamic_cap{AggregateDynamicDescriptorCap(
+            dynamic_storage_counts, fixed_storage_descriptors, storage_set_limit)};
         for (Shader::IR::Program* const program : active_programs) {
             Shader::Optimization::ClampDynamicStorageTextureDescriptors(
                 *program, aggregate_dynamic_cap);
