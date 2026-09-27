@@ -703,8 +703,7 @@ struct Values {
     Setting<bool> dump_shaders{
         linkage, false, "dump_shaders", Category::DebuggingGraphics, Specialization::Default,
         false};
-    Setting<bool> dump_macros{
-        linkage, false, "dump_macros", Category::DebuggingGraphics, Specialization::Default, false};
+    Setting<bool> dump_macros{linkage, false, "dump_macros", Category::DebuggingGraphics};
     Setting<bool> enable_fs_access_log{linkage, false, "enable_fs_access_log", Category::Debugging};
     Setting<bool> reporting_services{
         linkage, false, "reporting_services", Category::Debugging, Specialization::Default, false};

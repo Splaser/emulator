@@ -190,6 +190,7 @@ struct MacroInterpreterImpl final {
     bool carry_flag = false;
     bool execution_faulted = false;
     bool nested_macro_warning_reported = false;
+    bool large_render_target_dumped = false;
 };
 struct DynamicCachedMacro {
     virtual ~DynamicCachedMacro() = default;

@@ -294,30 +294,32 @@ void Maxwell3D::ConsumeSinkImpl() {
     if (control == Regs::ShadowRamControl::Track || control == Regs::ShadowRamControl::TrackWithFilter) {
         for (auto [method, value] : method_sink) {
             shadow_state.reg_array[method] = value;
-            ProcessDirtyRegisters(method, value);
+            ProcessDirtyRegisters(method, value, true);
         }
     } else if (control == Regs::ShadowRamControl::Replay) {
         for (auto [method, value] : method_sink)
-            ProcessDirtyRegisters(method, shadow_state.reg_array[method]);
+            ProcessDirtyRegisters(method, shadow_state.reg_array[method], true);
     } else {
         for (auto [method, value] : method_sink)
-            ProcessDirtyRegisters(method, value);
+            ProcessDirtyRegisters(method, value, true);
     }
     method_sink.clear();
 }
 
-void Maxwell3D::ProcessDirtyRegisters(u32 method, u32 argument) {
+void Maxwell3D::ProcessDirtyRegisters(u32 method, u32 argument, bool from_sink) {
     constexpr u32 rt_start = MAXWELL3D_REG_INDEX(rt);
     constexpr u32 rt_words = sizeof(Regs::RenderTargetConfig) / sizeof(u32);
     constexpr u32 dimension_word = offsetof(Regs::RenderTargetConfig, array_pitch) / sizeof(u32) - 1;
     if (method >= rt_start && method < rt_start + Regs::NumRenderTargets * rt_words &&
         (method - rt_start) % rt_words == dimension_word &&
-        regs.reg_array[method] != argument && (argument & 0xffffU) > 16) {
+        regs.reg_array[method] != argument &&
+        ((argument & 0xffffU) > 16 || (regs.reg_array[method] & 0xffffU) > 16)) {
         LOG_WARNING(HW_GPU,
                     "Large render target dimension write: rt={}, method=0x{:x}, old=0x{:x}, "
-                    "value=0x{:x}, shadow_mode={}",
+                    "value=0x{:x}, shadow_mode={}, source={}",
                     (method - rt_start) / rt_words, method * sizeof(u32), regs.reg_array[method],
-                    argument, static_cast<u32>(shadow_state.shadow_ram_control));
+                    argument, static_cast<u32>(shadow_state.shadow_ram_control),
+                    from_sink ? "command_buffer" : "call_method");
     }
     regs.reg_array[method] = argument;
     for (const auto& table : dirty.tables)
@@ -329,6 +331,13 @@ void Maxwell3D::ProcessMethodCall(u32 method, u32 argument, u32 nonshadow_argume
     case MAXWELL3D_REG_INDEX(wait_for_idle):
         return rasterizer->WaitForIdle();
     case MAXWELL3D_REG_INDEX(shadow_ram_control):
+        if (regs.rt[0].depth > 16 || shadow_state.rt[0].depth > 16) {
+            LOG_WARNING(HW_GPU,
+                        "Large RT shadow mode change: old={}, new={}, rt0=0x{:x}, shadow_rt0=0x{:x}",
+                        static_cast<u32>(shadow_state.shadow_ram_control), nonshadow_argument,
+                        regs.reg_array[MAXWELL3D_REG_INDEX(rt) + 6],
+                        shadow_state.reg_array[MAXWELL3D_REG_INDEX(rt) + 6]);
+        }
         shadow_state.shadow_ram_control = Regs::ShadowRamControl(nonshadow_argument);
         return;
     case MAXWELL3D_REG_INDEX(load_mme.instruction_ptr):
