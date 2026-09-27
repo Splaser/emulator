@@ -307,6 +307,18 @@ void Maxwell3D::ConsumeSinkImpl() {
 }
 
 void Maxwell3D::ProcessDirtyRegisters(u32 method, u32 argument) {
+    constexpr u32 rt_start = MAXWELL3D_REG_INDEX(rt);
+    constexpr u32 rt_words = sizeof(Regs::RenderTargetConfig) / sizeof(u32);
+    constexpr u32 dimension_word = offsetof(Regs::RenderTargetConfig, array_pitch) / sizeof(u32) - 1;
+    if (method >= rt_start && method < rt_start + Regs::NumRenderTargets * rt_words &&
+        (method - rt_start) % rt_words == dimension_word &&
+        regs.reg_array[method] != argument && (argument & 0xffffU) > 16) {
+        LOG_WARNING(HW_GPU,
+                    "Large render target dimension write: rt={}, method=0x{:x}, old=0x{:x}, "
+                    "value=0x{:x}, shadow_mode={}",
+                    (method - rt_start) / rt_words, method * sizeof(u32), regs.reg_array[method],
+                    argument, static_cast<u32>(shadow_state.shadow_ram_control));
+    }
     regs.reg_array[method] = argument;
     for (const auto& table : dirty.tables)
         dirty.flags[table[method]] = true;
@@ -416,6 +428,16 @@ void Maxwell3D::CallMethod(u32 method, u32 method_argument, bool is_last_call) {
     ASSERT(method < Regs::NUM_REGS && "Invalid Maxwell3D register, increase the size of the Regs structure");
 
     const u32 argument = ProcessShadowRam(method, method_argument);
+    constexpr u32 rt_start = MAXWELL3D_REG_INDEX(rt);
+    constexpr u32 rt_words = sizeof(Regs::RenderTargetConfig) / sizeof(u32);
+    constexpr u32 dimension_word = offsetof(Regs::RenderTargetConfig, array_pitch) / sizeof(u32) - 1;
+    if (method >= rt_start && method < rt_start + Regs::NumRenderTargets * rt_words &&
+        (method - rt_start) % rt_words == dimension_word && argument != method_argument &&
+        (argument & 0xffffU) > 16) {
+        LOG_WARNING(HW_GPU,
+                    "Large render target shadow replay: rt={}, input=0x{:x}, effective=0x{:x}",
+                    (method - rt_start) / rt_words, method_argument, argument);
+    }
     ProcessDirtyRegisters(method, argument);
     ProcessMethodCall(method, argument, method_argument, is_last_call);
 }

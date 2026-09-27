@@ -1883,6 +1883,27 @@ ImageViewId TextureCache<P>::FindColorBuffer(size_t index) {
         return ImageViewId{};
     }
     const ImageInfo info(regs.rt[index], regs.anti_alias_samples_mode);
+    const u64 layered_guest_bytes = u64{info.layer_stride} * info.resources.layers;
+    if (layered_guest_bytes >= 256_MiB) {
+        const u32 rt_word = static_cast<u32>(
+            (offsetof(Tegra::Engines::Maxwell3D::Regs, rt) + index * sizeof(rt)) / sizeof(u32));
+        LOG_WARNING(HW_GPU,
+                    "Large color render target: rt={}, gpu=0x{:x}, count={}, "
+                    "mapping=[{},{},{},{},{},{},{},{}], "
+                    "raw=[{:08x},{:08x},{:08x},{:08x},{:08x},{:08x},{:08x},{:08x},{:08x},{:08x}], "
+                    "guest_bytes64={}, guest_bytes32={}, fully_mapped={}",
+                    index, gpu_addr, regs.rt_control.count.Value(),
+                    regs.rt_control.Map(0), regs.rt_control.Map(1), regs.rt_control.Map(2),
+                    regs.rt_control.Map(3), regs.rt_control.Map(4), regs.rt_control.Map(5),
+                    regs.rt_control.Map(6), regs.rt_control.Map(7),
+                    regs.reg_array[rt_word], regs.reg_array[rt_word + 1],
+                    regs.reg_array[rt_word + 2], regs.reg_array[rt_word + 3],
+                    regs.reg_array[rt_word + 4], regs.reg_array[rt_word + 5],
+                    regs.reg_array[rt_word + 6], regs.reg_array[rt_word + 7],
+                    regs.reg_array[rt_word + 8], regs.reg_array[rt_word + 9],
+                    layered_guest_bytes, CalculateGuestSizeInBytes(info),
+                    gpu_memory->IsFullyMappedRange(gpu_addr, layered_guest_bytes));
+    }
     return FindRenderTargetView(info, gpu_addr);
 }
 
