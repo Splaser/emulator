@@ -15,6 +15,7 @@
 #include "video_core/engines/kepler_compute.h"
 #include "video_core/guest_memory.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
+#include "video_core/texture_cache/image_size.h"
 #include "video_core/texture_cache/image_view_base.h"
 #include "video_core/texture_cache/samples_helper.h"
 #include "video_core/texture_cache/texture_cache_base.h"
@@ -1223,6 +1224,10 @@ ImageId TextureCache<P>::FindOrInsertImage(const ImageInfo& info, GPUVAddr gpu_a
 template <class P>
 ImageId TextureCache<P>::FindImage(const ImageInfo& info, GPUVAddr gpu_addr,
                                    RelaxedOptions options) {
+    const u64 range_end = ImageSize::Add(gpu_addr, CalculateGuestSizeInBytes(info));
+    if (!gpu_memory->IsWithinGPUAddressRange(range_end - 1)) {
+        throw InvalidImageSize{"Image backing range exceeds GPU address space"};
+    }
     std::optional<DAddr> cpu_addr = gpu_memory->GpuToCpuAddress(gpu_addr);
     if (!cpu_addr) {
         cpu_addr = gpu_memory->GpuToCpuAddress(gpu_addr, CalculateGuestSizeInBytes(info));
@@ -1439,13 +1444,18 @@ bool TextureCache<P>::ScaleDown(Image& image) {
 template <class P>
 ImageId TextureCache<P>::InsertImage(const ImageInfo& info, GPUVAddr gpu_addr,
                                      RelaxedOptions options) {
+    const u64 range_end = ImageSize::Add(gpu_addr, CalculateGuestSizeInBytes(info));
+    if (!gpu_memory->IsWithinGPUAddressRange(range_end - 1)) {
+        throw InvalidImageSize{"Image backing range exceeds GPU address space"};
+    }
     std::optional<DAddr> cpu_addr = gpu_memory->GpuToCpuAddress(gpu_addr);
     if (!cpu_addr) {
         const auto size = CalculateGuestSizeInBytes(info);
         cpu_addr = gpu_memory->GpuToCpuAddress(gpu_addr, size);
         if (!cpu_addr) {
             const DAddr fake_addr = ~(1ULL << 40ULL) + virtual_invalid_space;
-            virtual_invalid_space += Common::AlignUp(size, 32);
+            virtual_invalid_space =
+                ImageSize::Add(virtual_invalid_space, ImageSize::AlignUp(size, 32));
             cpu_addr = std::optional<DAddr>(fake_addr);
         }
     }
@@ -1883,7 +1893,7 @@ ImageViewId TextureCache<P>::FindColorBuffer(size_t index) {
         return ImageViewId{};
     }
     const ImageInfo info(regs.rt[index], regs.anti_alias_samples_mode);
-    const u64 layered_guest_bytes = u64{info.layer_stride} * info.resources.layers;
+    const u64 layered_guest_bytes = ImageSize::Multiply(info.layer_stride, info.resources.layers);
     if (layered_guest_bytes >= 256_MiB) {
         const u32 rt_word = static_cast<u32>(
             (offsetof(Tegra::Engines::Maxwell3D::Regs, rt) + index * sizeof(rt)) / sizeof(u32));
@@ -1891,17 +1901,15 @@ ImageViewId TextureCache<P>::FindColorBuffer(size_t index) {
                     "Large color render target: rt={}, gpu=0x{:x}, count={}, "
                     "mapping=[{},{},{},{},{},{},{},{}], "
                     "raw=[{:08x},{:08x},{:08x},{:08x},{:08x},{:08x},{:08x},{:08x},{:08x},{:08x}], "
-                    "guest_bytes64={}, guest_bytes32={}, fully_mapped={}",
-                    index, gpu_addr, regs.rt_control.count.Value(),
-                    regs.rt_control.Map(0), regs.rt_control.Map(1), regs.rt_control.Map(2),
-                    regs.rt_control.Map(3), regs.rt_control.Map(4), regs.rt_control.Map(5),
-                    regs.rt_control.Map(6), regs.rt_control.Map(7),
-                    regs.reg_array[rt_word], regs.reg_array[rt_word + 1],
+                    "guest_bytes64={}, fully_mapped={}",
+                    index, gpu_addr, regs.rt_control.count.Value(), regs.rt_control.Map(0),
+                    regs.rt_control.Map(1), regs.rt_control.Map(2), regs.rt_control.Map(3),
+                    regs.rt_control.Map(4), regs.rt_control.Map(5), regs.rt_control.Map(6),
+                    regs.rt_control.Map(7), regs.reg_array[rt_word], regs.reg_array[rt_word + 1],
                     regs.reg_array[rt_word + 2], regs.reg_array[rt_word + 3],
                     regs.reg_array[rt_word + 4], regs.reg_array[rt_word + 5],
                     regs.reg_array[rt_word + 6], regs.reg_array[rt_word + 7],
-                    regs.reg_array[rt_word + 8], regs.reg_array[rt_word + 9],
-                    layered_guest_bytes, CalculateGuestSizeInBytes(info),
+                    regs.reg_array[rt_word + 8], regs.reg_array[rt_word + 9], layered_guest_bytes,
                     gpu_memory->IsFullyMappedRange(gpu_addr, layered_guest_bytes));
     }
     return FindRenderTargetView(info, gpu_addr);
