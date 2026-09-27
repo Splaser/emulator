@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <exception>
 #include <unordered_set>
 #include <boost/container/small_vector.hpp>
 
@@ -1557,7 +1558,36 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
         }
     }
 
-    const ImageId new_image_id = slot_images.insert(runtime, new_info, gpu_addr, cpu_addr);
+    const auto log_image_allocation = [&](const char* reason) {
+        LOG_WARNING(HW_GPU,
+                    "Image allocation {}: gpu={:#x}, cpu={:#x}, type={}, format={}, samples={}, "
+                    "requested={}x{}x{} layers={} mips={} stride={}, "
+                    "merged={}x{}x{} layers={} mips={} stride={}, guest_bytes={}, "
+                    "upload_bytes={}, overlaps={}, aliases={}, cache_bytes={}",
+                    reason, gpu_addr, cpu_addr, static_cast<u32>(new_info.type),
+                    static_cast<u32>(new_info.format), new_info.num_samples,
+                    info.size.width, info.size.height, info.size.depth, info.resources.layers,
+                    info.resources.levels, info.layer_stride,
+                    new_info.size.width, new_info.size.height, new_info.size.depth,
+                    new_info.resources.layers, new_info.resources.levels, new_info.layer_stride,
+                    CalculateGuestSizeInBytes(new_info), CalculateUnswizzledSizeBytes(new_info),
+                    join_overlap_ids.size(), join_left_aliased_ids.size() +
+                                                join_right_aliased_ids.size(),
+                    total_used_memory);
+    };
+    // Keep this visible with the default Warning filter before a large allocation can fail.
+    if (CalculateGuestSizeInBytes(new_info) >= 256_MiB ||
+        CalculateUnswizzledSizeBytes(new_info) >= 256_MiB) {
+        log_image_allocation("large");
+    }
+    ImageId new_image_id;
+    try {
+        new_image_id = slot_images.insert(runtime, new_info, gpu_addr, cpu_addr);
+    } catch (const std::exception& exception) {
+        log_image_allocation("failed");
+        LOG_ERROR(HW_GPU, "Image construction exception: {}", exception.what());
+        throw;
+    }
     Image& new_image = slot_images[new_image_id];
 
     if (!gpu_memory->IsContinuousRange(new_image.gpu_addr, new_image.guest_size_bytes) &&
