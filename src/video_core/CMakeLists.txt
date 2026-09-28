@@ -334,7 +334,7 @@ else()
     )
 
     # VMA
-    set_source_files_properties(vulkan_common/vma.cpp PROPERTIES COMPILE_OPTIONS "-Wno-conversion;-Wno-unused-variable;-Wno-unused-parameter;-Wno-missing-field-initializers")
+    set_source_files_properties(vulkan_common/vma.cpp PROPERTIES COMPILE_OPTIONS "-Wno-conversion;-Wno-unused-variable;-Wno-unused-parameter;-Wno-unused-function;-Wno-missing-field-initializers")
 endif()
 
 if (ARCHITECTURE_x86_64)
