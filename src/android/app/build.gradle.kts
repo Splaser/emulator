@@ -36,6 +36,7 @@ tasks.configureEach {
  * next 680 years.
  */
 val autoVersion = (((System.currentTimeMillis() / 1000) - 1451606400) / 10).toInt()
+val citronAndroidUseCpm = providers.gradleProperty("citronAndroidUseCpm").orNull?.toBoolean() ?: false
 
 @Suppress("UnstableApiUsage")
 android {
@@ -180,13 +181,16 @@ android {
                     "-DENABLE_OPENSSL=1",
                     "-DBUNDLE_SPEEX=ON",
                     "-DANDROID_ARM_NEON=true", // cryptopp requires Neon to work
-                    "-DCITRON_USE_BUNDLED_VCPKG=ON",
+                    if (citronAndroidUseCpm) "-DCITRON_USE_BUNDLED_VCPKG=OFF" else "-DCITRON_USE_BUNDLED_VCPKG=ON",
                     "-DCITRON_USE_BUNDLED_FFMPEG=ON",
                     "-DCITRON_ENABLE_LTO=ON",
                     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
                     "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
                     "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
                 )
+                if (citronAndroidUseCpm) {
+                    arguments("-DCITRON_USE_CPM=ON")
+                }
 
                 abiFilters("arm64-v8a", "x86_64")
             }

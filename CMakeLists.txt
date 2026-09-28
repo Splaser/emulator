@@ -113,6 +113,9 @@ CMAKE_DEPENDENT_OPTION(CITRON_CRASH_DUMPS "Compile crash dump (Minidump) support
 # vcpkg is supported primarily for native MSVC and Android builds.
 option(CITRON_USE_BUNDLED_VCPKG "Use vcpkg for citron dependencies" "${MSVC}")
 option(CITRON_USE_CPM "Use CPM.cmake to fetch dependencies" OFF)
+if (CITRON_USE_CPM AND CITRON_USE_BUNDLED_VCPKG)
+    message(FATAL_ERROR "CITRON_USE_CPM and CITRON_USE_BUNDLED_VCPKG cannot both be enabled")
+endif()
 option(CITRON_CLANGCL "Build natively on Windows with clang-cl and the MSVC ABI" OFF)
 option(CITRON_CLANGCL_FULL_LTO_LINE_TABLES "Use CodeView line tables for clang-cl full-LTO RelWithDebInfo" OFF)
 
@@ -197,7 +200,7 @@ if (CITRON_USE_BUNDLED_VCPKG)
     endif()
 
     include(${CMAKE_SOURCE_DIR}/externals/vcpkg/scripts/buildsystems/vcpkg.cmake)
-elseif(NOT "$ENV{VCPKG_TOOLCHAIN_FILE}" STREQUAL "")
+elseif(NOT CITRON_USE_CPM AND NOT "$ENV{VCPKG_TOOLCHAIN_FILE}" STREQUAL "")
     option(VCPKG_MANIFEST_MODE "")
     include("$ENV{VCPKG_TOOLCHAIN_FILE}")
 endif()
@@ -384,8 +387,6 @@ endif()
 # find_package() calls so CPM-created targets and Find modules are available.
 # Gated behind an option so MSVC/Linux/macOS/Android builds are unaffected.
 if (CITRON_USE_CPM)
-    # Disable vcpkg manifest auto-install — CPM provides all packages
-    set(VCPKG_MANIFEST_MODE OFF CACHE BOOL "" FORCE)
     set(CPM_SOURCE_CACHE "${CMAKE_BINARY_DIR}/_cpm_cache"
         CACHE PATH "CPM download cache — point to a shared directory on CI")
     option(CPM_USE_LOCAL_PACKAGES "Prefer system find_package over CPM fetch" OFF)
