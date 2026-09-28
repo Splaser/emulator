@@ -54,6 +54,11 @@ endif()
 
 if (NOT TARGET Boost::headers)
     set(BOOST_INCLUDE_LIBRARIES "algorithm;asio;container;context;crc;heap;icl;intrusive;process;range;spirit;test;timer;variant" CACHE STRING "Boost components to build")
+    if (ANDROID)
+        # Android uses the socket-based debugger path and has no wordexp.h.
+        list(REMOVE_ITEM BOOST_INCLUDE_LIBRARIES process)
+        set(BOOST_INCLUDE_LIBRARIES "${BOOST_INCLUDE_LIBRARIES}" CACHE STRING "Boost components to build" FORCE)
+    endif()
     set(BOOST_ENABLE_CMAKE ON CACHE BOOL "Enable Boost CMake")
     set(BUILD_TESTING OFF CACHE BOOL "Disable testing")
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "Disable shared libs")
