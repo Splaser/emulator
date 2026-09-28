@@ -327,7 +327,7 @@ if (ANDROID AND CMAKE_HOST_WIN32)
     # supplies C:/... paths; normalize the root to the same spelling.
     execute_process(COMMAND "${_PERL}" -e "print $^O"
         OUTPUT_VARIABLE _openssl_perl_platform OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if (_openssl_perl_platform STREQUAL "msys")
+    if (_openssl_perl_platform MATCHES "^(msys|cygwin)$")
         string(REPLACE "\\" "/" _openssl_android_ndk_env "${_OPENSSL_ANDROID_NDK}")
         if (_openssl_android_ndk_env MATCHES "^([A-Za-z]):/(.*)$")
             string(TOLOWER "${CMAKE_MATCH_1}" _openssl_ndk_drive)
