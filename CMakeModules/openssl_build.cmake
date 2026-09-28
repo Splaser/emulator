@@ -321,6 +321,26 @@ endif()
 if (NOT _PERL)
     message(FATAL_ERROR "[OpenSSL] Perl is required to build OpenSSL from source")
 endif()
+if (ANDROID AND CMAKE_HOST_WIN32)
+    # OpenSSL's Android Configure compares its NDK root against the path to
+    # clang returned by Perl.  MSYS Perl reports /c/... paths, while CMake
+    # supplies C:/... paths; normalize the root to the same spelling.
+    execute_process(COMMAND "${_PERL}" -e "print $^O"
+        OUTPUT_VARIABLE _openssl_perl_platform OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if (_openssl_perl_platform STREQUAL "msys")
+        string(REPLACE "\\" "/" _openssl_android_ndk_env "${_OPENSSL_ANDROID_NDK}")
+        if (_openssl_android_ndk_env MATCHES "^([A-Za-z]):/(.*)$")
+            string(TOLOWER "${CMAKE_MATCH_1}" _openssl_ndk_drive)
+            set(_openssl_android_ndk_env "/${_openssl_ndk_drive}/${CMAKE_MATCH_2}")
+        endif()
+        get_filename_component(_openssl_perl_dir "${_PERL}" DIRECTORY)
+        if (EXISTS "${_openssl_perl_dir}/make.exe")
+            set(_OPENSSL_BUILD_TOOL "${_openssl_perl_dir}/make.exe")
+        endif()
+    else()
+        set(_openssl_android_ndk_env "${_OPENSSL_ANDROID_NDK}")
+    endif()
+endif()
 
 # OpenSSL's Configure script often generates broken relative paths in the Makefile
 # when the source and build directories are on different drives (e.g. source on C:,
@@ -357,7 +377,11 @@ if (CMAKE_HOST_WIN32)
 endif()
 set(_openssl_env_args "PATH=${_openssl_env_path}")
 if (ANDROID)
-    list(APPEND _openssl_env_args "ANDROID_NDK_ROOT=${_OPENSSL_ANDROID_NDK}")
+    if (CMAKE_HOST_WIN32)
+        list(APPEND _openssl_env_args "ANDROID_NDK_ROOT=${_openssl_android_ndk_env}")
+    else()
+        list(APPEND _openssl_env_args "ANDROID_NDK_ROOT=${_OPENSSL_ANDROID_NDK}")
+    endif()
 endif()
 
 # Determine what we are building for (for the status message).
