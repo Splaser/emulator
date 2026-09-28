@@ -16,7 +16,13 @@
 # OpenSSL uses Perl/Configure, not CMake; this module drives it with
 # execute_process during cmake configure.
 
-set(_OPENSSL_VERSION "3.4.1")
+# Match the Android vcpkg baseline while retaining the existing CPM version
+# for other platforms.
+if (ANDROID)
+    set(_OPENSSL_VERSION "3.6.1")
+else()
+    set(_OPENSSL_VERSION "3.4.1")
+endif()
 
 # ── clang-cl global artifact cache ──────────────────────────────────────────
 # When CLANGCL_OPENSSL_CACHE_DIR is set (by build-clangtron-windows.sh), the
