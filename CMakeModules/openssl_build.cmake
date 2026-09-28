@@ -16,13 +16,7 @@
 # OpenSSL uses Perl/Configure, not CMake; this module drives it with
 # execute_process during cmake configure.
 
-# Match the Android vcpkg baseline while retaining the existing CPM version
-# for other platforms.
-if (ANDROID)
-    set(_OPENSSL_VERSION "3.6.1")
-else()
-    set(_OPENSSL_VERSION "3.4.1")
-endif()
+set(_OPENSSL_VERSION "3.6.1")
 
 # ── clang-cl global artifact cache ──────────────────────────────────────────
 # When CLANGCL_OPENSSL_CACHE_DIR is set (by build-clangtron-windows.sh), the
@@ -240,6 +234,22 @@ if (CMAKE_CROSSCOMPILING)
     unset(OPENSSL_INCLUDE_DIR CACHE)
     unset(OPENSSL_SSL_LIBRARY CACHE)
     unset(OPENSSL_CRYPTO_LIBRARY CACHE)
+endif()
+
+# Existing non-Android installs predate a version marker.  Rebuild them once
+# so changing _OPENSSL_VERSION cannot silently reuse older static archives.
+if (_OPENSSL_LIBDIR AND NOT ANDROID)
+    set(_openssl_version_sentinel "${_OPENSSL_INSTALL}/.citron-openssl-version")
+    set(_openssl_cached_version "")
+    if (EXISTS "${_openssl_version_sentinel}")
+        file(READ "${_openssl_version_sentinel}" _openssl_cached_version)
+        string(STRIP "${_openssl_cached_version}" _openssl_cached_version)
+    endif()
+    if (NOT "${_openssl_cached_version}" STREQUAL "${_OPENSSL_VERSION}")
+        message(STATUS "[OpenSSL] Cached version ${_openssl_cached_version} differs from ${_OPENSSL_VERSION}; rebuilding")
+        file(REMOVE_RECURSE "${_OPENSSL_BUILD_DIR}" "${_OPENSSL_INSTALL}")
+        set(_OPENSSL_LIBDIR "")
+    endif()
 endif()
 
 # A Windows cross OpenSSL archive compiled with host clang contains ELF members,
@@ -538,6 +548,8 @@ if (_OPENSSL_TARGET STREQUAL "VC-WIN64A")
 endif()
 if (ANDROID)
     file(WRITE "${_openssl_android_sentinel}" "${_openssl_android_key}")
+else()
+    file(WRITE "${_OPENSSL_INSTALL}/.citron-openssl-version" "${_OPENSSL_VERSION}")
 endif()
 
 _citron_publish_openssl_imports()
