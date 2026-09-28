@@ -33,7 +33,7 @@ if ((ARCHITECTURE_x86 OR ARCHITECTURE_x86_64) AND NOT TARGET xbyak::xbyak)
 endif()
 
 # Oaknut (also used by Dynarmic, so needs to be added first)
-if (ARCHITECTURE_arm64 AND NOT TARGET merry::oaknut AND NOT (ANDROID AND CITRON_USE_CPM))
+if (ARCHITECTURE_arm64 AND NOT TARGET merry::oaknut)
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/oaknut/CMakeLists.txt")
         add_subdirectory(oaknut)
     endif()
@@ -107,7 +107,7 @@ if (CITRON_USE_EXTERNAL_SDL2 AND NOT TARGET SDL2::SDL2 AND NOT TARGET SDL2-stati
 endif()
 
 # ENet
-if (NOT TARGET enet::enet AND NOT (ANDROID AND CITRON_USE_CPM))
+if (NOT TARGET enet::enet)
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/enet/CMakeLists.txt")
         add_subdirectory(enet)
         target_include_directories(enet INTERFACE ./enet/include)
@@ -166,8 +166,7 @@ if (CITRON_USE_BUNDLED_FFMPEG)
 endif()
 
 # Vulkan-Headers
-if (CITRON_USE_EXTERNAL_VULKAN_HEADERS AND NOT TARGET Vulkan-Headers AND
-    NOT (ANDROID AND CITRON_USE_CPM))
+if (CITRON_USE_EXTERNAL_VULKAN_HEADERS AND NOT TARGET Vulkan-Headers)
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Vulkan-Headers/CMakeLists.txt")
         add_subdirectory(Vulkan-Headers)
     endif()
@@ -221,7 +220,7 @@ if (NOT TARGET RenderDoc::API)
 endif()
 
 if (ANDROID)
-   if (ARCHITECTURE_arm64 AND NOT TARGET adrenotools AND NOT CITRON_USE_CPM)
+   if (ARCHITECTURE_arm64 AND NOT TARGET adrenotools)
        add_subdirectory(libadrenotools)
    endif()
 endif()
