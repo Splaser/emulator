@@ -220,7 +220,7 @@ if (NOT TARGET RenderDoc::API)
 endif()
 
 if (ANDROID)
-   if (ARCHITECTURE_arm64)
+   if (ARCHITECTURE_arm64 AND NOT TARGET adrenotools)
        add_subdirectory(libadrenotools)
    endif()
 endif()

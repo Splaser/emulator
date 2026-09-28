@@ -18,13 +18,6 @@
 # all CPM packages inherit this setting.
 
 
-# ── Submodule & vcpkg Policy ──────────────────────────────────────────────────
-# Force-disable reliance on git submodules and vcpkg. All external dependencies
-# must be fetched and managed via CPM to ensure portability and build-time
-# environment isolation.
-set(CITRON_CHECK_SUBMODULES OFF CACHE BOOL "Force disable submodule presence checks" FORCE)
-set(CITRON_USE_BUNDLED_VCPKG OFF CACHE BOOL "Force disable vcpkg usage" FORCE)
-
 if (NOT COMMAND CPMAddPackage)
     message(FATAL_ERROR "CPM.cmake not loaded — include CMakeModules/CPM.cmake before this file")
 endif()
