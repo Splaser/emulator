@@ -200,15 +200,15 @@ if (CITRON_USE_BUNDLED_VCPKG)
     endif()
 
     include(${CMAKE_SOURCE_DIR}/externals/vcpkg/scripts/buildsystems/vcpkg.cmake)
-    if (ANDROID)
-        include(${CMAKE_SOURCE_DIR}/CMakeModules/OboeVcpkg.cmake)
-    endif()
 elseif(NOT CITRON_USE_CPM AND NOT "$ENV{VCPKG_TOOLCHAIN_FILE}" STREQUAL "")
     option(VCPKG_MANIFEST_MODE "")
     include("$ENV{VCPKG_TOOLCHAIN_FILE}")
-    if (ANDROID)
-        include(${CMAKE_SOURCE_DIR}/CMakeModules/OboeVcpkg.cmake)
-    endif()
+endif()
+
+if (ANDROID AND NOT CITRON_USE_CPM AND
+    DEFINED VCPKG_INSTALLED_DIR AND NOT "${VCPKG_INSTALLED_DIR}" STREQUAL "" AND
+    DEFINED VCPKG_TARGET_TRIPLET AND NOT "${VCPKG_TARGET_TRIPLET}" STREQUAL "")
+    include(${CMAKE_SOURCE_DIR}/CMakeModules/OboeVcpkg.cmake)
 endif()
 
 option(CITRON_USE_PRECOMPILED_HEADERS "Use Precompiled Headers" ON)
