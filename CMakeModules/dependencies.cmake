@@ -73,7 +73,8 @@ if (NOT TARGET Boost::headers)
             set(_boost_headers_target "${_boost_headers_aliased}")
         endif()
         file(GLOB _boost_header_include_dirs LIST_DIRECTORIES true
-            "${Boost_SOURCE_DIR}/libs/*/include")
+            "${Boost_SOURCE_DIR}/libs/*/include"
+            "${Boost_SOURCE_DIR}/libs/*/*/include")
         list(REMOVE_DUPLICATES _boost_header_include_dirs)
         if (_boost_header_include_dirs)
             target_include_directories("${_boost_headers_target}" SYSTEM INTERFACE ${_boost_header_include_dirs})
