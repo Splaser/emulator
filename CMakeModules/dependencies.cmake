@@ -382,6 +382,24 @@ if (ENABLE_CUBEB AND NOT TARGET cubeb::cubeb)
     endif()
 endif()
 
+# ── Oboe (Android audio) ──────────────────────────────────────────────────────
+if (ANDROID AND NOT TARGET oboe::oboe)
+    if (NOT TARGET oboe)
+        CPMAddPackage(
+            NAME oboe
+            GITHUB_REPOSITORY google/oboe
+            GIT_TAG a81bb9f87d4105b84b682685d3bfbb5beca371d1
+            OPTIONS
+                "BUILD_SHARED_LIBS OFF"
+                "OBOE_DISABLE_CONVERSION OFF"
+                "OBOE_DO_NOT_DEFINE_OPENSL_ES_CONSTANTS OFF"
+        )
+    endif()
+    if (TARGET oboe AND NOT TARGET oboe::oboe)
+        add_library(oboe::oboe ALIAS oboe)
+    endif()
+endif()
+
 # ── SDL2 ──────────────────────────────────────────────────────────────────────
 if (CITRON_USE_EXTERNAL_SDL2 AND NOT TARGET SDL2::SDL2)
     CPMAddPackage(
