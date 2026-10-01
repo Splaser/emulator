@@ -11,6 +11,20 @@ endfunction()
 citron_dependency_alias(sirit::sirit sirit)
 citron_dependency_alias(adrenotools::adrenotools adrenotools)
 
+# SimpleIni is a header-only third-party library. Its template warnings must not
+# inherit Citron's -Werror policy when instantiated by frontend consumers.
+if (TARGET SimpleIni::SimpleIni)
+    get_target_property(_simpleini_target SimpleIni::SimpleIni ALIASED_TARGET)
+    if (NOT _simpleini_target)
+        set(_simpleini_target SimpleIni::SimpleIni)
+    endif()
+    get_target_property(_simpleini_includes ${_simpleini_target} INTERFACE_INCLUDE_DIRECTORIES)
+    if (_simpleini_includes)
+        set_property(TARGET ${_simpleini_target} PROPERTY
+            INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_simpleini_includes}")
+    endif()
+endif()
+
 # Keep provider-specific FFmpeg paths and flags out of consumers.
 function(citron_resolve_ffmpeg_target)
     if (TARGET FFmpeg::FFmpeg)
