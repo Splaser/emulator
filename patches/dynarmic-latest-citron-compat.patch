@@ -97,3 +97,86 @@ index 0000000..fdb4484
 +};
 +
 +} // namespace Dynarmic
+diff --git a/src/dynarmic/ir/basic_block.cpp b/src/dynarmic/ir/basic_block.cpp
+index 1b7a324..3b7779e 100644
+--- a/src/dynarmic/ir/basic_block.cpp
++++ b/src/dynarmic/ir/basic_block.cpp
+@@ -77,6 +77,35 @@ static std::string TerminalToString([[maybe_unused]] const Term::Terminal& termi
+     return "";
+ }
+ 
++// Keep runtime formatting out of an implicitly constexpr lambda (GCC 16).
++static std::string ArgToString(const IR::Value& arg) {
++    if (arg.IsEmpty()) {
++        return "<null>";
++    } else if (!arg.IsImmediate()) {
++        if (auto const name = arg.GetInst()->GetName())
++            return std::format("%{}", name);
++        return std::format("%<unnamed inst {:016x}>", u64(arg.GetInst()));
++    }
++    switch (arg.GetType()) {
++    case Type::U1: return std::format("#{}", arg.GetU1() ? '1' : '0');
++    case Type::U8: return std::format("#{}", arg.GetU8());
++    case Type::U16: return std::format("#{:#x}", arg.GetU16());
++    case Type::U32: return std::format("#{:#x}", arg.GetU32());
++    case Type::U64: return std::format("#{:#x}", arg.GetU64());
++    case Type::U128: return std::format("#<u128 imm>");
++    case Type::A32Reg: return A32::RegToString(arg.GetA32RegRef());
++    case Type::A32ExtReg: return A32::ExtRegToString(arg.GetA32ExtRegRef());
++    case Type::A64Reg: return A64::RegToString(arg.GetA64RegRef());
++    case Type::A64Vec: return A64::VecToString(arg.GetA64VecRef());
++    case Type::CoprocInfo: return std::format("$coproc{}", arg.GetCoprocInfo()[0]);
++    case Type::NZCVFlags: return std::format("$nzcv");
++    case Type::Cond: return std::format("$cond={}", A32::CondToString(arg.GetCond()));
++    case Type::Table: return std::format("$table");
++    case Type::AccType: return std::format("$acc-type={}", u32(arg.GetAccType()));
++    default: return std::format("<unknown immediate type {}>", arg.GetType());
++    }
++}
++
+ std::string DumpBlock(const IR::Block& block) noexcept {
+     std::string ret = std::format("Block: location={}-{}\n", block.Location(), block.EndLocation())
+         + std::format("cycles={}", block.CycleCount())
+@@ -85,33 +114,6 @@ std::string DumpBlock(const IR::Block& block) noexcept {
+         ret += std::format(", cond_fail={}", block.ConditionFailedLocation());
+     ret += '\n';
+ 
+-    const auto arg_to_string = [](const IR::Value& arg) -> std::string {
+-        if (arg.IsEmpty()) {
+-            return "<null>";
+-        } else if (!arg.IsImmediate()) {
+-            if (auto const name = arg.GetInst()->GetName())
+-                return std::format("%{}", name);
+-            return std::format("%<unnamed inst {:016x}>", u64(arg.GetInst()));
+-        }
+-        switch (arg.GetType()) {
+-        case Type::U1: return std::format("#{}", arg.GetU1() ? '1' : '0');
+-        case Type::U8: return std::format("#{}", arg.GetU8());
+-        case Type::U16: return std::format("#{:#x}", arg.GetU16());
+-        case Type::U32: return std::format("#{:#x}", arg.GetU32());
+-        case Type::U64: return std::format("#{:#x}", arg.GetU64());
+-        case Type::U128: return std::format("#<u128 imm>");
+-        case Type::A32Reg: return A32::RegToString(arg.GetA32RegRef());
+-        case Type::A32ExtReg: return A32::ExtRegToString(arg.GetA32ExtRegRef());
+-        case Type::A64Reg: return A64::RegToString(arg.GetA64RegRef());
+-        case Type::A64Vec: return A64::VecToString(arg.GetA64VecRef());
+-        case Type::CoprocInfo: return std::format("$coproc{}", arg.GetCoprocInfo()[0]);
+-        case Type::NZCVFlags: return std::format("$nzcv");
+-        case Type::Cond: return std::format("$cond={}", A32::CondToString(arg.GetCond()));
+-        case Type::Table: return std::format("$table");
+-        case Type::AccType: return std::format("$acc-type={}", u32(arg.GetAccType()));
+-        default: return std::format("<unknown immediate type {}>", arg.GetType());
+-        }
+-    };
+ 
+     for (const auto& inst : block.instructions) {
+         const Opcode op = inst.GetOpcode();
+@@ -134,7 +136,7 @@ std::string DumpBlock(const IR::Block& block) noexcept {
+             const Value arg = inst.GetArg(arg_index);
+ 
+             ret += arg_index != 0 ? ", " : " ";
+-            ret += arg_to_string(arg);
++            ret += ArgToString(arg);
+ 
+             Type actual_type = arg.GetType();
+             Type expected_type = GetArgTypeOf(op, arg_index);
