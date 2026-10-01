@@ -488,23 +488,18 @@ if ((ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64) AND NOT (MSVC AND ARCHITECTURE_a
         CPMAddPackage(
             NAME dynarmic
             GITHUB_REPOSITORY xinitrcn1/dynarmic
-            GIT_TAG 7bec834bcadbb8b7def7c552a08ad4ac189d4397
+            GIT_TAG b1440b456b80f3dde0c01665932d114c4961ee93
             OPTIONS
                 "DYNARMIC_USE_PRECOMPILED_HEADERS ${CITRON_USE_PRECOMPILED_HEADERS}"
                 "DYNARMIC_IGNORE_ASSERTS ON"
                 "DYNARMIC_TESTS OFF"
+            PATCH_COMMAND
+                "${CMAKE_COMMAND}"
+                "-DDYNARMIC_SOURCE_DIR=<SOURCE_DIR>"
+                -P "${CMAKE_SOURCE_DIR}/CMakeModules/PatchDynarmic.cmake"
         )
         if (TARGET dynarmic AND NOT TARGET dynarmic::dynarmic)
             add_library(dynarmic::dynarmic ALIAS dynarmic)
-        endif()
-        if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND dynarmic_ADDED)
-            execute_process(
-                COMMAND git apply --ignore-whitespace
-                        "${CMAKE_SOURCE_DIR}/patches/mcl_clang_template_fix.patch"
-                WORKING_DIRECTORY "${dynarmic_SOURCE_DIR}/externals/mcl"
-                RESULT_VARIABLE _mcl_patch
-                OUTPUT_QUIET ERROR_QUIET
-            )
         endif()
     endif()
 endif()

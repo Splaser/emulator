@@ -1,0 +1,38 @@
+diff --git a/src/dynarmic/backend/arm64/address_space.cpp b/src/dynarmic/backend/arm64/address_space.cpp
+index e23f4d37..57311efe 100644
+--- a/src/dynarmic/backend/arm64/address_space.cpp
++++ b/src/dynarmic/backend/arm64/address_space.cpp
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include <cstdio>
++#include <print>
+ 
+ #include <bit>
+ 
+diff --git a/src/dynarmic/common/container/unordered_map.h b/src/dynarmic/common/container/unordered_map.h
+index 741e82da..7d9e49fd 100644
+--- a/src/dynarmic/common/container/unordered_map.h
++++ b/src/dynarmic/common/container/unordered_map.h
+@@ -3,6 +3,8 @@
+ 
+ #pragma once
+ 
++#include "common/container_hash.h"
++
+ #include <boost/unordered/unordered_flat_map.hpp>
+ 
+ namespace Common {
+diff --git a/src/dynarmic/common/container/unordered_set.h b/src/dynarmic/common/container/unordered_set.h
+index 3674e3fa..54d71406 100644
+--- a/src/dynarmic/common/container/unordered_set.h
++++ b/src/dynarmic/common/container/unordered_set.h
+@@ -3,6 +3,8 @@
+ 
+ #pragma once
+ 
++#include "common/container_hash.h"
++
+ #include <boost/unordered/unordered_flat_set.hpp>
+ 
+ namespace Common {
