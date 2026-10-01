@@ -453,7 +453,12 @@ if (_OPENSSL_CROSS)
     list(APPEND _OPENSSL_CONFIGURE_ARGS "--cross-compile-prefix=${_OPENSSL_CROSS}")
 endif()
 if (ANDROID)
-    list(APPEND _OPENSSL_CONFIGURE_ARGS "-D__ANDROID_API__=${_OPENSSL_ANDROID_API}" "--openssldir=/etc/ssl")
+    # Configure reads this numeric API to select the matching NDK compiler.
+    # Keep undefine/define together in CPPFLAGS so Clang's built-in alias is
+    # removed before the explicit definition, rather than redefined per file.
+    list(APPEND _OPENSSL_CONFIGURE_ARGS
+        "CPPFLAGS=-U__ANDROID_API__ -D__ANDROID_API__=${_OPENSSL_ANDROID_API}"
+        "--openssldir=/etc/ssl")
 endif()
 if (_OPENSSL_TARGET STREQUAL "VC-WIN64A")
     # The rest of the project is forced onto the dynamic CRT (/MD, /MDd) via
