@@ -43,6 +43,15 @@ endif()
 if ((ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64) AND NOT TARGET dynarmic::dynarmic)
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dynarmic/CMakeLists.txt")
         set(DYNARMIC_IGNORE_ASSERTS ON)
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}"
+                "-DDYNARMIC_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/dynarmic"
+                -P "${CMAKE_SOURCE_DIR}/CMakeModules/PatchDynarmic.cmake"
+            RESULT_VARIABLE _dynarmic_patch_result
+        )
+        if (NOT _dynarmic_patch_result EQUAL 0)
+            message(FATAL_ERROR "Failed to apply Dynarmic host compatibility patch")
+        endif()
         add_subdirectory(dynarmic)
         add_library(dynarmic::dynarmic ALIAS dynarmic)
     endif()

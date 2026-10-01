@@ -326,11 +326,13 @@ endif()
 
 # Configure C++ standard
 # ===========================
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # boost asio's concept usage doesn't play nicely with some compilers yet.
 add_definitions(-DBOOST_ASIO_DISABLE_CONCEPTS)
 if (MSVC)
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/std:c++20>)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/std:c++latest>)
 
     # boost still makes use of deprecated result_of.
     add_definitions(-D_HAS_DEPRECATED_RESULT_OF)
@@ -340,9 +342,6 @@ if (MSVC)
     if(CITRON_ENABLE_PGO_GENERATE OR CITRON_ENABLE_PGO_USE OR CITRON_ENABLE_LTO)
         add_link_options(/LTCG)
     endif()
-else()
-    set(CMAKE_CXX_STANDARD 20)
-    set(CMAKE_CXX_STANDARD_REQUIRED ON)
 endif()
 
 # Output binaries to bin/
