@@ -523,6 +523,10 @@ if (ANDROID AND ARCHITECTURE_arm64)
         NAME libadrenotools
         GITHUB_REPOSITORY bylaws/libadrenotools
         GIT_TAG 5cd3f5c5ceea6d9e9d435ccdd922d9b99e55d10b
+        PATCH_COMMAND
+            "${CMAKE_COMMAND}"
+            "-DLIBADRENOTOOLS_SOURCE_DIR=<SOURCE_DIR>"
+            -P "${CMAKE_SOURCE_DIR}/CMakeModules/PatchLibadrenotools.cmake"
     )
 endif()
 
