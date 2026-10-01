@@ -59,6 +59,10 @@ Other containers retain their existing default hash behavior. This removes the
 host-header coupling without inventing `std::hash` specializations for tuples
 containing only standard/built-in types.
 
+The patch also moves the IR dump argument formatter into a normal runtime helper
+to avoid GCC 16's immediate-function escalation of the original lambda. This
+changes neither the format strings nor the emitted debug text.
+
 This is not a claim that upstream Dynarmic requires no patches. The remaining
 self-contained source changes can be proposed upstream independently.
 
