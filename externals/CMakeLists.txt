@@ -230,6 +230,15 @@ endif()
 
 if (ANDROID)
    if (ARCHITECTURE_arm64 AND NOT TARGET adrenotools)
+       execute_process(
+           COMMAND "${CMAKE_COMMAND}"
+               "-DLIBADRENOTOOLS_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/libadrenotools"
+               -P "${CMAKE_SOURCE_DIR}/CMakeModules/PatchLibadrenotools.cmake"
+           RESULT_VARIABLE _adrenotools_patch_result
+       )
+       if (NOT _adrenotools_patch_result EQUAL 0)
+           message(FATAL_ERROR "Failed to apply libadrenotools runtime page-size patch")
+       endif()
        add_subdirectory(libadrenotools)
    endif()
 endif()
