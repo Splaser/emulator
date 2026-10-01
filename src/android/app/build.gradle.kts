@@ -22,7 +22,7 @@ android {
     namespace = "org.citron.citron_emu"
 
     compileSdk = 37
-    ndkVersion = "26.1.10909125"
+    ndkVersion = "29.0.14206865"
 
     buildFeatures {
         viewBinding = true
