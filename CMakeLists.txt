@@ -553,6 +553,7 @@ function(create_target_directory_groups target_name)
 endfunction()
 
 add_subdirectory(externals)
+include(DependencyTargets)
 # When CPM is ON, dynarmic/mcl patches are applied post-populate
 # inside CMakeModules/dependencies.cmake. Skip the submodule-path patches.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT CITRON_USE_CPM)
@@ -734,12 +735,13 @@ set(FFmpeg_COMPONENTS
 
 if (UNIX AND NOT APPLE AND NOT ANDROID)
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(LIBVA libva)
+    pkg_check_modules(LIBVA IMPORTED_TARGET libva)
 endif()
 if (NOT CITRON_USE_BUNDLED_FFMPEG)
     # Use system installed FFmpeg
     find_package(FFmpeg 4.3 REQUIRED QUIET COMPONENTS ${FFmpeg_COMPONENTS})
 endif()
+citron_resolve_ffmpeg_target()
 
 if(ENABLE_QT)
     set_citron_qt_components()
@@ -749,7 +751,7 @@ if(ENABLE_QT)
     set_target_properties(Qt6::Platform PROPERTIES INTERFACE_COMPILE_FEATURES "")
 endif()
 
-if (WIN32 AND CITRON_CRASH_DUMPS)
+if (WIN32 AND CITRON_CRASH_DUMPS AND NOT TARGET libbreakpad_client)
     set(BREAKPAD_VER "breakpad-c89f9dd")
     download_bundled_external("breakpad/" ${BREAKPAD_VER} BREAKPAD_PREFIX)
 
