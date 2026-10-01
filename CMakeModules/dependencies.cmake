@@ -311,7 +311,7 @@ endif()
 
 # ── SPIRV-Headers ─────────────────────────────────────────────────────────────
 # Must be declared before sirit.
-if (NOT CITRON_CLANGCL AND NOT TARGET SPIRV-Headers)
+if (NOT TARGET SPIRV-Headers AND NOT TARGET SPIRV-Headers::SPIRV-Headers)
     CPMAddPackage(
         NAME SPIRV-Headers
         GITHUB_REPOSITORY KhronosGroup/SPIRV-Headers
@@ -456,16 +456,16 @@ endif()
 
 # ── sirit (yuzu-mirror fork) ──────────────────────────────────────────────────
 # sirit needs SPIRV-Headers. CPM already populated it above.
-if (NOT TARGET sirit)
-    if(CITRON_CLANGCL)
-        set(SIRIT_USE_SYSTEM_SPIRV_HEADERS OFF)
-    else()
-        set(SIRIT_USE_SYSTEM_SPIRV_HEADERS ON)
-    endif()
+if (NOT TARGET sirit::sirit AND NOT TARGET sirit)
+    set(SIRIT_USE_SYSTEM_SPIRV_HEADERS ON)
     CPMAddPackage(
         NAME sirit
         GITHUB_REPOSITORY yuzu-mirror/sirit
         GIT_TAG ab75463999f4f3291976b079d42d52ee91eebf3f
+        PATCH_COMMAND
+            "${CMAKE_COMMAND}"
+            "-DSIRIT_SOURCE_DIR=<SOURCE_DIR>"
+            -P "${CMAKE_SOURCE_DIR}/CMakeModules/PatchSirit.cmake"
     )
     if (CITRON_CLANGCL AND TARGET sirit)
         get_target_property(_sirit_compile_options sirit COMPILE_OPTIONS)
@@ -518,7 +518,7 @@ if (CITRON_CRASH_DUMPS AND NOT TARGET libbreakpad_client)
 endif()
 
 # ── libadrenotools — Android only ─────────────────────────────────────────────
-if (ANDROID AND ARCHITECTURE_arm64)
+if (ANDROID AND ARCHITECTURE_arm64 AND NOT TARGET adrenotools::adrenotools AND NOT TARGET adrenotools)
     CPMAddPackage(
         NAME libadrenotools
         GITHUB_REPOSITORY bylaws/libadrenotools
