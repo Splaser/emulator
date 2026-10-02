@@ -338,7 +338,7 @@ if (NOT TARGET enet::enet)
 endif()
 
 # ── opus ──────────────────────────────────────────────────────────────────────
-if (NOT TARGET Opus::opus)
+if (NOT TARGET Opus::opus AND NOT TARGET opus)
     set(_opus_cpm_patches "")
     if (CITRON_CLANGCL)
         # Opus only applies -msse4.1 under `if (NOT MSVC)`, but CMake's MSVC

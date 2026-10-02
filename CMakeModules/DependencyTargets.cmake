@@ -8,6 +8,7 @@ function(citron_dependency_alias canonical provider)
     endif()
 endfunction()
 
+citron_dependency_alias(Opus::opus opus)
 citron_dependency_alias(sirit::sirit sirit)
 citron_dependency_alias(adrenotools::adrenotools adrenotools)
 
@@ -40,6 +41,9 @@ function(citron_resolve_ffmpeg_target)
     add_library(FFmpeg::FFmpeg ALIAS citron_ffmpeg)
 endfunction()
 
+if (NOT TARGET Opus::opus)
+    message(FATAL_ERROR "The selected dependency provider did not supply Opus::opus")
+endif()
 if (NOT TARGET sirit::sirit)
     message(FATAL_ERROR "The selected dependency provider did not supply sirit::sirit")
 endif()
