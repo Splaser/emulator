@@ -79,8 +79,6 @@ endif()
 # Tell sirit to use our target
 if (NOT TARGET sirit::sirit AND NOT TARGET sirit)
     set(SIRIT_USE_SYSTEM_SPIRV_HEADERS ON)
-    set(SPIRV-Headers_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-    list(APPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sirit/CMakeLists.txt")
         execute_process(
             COMMAND "${CMAKE_COMMAND}"
