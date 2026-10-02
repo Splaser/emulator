@@ -136,12 +136,17 @@ their implementation. They cover canonical/raw target priority, bundled Opus,
 missing sources/parent headers, config-only Opus and absent pkg-config. These
 are configure-only checks; they do not claim an APK or desktop rebuild.
 
-The CI test branch pairs the existing Android/CPM workflow with a manual desktop
-provider workflow: Windows/MSVC + vcpkg/submodules and Linux + system/submodules.
-It builds the SDL CLI and tests without Qt and does not publish releases.
-Existing Clangtron/Linux packaging scripts use CPM; they are separate coverage,
-not evidence for these default-provider routes. Desktop workflow success and
-game/runtime correctness must be reported separately.
+The separate CI repository has manual fallback/provider compatibility tests:
+Windows/MSVC + vcpkg/submodules and Linux + system/submodules. They build the SDL
+CLI and tests without Qt and do not publish releases. The Windows workflow is
+**fallback/provider compatibility test only, not the supported production
+Windows build path**. The production Windows path is clang-cl/Clangtron; this
+test does not restore MSVC/vcpkg as the main Windows CI or establish support for
+shipping that configuration.
+
+Clangtron/Linux packaging scripts use CPM and provide separate coverage.
+Compatibility test success, production build validation and game/runtime
+correctness must be reported separately.
 
 Remaining work includes packaged Qt frontends, iOS framework paths, local
 FidelityFX shader-generation inputs, default-provider version drift and real
