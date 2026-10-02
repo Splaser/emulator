@@ -160,13 +160,15 @@ endif()
 # longer built.
 
 # Opus
-if (NOT TARGET Opus::opus)
+if (NOT TARGET Opus::opus AND NOT TARGET opus)
     set(OPUS_BUILD_TESTING OFF)
     set(OPUS_BUILD_PROGRAMS OFF)
     set(OPUS_INSTALL_PKG_CONFIG_MODULE OFF)
     set(OPUS_INSTALL_CMAKE_CONFIG_MODULE OFF)
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/opus/CMakeLists.txt")
         add_subdirectory(opus)
+    else()
+        message(FATAL_ERROR "Opus provider target is missing and externals/opus is unavailable")
     endif()
 endif()
 
