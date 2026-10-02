@@ -8,7 +8,7 @@ personal `main` branch or upgrade all dependencies to a common version.
 
 Consumers link canonical targets. Provider discovery, source population, path
 adapters and aliases belong in the root CMake/provider modules and `externals`.
-`DependencyTargets.cmake` normalizes Sirit, Adrenotools and FFmpeg. Oboe's vcpkg
+`DependencyTargets.cmake` normalizes Opus, Sirit, Adrenotools and FFmpeg. Oboe's vcpkg
 layout stays in `OboeVcpkg.cmake`; audio consumers use `oboe::oboe`.
 
 Submodule fallbacks remain useful for non-CPM builds. They must check for the
@@ -21,7 +21,7 @@ FFmpeg consumers now link `FFmpeg::FFmpeg`. Legacy bundled library paths,
 include directories and linker options are confined to its adapter. Linux VA-API
 uses `PkgConfig::LIBVA` so its include and link requirements travel together.
 
-## Version matrix (2026-10-01)
+## Version matrix (verified 2026-10-02)
 
 The vcpkg column comes from manifest baseline
 `c3173be258001c60814b6adf161322b6eb3688ee`, with manifest overrides applied.
@@ -42,6 +42,59 @@ System-provider versions depend on the build host and must be recorded in CI.
 | SPIRV-Headers | `vulkan-sdk-1.4.304.1` | Not in manifest (baseline port is 1.4.341.0) | `00898b201b4153d7198c3e0134dbf953c83bbfd7` | Provider versions still differ; explicit, not silently unified |
 | Sirit nested SPIRV-Headers | Previously used by clang-cl | Not applicable | `c214f6f2d1a7253bb0e9f195c2dc5b0659dc99ef` | No longer selected when parent supplies a target |
 | Vulkan-Headers / Utility-Libraries | 1.4.337 | Not in manifest | Separate source pins | Not assumed to share SPIRV-Headers release numbering |
+
+### Transitive pins and duplicate-version risks
+
+Different versions in separate provider builds are drift, not proof that two
+versions enter one graph. The risks below distinguish those cases. Evidence is
+the checked-in CPM declarations, manifest baseline/port recipes, root gitlinks,
+and dependency CMake files at the listed commits; installed system versions are
+unknown until a build records them. No dependency versions were changed.
+
+| Dependency edge | CPM / vcpkg selection | Source/transitive selection | Same-graph risk and resolution |
+| --- | --- | --- | --- |
+| Citron → Boost; Dynarmic → Boost | CPM 1.87.0; vcpkg headers/context 1.90.0#1 | Dynarmic calls `find_package(Boost 1.57 REQUIRED)`; it does not pin a private Boost source | **Possible mixed discovery**, not confirmed duplication: a partial preexisting Boost provider can supply headers while discovery supplies compiled components elsewhere. Check `Boost::headers` and `Boost::context` usage paths together; do not mix their include/library installations. Cross-provider drift remains intentional. |
+| Citron → Opus | CPM 1.5.2; vcpkg 1.5.2#1 | Bundled `101a71e03bbf860aaafb7090a0e440675cb27660` | **Former duplicate-source risk:** pkg-config-only discovery could miss the vcpkg CMake export and add old bundled Opus. Config-first discovery now reuses `Opus::opus`; a raw `opus` target also blocks a second source build and is aliased centrally. Missing target plus missing source fails explicitly. |
+| FFmpeg → Opus | CPM FFmpeg `n8.0`; vcpkg FFmpeg 8.0.1#2 | FFmpeg submodule `c1b19ee69f2142bb4b098936cc7421d80b3db7e4` | **Conditional risk:** vcpkg's optional `opus` feature depends on the same vcpkg Opus version. This manifest requests only avcodec/avfilter/swscale, with default features off; the bundled wrapper does not enable libopus. No second external Opus is implied by FFmpeg's native codecs. Reaudit if libopus is enabled later. |
+| Citron → SPIRV-Headers; Sirit → SPIRV-Headers | CPM SDK tag 1.4.304.1 resolves to `3f17b2af6784bfa2c5aa5dbb8e0e74a607dd8b3b`; vcpkg baseline 1.4.341.0 is not requested | Root `00898b201b4153d7198c3e0134dbf953c83bbfd7`; Sirit nested `c214f6f2d1a7253bb0e9f195c2dc5b0659dc99ef` | **Prevented duplicate-tree risk:** Sirit must receive the parent's raw or canonical SPIRV-Headers target. Its nested gitlink remains on disk but is not configured. Both CPM and bundled routes fail before Sirit if that parent target is absent. |
+| Citron → Sirit | CPM and bundled `ab75463999f4f3291976b079d42d52ee91eebf3f`; no vcpkg manifest entry | Transitive headers as above | A preexisting `sirit::sirit` or raw `sirit` target takes priority; no second Sirit source is added. An externally built imported Sirit already owns its dependency graph. |
+| Dynarmic → xbyak | CPM, root gitlink and Dynarmic nested gitlink all `c506ecd5134122115a981fdd45c2a756f9ce20ac` | Dynarmic nested source used only without `xbyak::xbyak` | Pins aligned; parent target blocks the nested build. |
+| Dynarmic → oaknut | CPM, root and nested all `94c726ce0338b054eb8cb5ea91de8fe6c19f4392` | ARM64 only unless Dynarmic tests are enabled | Pins aligned; parent `merry::oaknut` blocks nested build. |
+| Dynarmic → unordered_dense | CPM, root and nested all `7b55cab8418da1603496462ce3ccdb4cb1dc3368` | Nested fallback checks `unordered_dense::unordered_dense` | Pins aligned; parent target blocks nested build. |
+| Dynarmic → Catch2 | CPM and nested `675f9eaeb191c51b9d2ffb2bb198009533895051`; vcpkg override 3.3.1 | Nested dependency is gated by Dynarmic tests | Dynarmic tests are off in this integration; no nested Catch2 is configured. |
+
+### Remaining provider paths
+
+The scan includes `VCPKG_INSTALLED_DIR`, archive paths, `externals/` paths and
+`add_subdirectory` in CMake provider modules and consumers. Remaining literal
+paths have specific owners:
+
+- `OboeVcpkg.cmake` adapts a port without a CMake export. The path is confined
+  to the provider; consumers link `oboe::oboe`.
+- FFmpeg's autotools provider must name its output archives. Consumers link
+  `FFmpeg::FFmpeg`; archive paths are not spread into source targets.
+- `wininet.lib` and `version.lib` are Windows SDK libraries, not alternate
+  external dependency providers.
+- MoltenVK frameworks and FidelityFX shader source inputs are platform/build
+  resources, not interchangeable library targets. They remain separate work.
+- Project vendored sources such as glad and tz legitimately use
+  `add_subdirectory`. External sources use target guards; the required Opus
+  fallback now diagnoses absent source rather than silently continuing.
+
+## External patch audit (2026-10-02)
+
+| Patch | Pinned/upstream evidence | Decision |
+| --- | --- | --- |
+| Dynarmic tuple/pair hash | Upstream HEAD is still [`b1440b45`](https://github.com/xinitrcn1/dynarmic/tree/b1440b456b80f3dde0c01665932d114c4961ee93); x64 containers still use default hash with tuple keys | Keep explicit standalone hasher; no Citron header or `std::hash` specialization. |
+| Dynarmic `<print>` include | The pinned ARM64 address-space file uses printing without the direct include | Keep the one-line include. |
+| Dynarmic RegList formatter removal | The pinned formatter specializes the `u16` alias and collides with integer formatting | Keep; no fmt usage changes in this audit. |
+| Sirit target reuse | Pinned `ab754639` and current upstream [`4ab79a8c`](https://github.com/yuzu-mirror/sirit/tree/4ab79a8c023aa63caaa93848b09b9fe8b183b1a9) still unconditionally find SPIRV-Headers in system mode | Keep the small target-first patch for both source providers. |
+| Legacy MCL Clang patch | Current Dynarmic's external gitlinks and CMake no longer contain MCL | Delete the patch and obsolete root hook; no replacement needed. |
+| Adrenotools runtime page-size / Opus clang-cl SSE4 / stb overflow patches | Separate platform or source compatibility fixes; not part of the removed MCL dependency | Retain; this audit does not establish that newer upstream versions supersede them. |
+
+Dynarmic and Sirit patch application accepts clean pinned sources and an
+already-applied patch, but rejects mismatched source drift. A future pin bump
+must check each hunk rather than treating a failed patch as success.
 
 ## Android branches
 
@@ -75,7 +128,13 @@ check canonical provider priority, idempotence and FFmpeg usage requirements:
 ```sh
 cmake -S CMakeModules/tests/provider_contract -B build-contract-raw
 cmake -S CMakeModules/tests/provider_contract -B build-contract-canonical -DCANONICAL_PROVIDER=ON
+cmake -DCHECK_BINARY_DIR=/absolute/path/to/provider-checks -P CMakeModules/tests/CheckProviderResolution.cmake
 ```
+
+The resolution checks use the actual Opus/Sirit fallback blocks, not copies of
+their implementation. They cover canonical/raw target priority, bundled Opus,
+missing sources/parent headers, config-only Opus and absent pkg-config. These
+are configure-only checks; they do not claim an APK or desktop rebuild.
 
 The CI test branch pairs the existing Android/CPM workflow with a manual desktop
 provider workflow: Windows/MSVC + vcpkg/submodules and Linux + system/submodules.
