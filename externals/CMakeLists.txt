@@ -78,6 +78,9 @@ endif()
 # Sirit
 # Tell sirit to use our target
 if (NOT TARGET sirit::sirit AND NOT TARGET sirit)
+    if (NOT TARGET SPIRV-Headers AND NOT TARGET SPIRV-Headers::SPIRV-Headers)
+        message(FATAL_ERROR "Sirit requires the project SPIRV-Headers target; no provider supplied it")
+    endif()
     set(SIRIT_USE_SYSTEM_SPIRV_HEADERS ON)
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sirit/CMakeLists.txt")
         execute_process(
