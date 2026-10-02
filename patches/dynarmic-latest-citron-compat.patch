@@ -69,7 +69,7 @@ new file mode 100644
 index 0000000..fdb4484
 --- /dev/null
 +++ b/src/dynarmic/common/tuple_hash.h
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,33 @@
 +// SPDX-FileCopyrightText: Copyright 2026 citron Emulator Project
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
@@ -79,12 +79,18 @@ index 0000000..fdb4484
 +#include <functional>
 +#include <tuple>
 +#include <type_traits>
++#include <utility>
 +
 +namespace Dynarmic {
 +
 +// Explicit tuple hashing keeps the backend independent of host-project headers
 +// and avoids specializing std::hash for standard-library-only tuple types.
 +struct TupleHash {
++    template <typename First, typename Second>
++    std::size_t operator()(const std::pair<First, Second>& key) const {
++        return (*this)(std::tie(key.first, key.second));
++    }
++
 +    template <typename... Ts>
 +    std::size_t operator()(const std::tuple<Ts...>& key) const {
 +        std::size_t seed = 0;
