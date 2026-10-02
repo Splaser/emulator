@@ -457,6 +457,9 @@ endif()
 # ── sirit (yuzu-mirror fork) ──────────────────────────────────────────────────
 # sirit needs SPIRV-Headers. CPM already populated it above.
 if (NOT TARGET sirit::sirit AND NOT TARGET sirit)
+    if (NOT TARGET SPIRV-Headers AND NOT TARGET SPIRV-Headers::SPIRV-Headers)
+        message(FATAL_ERROR "Sirit requires the project SPIRV-Headers target; no provider supplied it")
+    endif()
     set(SIRIT_USE_SYSTEM_SPIRV_HEADERS ON)
     CPMAddPackage(
         NAME sirit
