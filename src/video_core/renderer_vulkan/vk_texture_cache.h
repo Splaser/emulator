@@ -61,6 +61,8 @@ public:
 
     u64 GetDeviceMemoryUsage() const;
 
+    u64 GetDeviceMemoryBudget() const;
+
     bool CanReportMemoryUsage() const;
 
     void BlitImage(Framebuffer* dst_framebuffer, ImageView& dst, ImageView& src,

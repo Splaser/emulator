@@ -346,7 +346,7 @@ private:
                ((device_addr + size) & ~Core::DEVICE_PAGEMASK);
     }
 
-    void RunGarbageCollector();
+    void RunGarbageCollector(u64 heap_usage, u64 heap_budget);
 
 public:
     // FIXED: VRAM leak prevention - Enhanced public interface for buffer VRAM management
