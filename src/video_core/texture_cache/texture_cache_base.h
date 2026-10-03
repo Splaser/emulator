@@ -288,7 +288,7 @@ private:
     void OnGPUASRegister(size_t map_id) final override;
 
     /// Runs the Garbage Collector.
-    void RunGarbageCollector();
+    void RunGarbageCollector(u64 heap_usage, u64 heap_budget);
 
 public:
     /// Get current VRAM usage statistics

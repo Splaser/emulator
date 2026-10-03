@@ -11,6 +11,7 @@
 
 #include "common/range_sets.inc"
 #include "video_core/buffer_cache/buffer_cache_base.h"
+#include "video_core/cache_memory_pressure.h"
 #include "video_core/guest_memory.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
 
@@ -56,8 +57,10 @@ template <class P>
 BufferCache<P>::~BufferCache() = default;
 
 template <class P>
-void BufferCache<P>::RunGarbageCollector() {
-    const bool aggressive_gc = total_used_memory >= critical_memory;
+void BufferCache<P>::RunGarbageCollector(u64 heap_usage, u64 heap_budget) {
+    const auto pressure = GetCacheMemoryPressure(total_used_memory, heap_usage, heap_budget,
+                                                 minimum_memory, critical_memory);
+    const bool aggressive_gc = pressure.IsCritical();
     const u64 ticks_to_destroy = aggressive_gc ? 60 : 120;
     int num_iterations = aggressive_gc ? 64 : 32;
     const auto clean_up = [this, &num_iterations](BufferId buffer_id) {
@@ -98,10 +101,13 @@ void BufferCache<P>::TickFrame() {
     const bool skip_preferred = hits * 256 < shots * 251;
     channel_state->uniform_buffer_skip_cache_size = skip_preferred ? DEFAULT_SKIP_CACHE_SIZE : 0;
 
-    const u64 gc_memory_usage =
-        runtime.CanReportMemoryUsage() ? runtime.GetDeviceMemoryUsage() : total_used_memory;
-    if (gc_memory_usage >= minimum_memory) {
-        RunGarbageCollector();
+    const bool can_report = runtime.CanReportMemoryUsage();
+    const u64 heap_usage = can_report ? runtime.GetDeviceMemoryUsage() : 0;
+    const u64 heap_budget = can_report ? runtime.GetDeviceMemoryBudget() : 0;
+    const auto pressure = GetCacheMemoryPressure(total_used_memory, heap_usage, heap_budget,
+                                                 minimum_memory, critical_memory);
+    if (pressure.IsHigh()) {
+        RunGarbageCollector(heap_usage, heap_budget);
     }
     ++frame_tick;
     delayed_destruction_ring.Tick();

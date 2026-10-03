@@ -391,7 +391,7 @@ private:
         page_table.GetOrAllocate(page) = buffer_id.index + 1;
     }
 
-    void RunGarbageCollector();
+    void RunGarbageCollector(u64 heap_usage, u64 heap_budget);
 
 public:
     // FIXED: VRAM leak prevention - Enhanced public interface for buffer VRAM management
