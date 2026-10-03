@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <algorithm>
+#include <new>
 #include <utility>
 #include <vector>
 
@@ -82,6 +83,30 @@ void StagingBufferPool::FreeDeferred(StagingBufferRef& ref) {
     ASSERT(it->deferred);
     it->tick = scheduler.CurrentTick();
     it->deferred = false;
+}
+
+std::optional<StagingBufferRef> StagingBufferPool::RequestGCDownload(size_t size) {
+    if (size == 0 || size > 32_MiB) {
+        return std::nullopt;
+    }
+    if (gc_download && gc_download->mapped_span.size() >= size) {
+        return gc_download;
+    }
+    try {
+        auto replacement = Request(size, MemoryUsage::Download, true);
+        if (gc_download) {
+            FreeDeferred(*gc_download);
+        }
+        gc_download = replacement;
+        return gc_download;
+    } catch (const vk::Exception& error) {
+        if (error.GetResult() != VK_ERROR_OUT_OF_DEVICE_MEMORY &&
+            error.GetResult() != VK_ERROR_OUT_OF_HOST_MEMORY) {
+            throw;
+        }
+    } catch (const std::bad_alloc&) {
+    }
+    return std::nullopt;
 }
 
 void StagingBufferPool::TickFrame() {
@@ -313,6 +338,7 @@ void StagingBufferPool::ReleaseAllFreeBuffers() {
 }
 
 void StagingBufferPool::Nuke() {
+    gc_download.reset();
     auto nuke_cache = [](StagingBuffersCache& cache) {
         for (auto& level : cache) {
             level.entries.clear();

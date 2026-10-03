@@ -24,6 +24,7 @@
 #include "common/settings.h"
 #include "common/slot_vector.h"
 #include "video_core/buffer_cache/buffer_base.h"
+#include "video_core/cache_memory_pressure.h"
 #include "video_core/control/channel_state_cache.h"
 #include "video_core/delayed_destruction_ring.h"
 #include "video_core/dirty_flags.h"
@@ -179,10 +180,6 @@ class BufferCache : public VideoCommon::ChannelSetupCaches<BufferCacheChannelInf
     static constexpr bool SEPARATE_IMAGE_BUFFERS_BINDINGS = P::SEPARATE_IMAGE_BUFFER_BINDINGS;
     static constexpr bool USE_MEMORY_MAPS_FOR_UPLOADS = P::USE_MEMORY_MAPS_FOR_UPLOADS;
 
-    static constexpr s64 DEFAULT_EXPECTED_MEMORY = 512_MiB;
-    static constexpr s64 DEFAULT_CRITICAL_MEMORY = 1_GiB;
-    static constexpr s64 TARGET_THRESHOLD = 4_GiB;
-
     // FIXED: VRAM leak prevention - Enhanced buffer eviction constants
     static constexpr u64 DEFAULT_BUFFER_EVICTION_FRAMES = 5;
     static constexpr size_t LARGE_BUFFER_THRESHOLD = 8_MiB;
@@ -212,7 +209,7 @@ public:
 
     ~BufferCache();
 
-    void TickFrame();
+    void TickFrame(u64 cache_usage, u64 cache_target, std::span<const HeapMemoryBudget> heaps);
 
     void WriteMemory(DAddr device_addr, u64 size);
 
@@ -391,7 +388,7 @@ private:
         page_table.GetOrAllocate(page) = buffer_id.index + 1;
     }
 
-    void RunGarbageCollector(u64 heap_usage, u64 heap_budget);
+    bool RunGarbageCollector(bool aggressive_gc);
 
 public:
     // FIXED: VRAM leak prevention - Enhanced public interface for buffer VRAM management
@@ -519,7 +516,8 @@ public:
     Tegra::MaxwellDeviceMemoryManager& device_memory;
 
     Common::SlotVector<Buffer> slot_buffers;
-    DelayedDestructionRing<Buffer, 8> delayed_destruction_ring;
+    static constexpr u64 TICKS_TO_DESTROY = 8;
+    DelayedDestructionRing<Buffer, TICKS_TO_DESTROY> delayed_destruction_ring;
 
     const Tegra::Engines::DrawManager::IndirectParams* current_draw_indirect{};
 
@@ -548,8 +546,7 @@ public:
     Common::LeastRecentlyUsedCache<LRUItemParams> lru_cache;
     u64 frame_tick = 0;
     u64 total_used_memory = 0; // Bytes owned by this cache.
-    u64 minimum_memory = 0;
-    u64 critical_memory = 0;
+    CacheMemoryPressure memory_pressure;
     BufferId inline_buffer_id;
 
     u64 large_buffer_memory = 0;

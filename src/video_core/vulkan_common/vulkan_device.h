@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <mutex>
 #include <set>
 #include <span>
 #include <string>
@@ -13,6 +15,7 @@
 #include "common/common_types.h"
 #include "common/logging.h"
 #include "common/settings.h"
+#include "video_core/cache_memory_pressure.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
 VK_DEFINE_HANDLE(VmaAllocator)
@@ -722,6 +725,8 @@ public:
     /// reporting rather than actual zero usage.
     u64 GetDeviceMemoryUsage() const;
 
+    std::array<VideoCommon::HeapMemoryBudget, VK_MAX_MEMORY_HEAPS> GetHeapMemoryBudgets() const;
+
     /// Refreshes reported heap usage and budget; no-ops when CanReportMemoryUsage() is false.
     void RefreshDeviceMemoryUsage(VmaAllocator vma_allocator) const;
 
@@ -924,6 +929,8 @@ private:
     bool dynamic_state3_enables{};             ///< Has all enables features of dynamic_state3.
     bool supports_conditional_barriers{};      ///< Allows barriers in conditional control flow.
     mutable std::atomic<u64> device_memory_usage{};
+    mutable std::mutex heap_budget_mutex;
+    mutable std::array<VideoCommon::HeapMemoryBudget, VK_MAX_MEMORY_HEAPS> heap_budgets{};
     mutable std::atomic<u64> device_memory_budget{};
     u64 device_access_memory{};                ///< Total size of device local memory in bytes.
     u32 sets_per_pool{};                       ///< Sets per Description Pool

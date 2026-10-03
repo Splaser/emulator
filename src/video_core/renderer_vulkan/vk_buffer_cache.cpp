@@ -372,8 +372,8 @@ u64 BufferCacheRuntime::GetDeviceMemoryUsage() const {
     return device.GetDeviceMemoryUsage();
 }
 
-u64 BufferCacheRuntime::GetDeviceMemoryBudget() const {
-    return device.GetDeviceMemoryBudget();
+std::optional<StagingBufferRef> BufferCacheRuntime::TryGCDownloadStagingBuffer(size_t size) {
+    return staging_pool.RequestGCDownload(size);
 }
 
 bool BufferCacheRuntime::CanReportMemoryUsage() const {
