@@ -24,6 +24,7 @@
 #include "common/scratch_buffer.h"
 #include "common/slot_vector.h"
 #include "common/thread_worker.h"
+#include "video_core/cache_memory_pressure.h"
 #include "video_core/compatible_formats.h"
 #include "video_core/control/channel_state_cache.h"
 #include "video_core/delayed_destruction_ring.h"
@@ -109,9 +110,6 @@ class TextureCache : public VideoCommon::ChannelSetupCaches<TextureCacheChannelI
 
     static constexpr size_t UNSET_CHANNEL{std::numeric_limits<size_t>::max()};
 
-    static constexpr s64 TARGET_THRESHOLD = 4_GiB;
-    static constexpr s64 DEFAULT_EXPECTED_MEMORY = 1_GiB + 125_MiB;
-    static constexpr s64 DEFAULT_CRITICAL_MEMORY = 1_GiB + 625_MiB;
     static constexpr size_t LARGE_TEXTURE_THRESHOLD = 16_MiB;
 
     using Runtime = typename P::Runtime;
@@ -134,7 +132,7 @@ public:
     explicit TextureCache(Runtime&, Tegra::MaxwellDeviceMemoryManager&);
 
     /// Notify the cache that a new frame has been queued
-    void TickFrame();
+    void TickFrame(u64 cache_usage, u64 cache_target, std::span<const HeapMemoryBudget> heaps);
 
     /// Return a constant reference to the given image view id
     [[nodiscard]] const ImageView& GetImageView(ImageViewId id) const noexcept;
@@ -295,7 +293,7 @@ private:
     void OnGPUASRegister(size_t map_id) final override;
 
     /// Runs the Garbage Collector.
-    void RunGarbageCollector(u64 heap_usage, u64 heap_budget);
+    bool RunGarbageCollector(bool aggressive_mode);
 
 public:
     /// Get current VRAM usage statistics
@@ -460,9 +458,7 @@ public:
     bool has_deleted_images = false;
     bool is_rescaling = false;
     u64 total_used_memory = 0; // Bytes owned by this cache.
-    u64 minimum_memory;
-    u64 expected_memory;
-    u64 critical_memory;
+    CacheMemoryPressure memory_pressure;
 
     u64 sparse_texture_memory = 0;      // Memory used by sparse textures
     u64 large_texture_memory = 0;       // Memory used by large textures (>16MB)

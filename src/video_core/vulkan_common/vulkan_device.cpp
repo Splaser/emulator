@@ -1395,12 +1395,19 @@ void Device::RefreshDeviceMemoryUsage(VmaAllocator vma_allocator) const {
     vmaGetHeapBudgets(vma_allocator, budgets.data());
     u64 usage{};
     u64 budget{};
+    std::scoped_lock lock{heap_budget_mutex};
     for (const size_t heap : valid_heap_memory) {
+        heap_budgets[heap] = {budgets[heap].usage, budgets[heap].budget};
         usage += budgets[heap].usage;
         budget += budgets[heap].budget;
     }
     device_memory_usage.store(usage, std::memory_order_relaxed);
     device_memory_budget.store(budget, std::memory_order_relaxed);
+}
+
+std::array<VideoCommon::HeapMemoryBudget, VK_MAX_MEMORY_HEAPS> Device::GetHeapMemoryBudgets() const {
+    std::scoped_lock lock{heap_budget_mutex};
+    return heap_budgets;
 }
 
 u64 Device::GetDeviceMemoryBudget() const {

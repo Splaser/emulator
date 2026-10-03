@@ -888,16 +888,21 @@ void RasterizerVulkan::TickFrame() {
     compute_pass_descriptor_queue.TickFrame();
     fence_manager.TickFrame();
     staging_pool.TickFrame();
+    // Cache capacity is shared by textures and buffers; Vulkan heap estimates
+    // include other process resources and must remain a separate pressure signal.
+    const u64 cache_usage = GetTextureMemoryUsage() + GetBufferMemoryUsage();
+    const u64 cache_target = device.GetDeviceLocalMemory();
+    const auto heap_budgets = device.GetHeapMemoryBudgets();
     {
         std::scoped_lock lock{texture_cache.mutex};
-        texture_cache.TickFrame();
+        texture_cache.TickFrame(cache_usage, cache_target, heap_budgets);
 
         // Perform VRAM leak prevention cleanup for Insane mode
         texture_cache_runtime.CleanupUnusedBuffers();
     }
     {
         std::scoped_lock lock{buffer_cache.mutex};
-        buffer_cache.TickFrame();
+        buffer_cache.TickFrame(cache_usage, cache_target, heap_budgets);
 
         // Perform VRAM leak prevention cleanup for Insane mode
         buffer_cache_runtime.CleanupUnusedBuffers();

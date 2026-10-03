@@ -4,7 +4,10 @@
 
 #pragma once
 
+#include <exception>
+#include <new>
 #include <unordered_set>
+#include <utility>
 #include <boost/container/small_vector.hpp>
 
 #include "common/alignment.h"
@@ -51,41 +54,14 @@ TextureCache<P>::TextureCache(Runtime& runtime_, Tegra::MaxwellDeviceMemoryManag
     void(slot_images.insert(NullImageParams{}));
     void(slot_image_views.insert(runtime, NullImageViewParams{}));
     void(slot_samplers.insert(runtime, sampler_descriptor));
-
-    if constexpr (HAS_DEVICE_MEMORY_INFO) {
-        const s64 device_local_memory = static_cast<s64>(runtime.GetDeviceLocalMemory());
-        const s64 min_spacing_expected = device_local_memory - 1_GiB;
-        const s64 min_spacing_critical = device_local_memory - 512_MiB;
-        const s64 mem_threshold = (std::min)(device_local_memory, TARGET_THRESHOLD);
-        const s64 min_vacancy_expected = (6 * mem_threshold) / 10;
-        const s64 min_vacancy_critical = (2 * mem_threshold) / 10;
-        expected_memory = static_cast<u64>(
-            (std::min)(device_local_memory,
-                       (std::max)((std::min)(device_local_memory - min_vacancy_expected,
-                                             min_spacing_expected),
-                                  DEFAULT_EXPECTED_MEMORY)));
-        critical_memory = static_cast<u64>(
-            (std::min)(device_local_memory,
-                       (std::max)((std::min)(device_local_memory - min_vacancy_critical,
-                                             min_spacing_critical),
-                                  DEFAULT_CRITICAL_MEMORY)));
-        minimum_memory = static_cast<u64>((device_local_memory - mem_threshold) / 2);
-    } else {
-        expected_memory = DEFAULT_EXPECTED_MEMORY + 512_MiB;
-        critical_memory = DEFAULT_CRITICAL_MEMORY + 1_GiB;
-        minimum_memory = 0;
-    }
 }
 
 template <class P>
-void TextureCache<P>::RunGarbageCollector(u64 heap_usage, u64 heap_budget) {
-    const auto pressure = GetCacheMemoryPressure(total_used_memory, heap_usage, heap_budget,
-                                                 expected_memory, critical_memory);
-    const bool high_priority_mode = pressure.IsHigh();
-    const bool aggressive_mode = pressure.IsCritical();
-    const u64 ticks_to_destroy = aggressive_mode ? 10ULL : high_priority_mode ? 25ULL : 50ULL;
-    const size_t max_evictions = aggressive_mode ? 40 : (high_priority_mode ? 20 : 10);
-    const size_t max_download_bytes = aggressive_mode ? 128_MiB : 32_MiB;
+bool TextureCache<P>::RunGarbageCollector(bool aggressive_mode) {
+    const u64 ticks_to_destroy = aggressive_mode ? 10ULL : 25ULL;
+    const size_t max_evictions = aggressive_mode ? 40 : 20;
+    const size_t max_scans = aggressive_mode ? 128 : 64;
+    const size_t max_download_bytes = 32_MiB;
     size_t download_bytes = 0;
     boost::container::small_vector<ImageId, 40> pending_downloads;
     size_t num_evictions = 0;
@@ -104,19 +80,23 @@ void TextureCache<P>::RunGarbageCollector(u64 heap_usage, u64 heap_budget) {
             return false;
         }
 
-        const bool must_download =
-            image.IsSafeDownload() && False(image.flags & ImageFlagBits::BadOverlap);
-
-        if (!high_priority_mode && must_download) {
+        const bool must_download = True(image.flags & ImageFlagBits::GpuModified) &&
+                                   False(image.flags & ImageFlagBits::CpuModified);
+        if (must_download &&
+            (!image.IsSafeDownload() ||
+             True(image.flags & (ImageFlagBits::BadOverlap | ImageFlagBits::Rescaled)))) {
+            // Preserve dirty images whose readback is unsupported, ambiguous, or
+            // could allocate scale-helper resources in the middle of an OOM pass.
             return false;
         }
 
         if (must_download) {
             const size_t size = Common::AlignUp<size_t>(image.unswizzled_size_bytes, 64);
-            // Allow one oversized image so it cannot become permanently unevictable.
-            // Keep looking for clean images when the readback budget has been exhausted.
-            if (!pending_downloads.empty() &&
-                size > max_download_bytes - std::min(download_bytes, max_download_bytes)) {
+            // Oversized dirty images remain owned: never make a large allocation
+            // a prerequisite for reclaiming clean images under memory pressure.
+            if (pending_downloads.size() == max_evictions ||
+                size > max_download_bytes - download_bytes ||
+                image.guest_size_bytes > max_download_bytes) {
                 return false;
             }
             download_bytes += size;
@@ -127,20 +107,44 @@ void TextureCache<P>::RunGarbageCollector(u64 heap_usage, u64 heap_budget) {
             }
             UnregisterImage(image_id);
             DeleteImage(image_id, image.scale_tick > frame_tick + 5);
+            ++num_evictions;
         }
-        // Protected entries do not consume the eviction budget or block later LRU entries.
-        ++num_evictions;
-        return false;
+        // Dirty candidates do not block the clean-only fallback if staging later fails.
+        return num_evictions == max_evictions;
     };
 
-    lru_cache.ForEachItemBelow(frame_tick - ticks_to_destroy, Cleanup);
+    lru_cache.ForEachItemBelow(frame_tick - ticks_to_destroy, max_scans, Cleanup);
+    pending_downloads.resize(std::min(pending_downloads.size(), max_evictions - num_evictions));
     if (pending_downloads.empty()) {
-        return;
+        return num_evictions != 0;
+    }
+    download_bytes = 0;
+    size_t scratch_bytes = 0;
+    for (const ImageId id : pending_downloads) {
+        download_bytes += Common::AlignUp<size_t>(slot_images[id].unswizzled_size_bytes, 64);
+        scratch_bytes = std::max(scratch_bytes, size_t{slot_images[id].guest_size_bytes});
+    }
+    if (scratch_bytes > swizzle_data_buffer.capacity()) {
+        // Prepare bounded CPU swizzle storage before recording readbacks. Replace
+        // only after successful allocation so OOM cannot corrupt the old capacity.
+        Common::ScratchBuffer<u8> scratch;
+        try {
+            scratch.resize_destructive(scratch_bytes);
+        } catch (const std::bad_alloc&) {
+            return true;
+        }
+        swizzle_data_buffer = std::move(scratch);
     }
 
     // Record all readbacks into one staging allocation and wait only once. Images stay
     // registered until their contents have been written back to guest memory.
-    auto map = runtime.DownloadStagingBuffer(download_bytes);
+    const auto staging = runtime.TryGCDownloadStagingBuffer(download_bytes);
+    if (!staging) {
+        // No GPU commands or dirty-state changes have been made for these images.
+        // Cool down this failed readback attempt too, rather than retrying OOM every frame.
+        return true;
+    }
+    auto map = *staging;
     const size_t original_offset = map.offset;
     for (const ImageId image_id : pending_downloads) {
         Image& image = slot_images[image_id];
@@ -162,17 +166,16 @@ void TextureCache<P>::RunGarbageCollector(u64 heap_usage, u64 heap_budget) {
         UnregisterImage(image_id);
         DeleteImage(image_id, image.scale_tick > frame_tick + 5);
     }
+    return true;
 }
 
 template <class P>
-void TextureCache<P>::TickFrame() {
-    const bool can_report = runtime.CanReportMemoryUsage();
-    const u64 heap_usage = can_report ? runtime.GetDeviceMemoryUsage() : 0;
-    const u64 heap_budget = can_report ? runtime.GetDeviceMemoryBudget() : 0;
-    const auto pressure = GetCacheMemoryPressure(total_used_memory, heap_usage, heap_budget,
-                                                 expected_memory, critical_memory);
-    if (pressure.usage > minimum_memory || pressure.IsHigh()) {
-        RunGarbageCollector(heap_usage, heap_budget);
+void TextureCache<P>::TickFrame(u64 cache_usage, u64 cache_target,
+                               std::span<const HeapMemoryBudget> heaps) {
+    memory_pressure.Update(cache_usage, cache_target, heaps);
+    if (memory_pressure.CanReclaim(frame_tick, TICKS_TO_DESTROY) &&
+        RunGarbageCollector(memory_pressure.IsCritical())) {
+        memory_pressure.Reclaimed(frame_tick);
     }
     sentenced_images.Tick();
     sentenced_framebuffers.Tick();

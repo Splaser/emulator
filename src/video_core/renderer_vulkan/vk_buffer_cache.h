@@ -89,7 +89,7 @@ public:
 
     u64 GetDeviceMemoryUsage() const;
 
-    u64 GetDeviceMemoryBudget() const;
+    std::optional<StagingBufferRef> TryGCDownloadStagingBuffer(size_t size);
 
     void CleanupUnusedBuffers();
 

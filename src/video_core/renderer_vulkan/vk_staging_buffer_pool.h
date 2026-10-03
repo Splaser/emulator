@@ -5,6 +5,7 @@
 #pragma once
 
 #include <climits>
+#include <optional>
 #include <vector>
 
 #include "common/common_types.h"
@@ -35,6 +36,9 @@ public:
     ~StagingBufferPool();
 
     StagingBufferRef Request(size_t size, MemoryUsage usage, bool deferred = false);
+    // Shared, bounded readback storage for synchronous GC passes. Callers must
+    // Finish before reusing it. Failure leaves dirty resources owned by their cache.
+    std::optional<StagingBufferRef> RequestGCDownload(size_t size);
     void FreeDeferred(StagingBufferRef& ref);
 
     [[nodiscard]] VkBuffer StreamBuf() const noexcept {
@@ -120,6 +124,7 @@ public:
     Scheduler& scheduler;
 
     vk::Buffer stream_buffer;
+    std::optional<StagingBufferRef> gc_download;
     std::span<u8> stream_pointer;
     VkDeviceSize stream_buffer_size;
     VkDeviceSize region_size;
