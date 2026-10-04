@@ -84,7 +84,8 @@ bool TextureCache<P>::RunGarbageCollector(bool aggressive_mode) {
                                    False(image.flags & ImageFlagBits::CpuModified);
         if (must_download &&
             (!image.IsSafeDownload() ||
-             True(image.flags & (ImageFlagBits::BadOverlap | ImageFlagBits::Rescaled)))) {
+             True(image.flags & ImageFlagBits::BadOverlap) ||
+             (True(image.flags & ImageFlagBits::Rescaled) && image.NeedsScaleHelper()))) {
             // Preserve dirty images whose readback is unsupported, ambiguous, or
             // could allocate scale-helper resources in the middle of an OOM pass.
             return false;
