@@ -180,10 +180,11 @@ public:
 
     bool ScaleDown(bool ignore = false);
 
+    // Allows cache GC to defer readbacks that may allocate scaling helper resources.
+    bool NeedsScaleHelper() const;
+
 private:
     bool BlitScaleHelper(bool scale_up);
-
-    bool NeedsScaleHelper() const;
 
     Scheduler* scheduler{};
     TextureCacheRuntime* runtime{};
