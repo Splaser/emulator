@@ -16,9 +16,11 @@ add_executable(tests
     common/uint128.cpp
     core/aes_util.cpp
     core/core_timing.cpp
+    core/exit_callback.cpp
     core/internal_network/network.cpp
     precompiled_headers.h
     video_core/memory_tracker.cpp
+    video_core/image_size.cpp
     input_common/calibration_configuration_job.cpp
 )
 
