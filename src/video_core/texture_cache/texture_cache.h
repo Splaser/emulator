@@ -6,6 +6,7 @@
 
 #include <exception>
 #include <new>
+#include <numeric>
 #include <unordered_set>
 #include <utility>
 #include <boost/container/small_vector.hpp>
@@ -63,7 +64,11 @@ bool TextureCache<P>::RunGarbageCollector(bool aggressive_mode) {
     const size_t max_scans = aggressive_mode ? 128 : 64;
     const size_t max_download_bytes = 32_MiB;
     size_t download_bytes = 0;
-    boost::container::small_vector<ImageId, 40> pending_downloads;
+    struct PendingDownload {
+        ImageId image_id;
+        size_t offset;
+    };
+    boost::container::small_vector<PendingDownload, 40> pending_downloads;
     size_t num_evictions = 0;
 
     const auto Cleanup = [&](ImageId image_id) {
@@ -92,16 +97,20 @@ bool TextureCache<P>::RunGarbageCollector(bool aggressive_mode) {
         }
 
         if (must_download) {
-            const size_t size = Common::AlignUp<size_t>(image.unswizzled_size_bytes, 64);
+            // Texel-block sizes need not divide the staging alignment (e.g. RGB32 is 12).
+            const size_t alignment =
+                std::lcm(size_t{64}, size_t{VideoCore::Surface::BytesPerBlock(image.info.format)});
+            const size_t offset = Common::AlignUp(download_bytes, alignment);
+            const size_t size = image.unswizzled_size_bytes;
             // Oversized dirty images remain owned: never make a large allocation
             // a prerequisite for reclaiming clean images under memory pressure.
             if (pending_downloads.size() == max_evictions ||
-                size > max_download_bytes - download_bytes ||
+                offset > max_download_bytes || size > max_download_bytes - offset ||
                 image.guest_size_bytes > max_download_bytes) {
                 return false;
             }
-            download_bytes += size;
-            pending_downloads.push_back(image_id);
+            download_bytes = offset + size;
+            pending_downloads.push_back({image_id, offset});
         } else {
             if (True(image.flags & ImageFlagBits::Tracked)) {
                 UntrackImage(image, image_id);
@@ -119,11 +128,13 @@ bool TextureCache<P>::RunGarbageCollector(bool aggressive_mode) {
     if (pending_downloads.empty()) {
         return num_evictions != 0;
     }
-    download_bytes = 0;
+    const auto& last_download = pending_downloads.back();
+    download_bytes = last_download.offset +
+                     slot_images[last_download.image_id].unswizzled_size_bytes;
     size_t scratch_bytes = 0;
-    for (const ImageId id : pending_downloads) {
-        download_bytes += Common::AlignUp<size_t>(slot_images[id].unswizzled_size_bytes, 64);
-        scratch_bytes = std::max(scratch_bytes, size_t{slot_images[id].guest_size_bytes});
+    for (const auto& download : pending_downloads) {
+        scratch_bytes =
+            std::max(scratch_bytes, size_t{slot_images[download.image_id].guest_size_bytes});
     }
     if (scratch_bytes > swizzle_data_buffer.capacity()) {
         // Prepare bounded CPU swizzle storage before recording readbacks. Replace
@@ -147,20 +158,19 @@ bool TextureCache<P>::RunGarbageCollector(bool aggressive_mode) {
     }
     auto map = *staging;
     const size_t original_offset = map.offset;
-    for (const ImageId image_id : pending_downloads) {
-        Image& image = slot_images[image_id];
+    for (const auto& download : pending_downloads) {
+        Image& image = slot_images[download.image_id];
         const auto copies = FullDownloadCopies(image.info);
+        map.offset = original_offset + download.offset;
         image.DownloadMemory(map, copies);
-        map.offset += Common::AlignUp<size_t>(image.unswizzled_size_bytes, 64);
     }
     runtime.Finish();
-    size_t offset = 0;
-    for (const ImageId image_id : pending_downloads) {
+    for (const auto& download : pending_downloads) {
+        const ImageId image_id = download.image_id;
         Image& image = slot_images[image_id];
         const auto copies = FullDownloadCopies(image.info);
         SwizzleImage(*gpu_memory, image.gpu_addr, image.info, copies,
-                     map.mapped_span.subspan(original_offset + offset), swizzle_data_buffer);
-        offset += Common::AlignUp<size_t>(image.unswizzled_size_bytes, 64);
+                     map.mapped_span.subspan(original_offset + download.offset), swizzle_data_buffer);
         if (True(image.flags & ImageFlagBits::Tracked)) {
             UntrackImage(image, image_id);
         }
