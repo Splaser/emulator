@@ -22,6 +22,7 @@
 #include "common/thread_worker.h"
 #include "core/core.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
+#include "shader_recompiler/descriptor_limits.h"
 #include "shader_recompiler/environment.h"
 #include "shader_recompiler/frontend/maxwell/control_flow.h"
 #include "shader_recompiler/frontend/maxwell/translate_program.h"
@@ -64,37 +65,7 @@ constexpr u32 TRANSFERABLE_CACHE_VERSION = 18;
 constexpr u32 VULKAN_PIPELINE_CACHE_VERSION = 14;
 constexpr std::array<char, 8> VULKAN_CACHE_MAGIC_NUMBER{'y', 'u', 'z', 'u', 'v', 'k', 'c', 'h'};
 
-constexpr u32 AggregateDynamicDescriptorCap(std::span<const u32> counts, u64 fixed_descriptors,
-                                            u64 descriptor_limit) {
-    if (counts.empty() || fixed_descriptors + counts.size() > descriptor_limit) {
-        return 0;
-    }
-    u64 actual_descriptors{fixed_descriptors};
-    u32 largest_count{};
-    for (const u32 count : counts) {
-        actual_descriptors += count;
-        largest_count = std::max(largest_count, count);
-    }
-    if (actual_descriptors <= descriptor_limit) {
-        return largest_count;
-    }
-
-    u32 lower_bound{1};
-    u32 upper_bound{largest_count};
-    while (lower_bound < upper_bound) {
-        const u32 candidate{lower_bound + (upper_bound - lower_bound + 1) / 2};
-        u64 candidate_descriptors{fixed_descriptors};
-        for (const u32 count : counts) {
-            candidate_descriptors += std::min(count, candidate);
-        }
-        if (candidate_descriptors <= descriptor_limit) {
-            lower_bound = candidate;
-        } else {
-            upper_bound = candidate - 1;
-        }
-    }
-    return lower_bound;
-}
+using Shader::AggregateDynamicDescriptorCap;
 
 static_assert([] {
     constexpr std::array counts{2U, 10U};
@@ -475,13 +446,20 @@ PipelineCache::PipelineCache(Tegra::MaxwellDeviceMemoryManager& device_memory_,
         .support_snorm_render_buffer = true,
         .support_viewport_index_layer = device.IsExtShaderViewportIndexLayerSupported(),
         .min_ssbo_alignment = static_cast<u32>(device.GetStorageBufferAlignment()),
-        .max_per_stage_descriptor_sampled_images = device.GetMaxPerStageDescriptorSampledImages(),
+        .max_per_stage_descriptor_sampled_images =
+            device.IsDescriptorIndexingSupported()
+                ? std::min(device.GetMaxPerStageDescriptorSampledImages(),
+                           device.GetMaxPerStageDescriptorUpdateAfterBindSampledImages())
+                : device.GetMaxPerStageDescriptorSampledImages(),
         .max_per_stage_descriptor_storage_images =
             device.IsDescriptorIndexingSupported()
                 ? device.GetMaxPerStageDescriptorUpdateAfterBindStorageImages()
                 : device.GetMaxPerStageDescriptorStorageImages(),
         .max_per_stage_resources = device.GetMaxPerStageResources(),
-        .max_descriptor_set_sampled_images = device.GetMaxDescriptorSetSampledImages(),
+        .max_descriptor_set_sampled_images =
+            device.IsDescriptorIndexingSupported()
+                ? device.GetMaxDescriptorSetUpdateAfterBindSampledImages()
+                : device.GetMaxDescriptorSetSampledImages(),
         .max_descriptor_set_storage_images =
             device.IsDescriptorIndexingSupported()
                 ? device.GetMaxDescriptorSetUpdateAfterBindStorageImages()
@@ -822,6 +800,8 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         }
     }
     boost::container::small_vector<Shader::IR::Program*, 5> active_programs;
+    boost::container::small_vector<u32, 12> dynamic_sampled_counts;
+    u64 fixed_sampled_descriptors{};
     boost::container::small_vector<u32, 12> dynamic_storage_counts;
     u64 fixed_storage_descriptors{};
     for (size_t index = uses_vertex_a && uses_vertex_b ? 1 : 0;
@@ -834,6 +814,17 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         }
         Shader::IR::Program& program{programs[index]};
         active_programs.push_back(&program);
+        const auto account_sampled = [&](const auto& descriptors) {
+            for (const auto& desc : descriptors) {
+                if (desc.count > 1) {
+                    dynamic_sampled_counts.push_back(desc.count);
+                } else {
+                    fixed_sampled_descriptors += desc.count;
+                }
+            }
+        };
+        account_sampled(program.info.texture_buffer_descriptors);
+        account_sampled(program.info.texture_descriptors);
         const auto account_storage = [&](const auto& descriptors) {
             for (const auto& desc : descriptors) {
                 if (desc.count > 1) {
@@ -845,6 +836,27 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         };
         account_storage(program.info.image_buffer_descriptors);
         account_storage(program.info.image_descriptors);
+    }
+    const u64 sampled_set_limit{host_info.max_descriptor_set_sampled_images};
+    const u64 minimum_sampled_descriptors{fixed_sampled_descriptors +
+                                          dynamic_sampled_counts.size()};
+    if (minimum_sampled_descriptors > sampled_set_limit) {
+        LOG_ERROR(Render_Vulkan,
+                  "Graphics pipeline requires at least {} sampled image descriptors, limit is {}",
+                  minimum_sampled_descriptors, sampled_set_limit);
+        return nullptr;
+    }
+    u64 actual_sampled_descriptors{fixed_sampled_descriptors};
+    for (const u32 count : dynamic_sampled_counts) {
+        actual_sampled_descriptors += count;
+    }
+    if (actual_sampled_descriptors > sampled_set_limit) {
+        const u32 aggregate_dynamic_cap{AggregateDynamicDescriptorCap(
+            dynamic_sampled_counts, fixed_sampled_descriptors, sampled_set_limit)};
+        for (Shader::IR::Program* const program : active_programs) {
+            Shader::Optimization::ClampDynamicSampledTextureDescriptors(
+                *program, aggregate_dynamic_cap);
+        }
     }
     const u64 storage_set_limit{host_info.max_descriptor_set_storage_images};
     const u64 minimum_storage_descriptors{fixed_storage_descriptors +
@@ -865,6 +877,22 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         for (Shader::IR::Program* const program : active_programs) {
             Shader::Optimization::ClampDynamicStorageTextureDescriptors(
                 *program, aggregate_dynamic_cap);
+        }
+    }
+    for (const Shader::IR::Program* const program : active_programs) {
+        const auto& info{program->info};
+        const u64 sampled_count{static_cast<u64>(Shader::NumDescriptors(info.texture_descriptors)) +
+                                Shader::NumDescriptors(info.texture_buffer_descriptors)};
+        const u64 storage_count{static_cast<u64>(Shader::NumDescriptors(info.image_descriptors)) +
+                                Shader::NumDescriptors(info.image_buffer_descriptors)};
+        if (sampled_count > host_info.max_per_stage_descriptor_sampled_images ||
+            storage_count > host_info.max_per_stage_descriptor_storage_images) {
+            LOG_ERROR(Render_Vulkan,
+                      "Graphics stage {} exceeds descriptor limits: sampled {} / {}, storage {} / {}",
+                      static_cast<u32>(program->stage), sampled_count,
+                      host_info.max_per_stage_descriptor_sampled_images, storage_count,
+                      host_info.max_per_stage_descriptor_storage_images);
+            return nullptr;
         }
     }
     std::array<const Shader::Info*, Tegra::Engines::Maxwell3D::Regs::MaxShaderStage> infos{};

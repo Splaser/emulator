@@ -58,7 +58,10 @@ void MultiLevelPageTable<BaseAddr>::ReserveRange(u64 start, std::size_t size) {
         return;
     }
     const u64 address_space_size = 1ULL << address_space_bits;
-    ASSERT(start < address_space_size && size <= address_space_size - start);
+    if (start >= address_space_size || size > address_space_size - start) {
+        ASSERT(false);
+        return;
+    }
     const u64 new_start = start >> first_level_shift;
     const u64 new_end = (start + size - 1) >> first_level_shift;
     for (u64 i = new_start; i <= new_end; i++) {

@@ -325,6 +325,13 @@ bool IsTextureInteger(EmitContext& ctx, const IR::TextureInstInfo& info) {
     return ctx.textures.at(info.descriptor_index).is_integer;
 }
 
+Id TextureResultType(EmitContext& ctx, const IR::TextureInstInfo& info) {
+    const bool is_signed{info.type == TextureType::Buffer
+                            ? ctx.texture_buffers.at(info.descriptor_index).is_signed
+                            : ctx.textures.at(info.descriptor_index).is_signed};
+    return IsTextureInteger(ctx, info) ? (is_signed ? ctx.S32[4] : ctx.U32[4]) : ctx.F32[4];
+}
+
 inline Id DecorateImage(EmitContext& ctx, IR::Inst* inst, Id sample) {
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     if (info.relaxed_precision != 0)
@@ -544,7 +551,7 @@ Id EmitImageSampleImplicitLod(EmitContext& ctx, IR::Inst* inst, const IR::Value&
                               Id bias_lc, const IR::Value& offset) {
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     const bool is_integer{IsTextureInteger(ctx, info)};
-    const Id result_type{is_integer ? ctx.U32[4] : ctx.F32[4]};
+    const Id result_type{TextureResultType(ctx, info)};
     Id color;
     if (ctx.stage == Stage::Fragment) {
         const ImageOperands operands(ctx, info.has_bias != 0, false, info.has_lod_clamp != 0,
@@ -569,7 +576,7 @@ Id EmitImageSampleExplicitLod(EmitContext& ctx, IR::Inst* inst, const IR::Value&
                               Id lod, const IR::Value& offset) {
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     const bool is_integer{IsTextureInteger(ctx, info)};
-    const Id result_type{is_integer ? ctx.U32[4] : ctx.F32[4]};
+    const Id result_type{TextureResultType(ctx, info)};
     const ImageOperands operands(ctx, false, true, false, lod, offset);
     const Id color{Emit(&EmitContext::OpImageSparseSampleExplicitLod,
                         &EmitContext::OpImageSampleExplicitLod, ctx, inst, result_type,
@@ -611,7 +618,7 @@ Id EmitImageGather(EmitContext& ctx, IR::Inst* inst, const IR::Value& index, Id 
                    const IR::Value& offset, const IR::Value& offset2) {
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     const bool is_integer{IsTextureInteger(ctx, info)};
-    const Id result_type{is_integer ? ctx.U32[4] : ctx.F32[4]};
+    const Id result_type{TextureResultType(ctx, info)};
     const ImageOperands operands(ctx, offset, offset2);
     if (ctx.profile.need_gather_subpixel_offset) {
         coords = ImageGatherSubpixelOffset(ctx, info, TextureImage(ctx, info, index), coords);
@@ -627,7 +634,7 @@ Id EmitImageGatherDref(EmitContext& ctx, IR::Inst* inst, const IR::Value& index,
                        const IR::Value& offset, const IR::Value& offset2, Id dref) {
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     const bool is_integer{IsTextureInteger(ctx, info)};
-    const Id result_type{is_integer ? ctx.U32[4] : ctx.F32[4]};
+    const Id result_type{TextureResultType(ctx, info)};
     const ImageOperands operands(ctx, offset, offset2);
     if (ctx.profile.need_gather_subpixel_offset) {
         coords = ImageGatherSubpixelOffset(ctx, info, TextureImage(ctx, info, index), coords);
@@ -642,7 +649,7 @@ Id EmitImageFetch(EmitContext& ctx, IR::Inst* inst, const IR::Value& index, Id c
                   Id lod, Id ms) {
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     const bool is_integer{IsTextureInteger(ctx, info)};
-    const Id result_type{is_integer ? ctx.U32[4] : ctx.F32[4]};
+    const Id result_type{TextureResultType(ctx, info)};
     AddOffsetToCoordinates(ctx, info, coords, offset);
     if (info.type == TextureType::Buffer) {
         lod = Id{};
@@ -701,7 +708,7 @@ Id EmitImageGradient(EmitContext& ctx, IR::Inst* inst, const IR::Value& index, I
                      Id derivatives, const IR::Value& offset, Id lod_clamp) {
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     const bool is_integer{IsTextureInteger(ctx, info)};
-    const Id result_type{is_integer ? ctx.U32[4] : ctx.F32[4]};
+    const Id result_type{TextureResultType(ctx, info)};
     const auto operands = info.num_derivatives == 3
                               ? ImageOperands(ctx, info.has_lod_clamp != 0, derivatives,
                                               ctx.Def(offset), {}, lod_clamp)

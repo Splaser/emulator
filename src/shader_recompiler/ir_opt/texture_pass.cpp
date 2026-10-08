@@ -7,6 +7,7 @@
 
 #include <boost/container/small_vector.hpp>
 
+#include "shader_recompiler/descriptor_limits.h"
 #include "shader_recompiler/environment.h"
 #include "shader_recompiler/frontend/ir/basic_block.h"
 #include "shader_recompiler/frontend/ir/breadth_first_search.h"
@@ -190,7 +191,19 @@ u32 DynamicResourceCap(const IR::Program& program, const HostTranslateInfo& host
         StaticDescriptorCount(info.texture_descriptors) +
         StaticDescriptorCount(info.image_buffer_descriptors) +
         StaticDescriptorCount(info.image_descriptors) + ActiveFragmentColorAttachmentCount(program)};
-    return SaturatingSub(resource_limit, resource_static_count) / dynamic_arrays;
+    boost::container::small_vector<u32, 24> counts;
+    const auto collect_counts = [&](const auto& descriptors) {
+        for (const auto& desc : descriptors) {
+            if (desc.count > 1) {
+                counts.push_back(desc.count);
+            }
+        }
+    };
+    collect_counts(info.texture_buffer_descriptors);
+    collect_counts(info.texture_descriptors);
+    collect_counts(info.image_buffer_descriptors);
+    collect_counts(info.image_descriptors);
+    return AggregateDynamicDescriptorCap(counts, resource_static_count, resource_limit);
 }
 
 u32 DynamicSampledTextureCap(const IR::Program& program, const HostTranslateInfo& host_info,
@@ -200,10 +213,20 @@ u32 DynamicSampledTextureCap(const IR::Program& program, const HostTranslateInfo
                                                   host_info.max_descriptor_set_sampled_images))};
     const u32 sampled_static_count{StaticDescriptorCount(info.texture_buffer_descriptors) +
                                    StaticDescriptorCount(info.texture_descriptors)};
-    const u32 sampled_budget{SaturatingSub(sampled_limit, sampled_static_count)};
+    boost::container::small_vector<u32, 12> counts;
+    const auto collect_counts = [&](const auto& descriptors) {
+        for (const auto& desc : descriptors) {
+            if (desc.count > 1) {
+                counts.push_back(desc.count);
+            }
+        }
+    };
+    collect_counts(info.texture_buffer_descriptors);
+    collect_counts(info.texture_descriptors);
     const u32 sampled_cap{sampled_dynamic_arrays == 0
                               ? sampled_limit
-                              : sampled_budget / sampled_dynamic_arrays};
+                              : AggregateDynamicDescriptorCap(counts, sampled_static_count,
+                                                              sampled_limit)};
     const u32 resource_cap{DynamicResourceCap(program, host_info, total_dynamic_arrays)};
     return std::min(sampled_cap, resource_cap);
 }
@@ -616,6 +639,7 @@ public:
                    desc.has_secondary == existing.has_secondary;
         })};
         texture_buffer_descriptors[index].is_integer |= desc.is_integer;
+        texture_buffer_descriptors[index].is_signed |= desc.is_signed;
         return index;
     }
 
@@ -646,6 +670,7 @@ public:
         // TODO: Read this from TIC
         texture_descriptors[index].is_multisample |= desc.is_multisample;
         texture_descriptors[index].is_integer |= desc.is_integer;
+        texture_descriptors[index].is_signed |= desc.is_signed;
         return index;
     }
 
@@ -863,6 +888,7 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
                 const bool is_integer{IsTexturePixelFormatInteger(env, cbuf)};
                 index = descriptors.Add(TextureBufferDescriptor{
                     .is_integer = is_integer,
+                    .is_signed = env.IsTexturePixelFormatSignedInteger(GetTextureHandle(env, cbuf)),
                     .has_secondary = cbuf.has_secondary,
                     .cbuf_index = cbuf.index,
                     .cbuf_offset = cbuf.offset,
@@ -880,6 +906,7 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
                     .is_depth = flags.is_depth != 0,
                     .is_multisample = is_multisample,
                     .is_integer = is_integer,
+                    .is_signed = env.IsTexturePixelFormatSignedInteger(GetTextureHandle(env, cbuf)),
                     .has_secondary = cbuf.has_secondary,
                     .cbuf_index = cbuf.index,
                     .cbuf_offset = cbuf.offset,
@@ -931,6 +958,31 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
         throw RuntimeError("Descriptor limits leave no dynamic texture capacity");
     }
     ClampDynamicTextureDescriptors(program, to_replace, sampled_dynamic_cap, storage_dynamic_cap);
+}
+
+void ClampDynamicSampledTextureDescriptors(IR::Program& program, u32 max_count) {
+    TextureInstVector texture_insts;
+    for (IR::Block* const block : program.post_order_blocks) {
+        for (IR::Inst& inst : block->Instructions()) {
+            switch (inst.GetOpcode()) {
+            case IR::Opcode::ImageSampleImplicitLod:
+            case IR::Opcode::ImageSampleExplicitLod:
+            case IR::Opcode::ImageSampleDrefImplicitLod:
+            case IR::Opcode::ImageSampleDrefExplicitLod:
+            case IR::Opcode::ImageGather:
+            case IR::Opcode::ImageGatherDref:
+            case IR::Opcode::ImageFetch:
+            case IR::Opcode::ImageQueryDimensions:
+            case IR::Opcode::ImageQueryLod:
+            case IR::Opcode::ImageGradient:
+                texture_insts.push_back(TextureInst{.cbuf = {}, .inst = &inst, .block = block});
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    ClampDynamicTextureDescriptors(program, texture_insts, max_count, ~0U);
 }
 
 void ClampDynamicStorageTextureDescriptors(IR::Program& program, u32 max_count) {

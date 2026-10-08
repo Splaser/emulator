@@ -104,6 +104,10 @@ public:
         return false;
     }
 
+    bool IsTexturePixelFormatSignedInteger(u32) override {
+        return false;
+    }
+
     u32 ReadViewportTransformState() override {
         return 1u;
     }
