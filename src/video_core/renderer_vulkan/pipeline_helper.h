@@ -163,7 +163,7 @@ private:
             });
             ++set.binding;
             set.num_descriptors += descriptors[i].count;
-            shared_offset += sizeof(DescriptorUpdateEntry);
+            shared_offset += descriptors[i].count * sizeof(DescriptorUpdateEntry);
         }
     }
 
