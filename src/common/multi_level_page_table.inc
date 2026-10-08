@@ -53,14 +53,14 @@ MultiLevelPageTable<BaseAddr>::~MultiLevelPageTable() noexcept {
 }
 
 template <typename BaseAddr>
-void MultiLevelPageTable<BaseAddr>::ReserveRange(u64 start, std::size_t size) {
+bool MultiLevelPageTable<BaseAddr>::ReserveRange(u64 start, std::size_t size) {
     if (size == 0) {
-        return;
+        return true;
     }
     const u64 address_space_size = 1ULL << address_space_bits;
     if (start >= address_space_size || size > address_space_size - start) {
         ASSERT(false);
-        return;
+        return false;
     }
     const u64 new_start = start >> first_level_shift;
     const u64 new_end = (start + size - 1) >> first_level_shift;
@@ -69,6 +69,7 @@ void MultiLevelPageTable<BaseAddr>::ReserveRange(u64 start, std::size_t size) {
             AllocateLevel(i);
         }
     }
+    return true;
 }
 
 template <typename BaseAddr>
