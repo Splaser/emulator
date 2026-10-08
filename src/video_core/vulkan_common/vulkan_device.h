@@ -313,6 +313,10 @@ public:
         return properties.properties.limits.maxPerStageDescriptorStorageImages;
     }
 
+    u32 GetMaxPerStageDescriptorUpdateAfterBindSampledImages() const {
+        return properties.descriptor_indexing.maxPerStageDescriptorUpdateAfterBindSampledImages;
+    }
+
     u32 GetMaxPerStageDescriptorUpdateAfterBindStorageImages() const {
         return properties.descriptor_indexing.maxPerStageDescriptorUpdateAfterBindStorageImages;
     }
@@ -327,6 +331,10 @@ public:
 
     u32 GetMaxDescriptorSetStorageImages() const {
         return properties.properties.limits.maxDescriptorSetStorageImages;
+    }
+
+    u32 GetMaxDescriptorSetUpdateAfterBindSampledImages() const {
+        return properties.descriptor_indexing.maxDescriptorSetUpdateAfterBindSampledImages;
     }
 
     u32 GetMaxDescriptorSetUpdateAfterBindStorageImages() const {
