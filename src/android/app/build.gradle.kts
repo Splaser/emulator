@@ -36,7 +36,7 @@ tasks.configureEach {
  * next 680 years.
  */
 val autoVersion = (((System.currentTimeMillis() / 1000) - 1451606400) / 10).toInt()
-val citronAndroidUseCpm = providers.gradleProperty("citronAndroidUseCpm").orNull?.toBoolean() ?: false
+val citronAndroidUseCpm = providers.gradleProperty("citronAndroidUseCpm").orNull?.toBoolean() ?: true
 
 @Suppress("UnstableApiUsage")
 android {
