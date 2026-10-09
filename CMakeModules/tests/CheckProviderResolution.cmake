@@ -18,7 +18,7 @@ function(check_case name body expected_error)
     set(source "${CHECK_BINARY_DIR}/${name}")
     file(MAKE_DIRECTORY "${source}")
     file(WRITE "${source}/CMakeLists.txt"
-        "cmake_minimum_required(VERSION 3.22)\nproject(ProviderResolution NONE)\n${body}\n")
+        "cmake_minimum_required(VERSION 3.22)\nproject(ProviderResolution NONE)\nset(CMAKE_SOURCE_DIR \"${_repo}\")\n${body}\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -S "${source}" -B "${source}/build"
         RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
     if (expected_error)
@@ -50,3 +50,14 @@ check_case(opus-config "list(APPEND CMAKE_MODULE_PATH \"\${CMAKE_CURRENT_SOURCE_
 file(MAKE_DIRECTORY "${CHECK_BINARY_DIR}/opus-no-pkgconfig/modules")
 file(WRITE "${CHECK_BINARY_DIR}/opus-no-pkgconfig/modules/FindPkgConfig.cmake" "set(PkgConfig_FOUND FALSE)\n")
 check_case(opus-no-pkgconfig "list(APPEND CMAKE_MODULE_PATH \"\${CMAKE_CURRENT_SOURCE_DIR}/modules\" \"${_repo}/CMakeModules\")\nfind_package(Opus QUIET MODULE)\nif(Opus_FOUND)\nmessage(FATAL_ERROR \"Missing provider was reported found\")\nendif()" "")
+
+# Exercise Sirit's unchanged find_package call with parent source/import targets.
+foreach(kind raw canonical)
+    if(kind STREQUAL "raw")
+        set(headers "add_library(SPIRV-Headers INTERFACE)")
+    else()
+        set(headers "add_library(SPIRV-Headers::SPIRV-Headers INTERFACE IMPORTED GLOBAL)")
+    endif()
+    check_case(sirit-package-${kind}
+        "${headers}\ninclude(\"${_repo}/CMakeModules/SiritProvider.cmake\")\ncitron_prepare_sirit_headers()\nfind_package(SPIRV-Headers REQUIRED CONFIG)" "")
+endforeach()

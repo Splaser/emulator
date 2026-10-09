@@ -460,15 +460,13 @@ if (NOT TARGET sirit::sirit AND NOT TARGET sirit)
     if (NOT TARGET SPIRV-Headers AND NOT TARGET SPIRV-Headers::SPIRV-Headers)
         message(FATAL_ERROR "Sirit requires the project SPIRV-Headers target; no provider supplied it")
     endif()
+    include(${CMAKE_SOURCE_DIR}/CMakeModules/SiritProvider.cmake)
+    citron_prepare_sirit_headers()
     set(SIRIT_USE_SYSTEM_SPIRV_HEADERS ON)
     CPMAddPackage(
         NAME sirit
         GITHUB_REPOSITORY yuzu-mirror/sirit
         GIT_TAG ab75463999f4f3291976b079d42d52ee91eebf3f
-        PATCH_COMMAND
-            "${CMAKE_COMMAND}"
-            "-DSIRIT_SOURCE_DIR=<SOURCE_DIR>"
-            -P "${CMAKE_SOURCE_DIR}/CMakeModules/PatchSirit.cmake"
     )
     if (CITRON_CLANGCL AND TARGET sirit)
         get_target_property(_sirit_compile_options sirit COMPILE_OPTIONS)
@@ -485,21 +483,17 @@ if (NOT TARGET sirit::sirit AND NOT TARGET sirit)
     endif()
 endif()
 
-# ── dynarmic (xinitrcn1 fork) ─────────────────────────────────────────────────
+# ── dynarmic (Citron integration fork) ─────────────────────────────────────────────────
 if ((ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64) AND NOT (MSVC AND ARCHITECTURE_arm64))
     if (NOT TARGET dynarmic::dynarmic)
         CPMAddPackage(
             NAME dynarmic
-            GITHUB_REPOSITORY xinitrcn1/dynarmic
-            GIT_TAG b1440b456b80f3dde0c01665932d114c4961ee93
+            GITHUB_REPOSITORY Splaser/dynarmic
+            GIT_TAG 31bdd01bdbe2fc68db8576ba397bce94322f6735
             OPTIONS
                 "DYNARMIC_USE_PRECOMPILED_HEADERS ${CITRON_USE_PRECOMPILED_HEADERS}"
                 "DYNARMIC_IGNORE_ASSERTS ON"
                 "DYNARMIC_TESTS OFF"
-            PATCH_COMMAND
-                "${CMAKE_COMMAND}"
-                "-DDYNARMIC_SOURCE_DIR=<SOURCE_DIR>"
-                -P "${CMAKE_SOURCE_DIR}/CMakeModules/PatchDynarmic.cmake"
         )
         if (TARGET dynarmic AND NOT TARGET dynarmic::dynarmic)
             add_library(dynarmic::dynarmic ALIAS dynarmic)
@@ -525,11 +519,7 @@ if (ANDROID AND ARCHITECTURE_arm64 AND NOT TARGET adrenotools::adrenotools AND N
     CPMAddPackage(
         NAME libadrenotools
         GITHUB_REPOSITORY bylaws/libadrenotools
-        GIT_TAG 5cd3f5c5ceea6d9e9d435ccdd922d9b99e55d10b
-        PATCH_COMMAND
-            "${CMAKE_COMMAND}"
-            "-DLIBADRENOTOOLS_SOURCE_DIR=<SOURCE_DIR>"
-            -P "${CMAKE_SOURCE_DIR}/CMakeModules/PatchLibadrenotools.cmake"
+        GIT_TAG 8fae8ce254dfc1344527e05301e43f37dea2df80
     )
 endif()
 

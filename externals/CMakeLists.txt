@@ -43,15 +43,6 @@ endif()
 if ((ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64) AND NOT TARGET dynarmic::dynarmic)
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dynarmic/CMakeLists.txt")
         set(DYNARMIC_IGNORE_ASSERTS ON)
-        execute_process(
-            COMMAND "${CMAKE_COMMAND}"
-                "-DDYNARMIC_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/dynarmic"
-                -P "${CMAKE_SOURCE_DIR}/CMakeModules/PatchDynarmic.cmake"
-            RESULT_VARIABLE _dynarmic_patch_result
-        )
-        if (NOT _dynarmic_patch_result EQUAL 0)
-            message(FATAL_ERROR "Failed to apply Dynarmic host compatibility patch")
-        endif()
         add_subdirectory(dynarmic)
         add_library(dynarmic::dynarmic ALIAS dynarmic)
     endif()
@@ -81,17 +72,10 @@ if (NOT TARGET sirit::sirit AND NOT TARGET sirit)
     if (NOT TARGET SPIRV-Headers AND NOT TARGET SPIRV-Headers::SPIRV-Headers)
         message(FATAL_ERROR "Sirit requires the project SPIRV-Headers target; no provider supplied it")
     endif()
+    include(${CMAKE_SOURCE_DIR}/CMakeModules/SiritProvider.cmake)
+    citron_prepare_sirit_headers()
     set(SIRIT_USE_SYSTEM_SPIRV_HEADERS ON)
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sirit/CMakeLists.txt")
-        execute_process(
-            COMMAND "${CMAKE_COMMAND}"
-                "-DSIRIT_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/sirit"
-                -P "${CMAKE_SOURCE_DIR}/CMakeModules/PatchSirit.cmake"
-            RESULT_VARIABLE _sirit_patch_result
-        )
-        if (NOT _sirit_patch_result EQUAL 0)
-            message(FATAL_ERROR "Failed to apply Sirit provider target patch")
-        endif()
         add_subdirectory(sirit)
     endif()
 endif()
@@ -243,15 +227,6 @@ endif()
 
 if (ANDROID)
    if (ARCHITECTURE_arm64 AND NOT TARGET adrenotools::adrenotools AND NOT TARGET adrenotools)
-       execute_process(
-           COMMAND "${CMAKE_COMMAND}"
-               "-DLIBADRENOTOOLS_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/libadrenotools"
-               -P "${CMAKE_SOURCE_DIR}/CMakeModules/PatchLibadrenotools.cmake"
-           RESULT_VARIABLE _adrenotools_patch_result
-       )
-       if (NOT _adrenotools_patch_result EQUAL 0)
-           message(FATAL_ERROR "Failed to apply libadrenotools runtime page-size patch")
-       endif()
        add_subdirectory(libadrenotools)
    endif()
 endif()
