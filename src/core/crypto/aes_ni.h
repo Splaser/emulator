@@ -41,9 +41,9 @@
 // aes_ni.h is x86-64 only. On other architectures the entire file is a no-op;
 // callers select the implementation with CITRON_HAS_AES_NI.
 // GNU-style per-function ISA targeting is required by this implementation.
-// MSVC and clang-cl use the existing OpenSSL implementation in consumers.
+// Clang (including clang-cl) and GCC support per-function target attributes.
 #if (defined(__x86_64__) || defined(_M_X64)) && \
-    (defined(__GNUC__) || (defined(__clang__) && !defined(_MSC_VER)))
+    (defined(__GNUC__) || defined(__clang__))
 #define CITRON_HAS_AES_NI 1
 #else
 #define CITRON_HAS_AES_NI 0
