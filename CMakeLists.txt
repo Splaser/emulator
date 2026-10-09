@@ -109,10 +109,10 @@ CMAKE_DEPENDENT_OPTION(CITRON_ROOM "Compile LDN room server" ON "NOT ANDROID" OF
 
 CMAKE_DEPENDENT_OPTION(CITRON_CRASH_DUMPS "Compile crash dump (Minidump) support" OFF "WIN32 OR LINUX" OFF)
 
-# CITRON_USE_CPM is the primary way to fetch dependencies on Linux and for Clangtron.
-# vcpkg is supported primarily for native MSVC and Android builds.
-option(CITRON_USE_BUNDLED_VCPKG "Use vcpkg for citron dependencies" "${MSVC}")
-option(CITRON_USE_CPM "Use CPM.cmake to fetch dependencies" OFF)
+# CPM is the default dependency provider on all platforms.
+# Bundled vcpkg remains available as an explicit compatibility provider.
+option(CITRON_USE_BUNDLED_VCPKG "Use vcpkg for citron dependencies" OFF)
+option(CITRON_USE_CPM "Use CPM.cmake to fetch dependencies" ON)
 if (CITRON_USE_CPM AND CITRON_USE_BUNDLED_VCPKG)
     message(FATAL_ERROR "CITRON_USE_CPM and CITRON_USE_BUNDLED_VCPKG cannot both be enabled")
 endif()
