@@ -15,8 +15,8 @@ Sirit uses the parent SPIRV-Headers provider through a build-tree
 nested headers or require a source patch.
 
 Dynarmic is pinned to the Citron integration fork for its C++23 requirements,
-direct `<print>` include and RegList formatter correction. Its containers use
-Boost hashing. Citron's tuple/pair hasher stays in `common/container_hash.h`;
+direct `<print>` include and RegList formatter correction. Its containers preserve `std::hash` for ordinary keys and use Boost hashing
+for tuple/pair keys. Citron's tuple/pair hasher stays in `common/container_hash.h`;
 no Citron headers or compatibility patches are injected into Dynarmic.
 
 OpenSSL remains at 3.6.1. Android keeps its ABI/API-aware OpenSSL builder and
