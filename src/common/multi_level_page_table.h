@@ -44,7 +44,15 @@ public:
         return *this;
     }
 
-    void ReserveRange(u64 start, std::size_t size);
+    /// Reserve every first-level allocation intersecting [start, start + size).
+    /// Return false if the requested range is outside the address space.
+    [[nodiscard]] bool ReserveRange(u64 start, std::size_t size);
+
+    [[nodiscard]] BaseAddr* TryGet(std::size_t index) noexcept;
+
+    [[nodiscard]] const BaseAddr* TryGet(std::size_t index) const noexcept;
+
+    [[nodiscard]] BaseAddr& GetOrAllocate(std::size_t index);
 
     [[nodiscard]] const BaseAddr& operator[](std::size_t index) const {
         return base_ptr[index];
