@@ -61,7 +61,7 @@ public:
 
     u64 GetDeviceMemoryUsage() const;
 
-    std::optional<StagingBufferRef> TryGCDownloadStagingBuffer(size_t size);
+    GCDownloadRef TryGCDownloadStagingBuffer(size_t size);
 
     bool CanReportMemoryUsage() const;
 

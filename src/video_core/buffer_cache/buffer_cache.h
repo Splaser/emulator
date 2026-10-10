@@ -107,6 +107,7 @@ bool BufferCache<P>::RunGarbageCollector(bool aggressive_gc) {
                          : copies[num_copies - 1].dst_offset +
                                Common::AlignUp<u64>(copies[num_copies - 1].size, 64);
     if (download_bytes != 0) {
+        // Retain staging until Finish and all mapped reads below have completed.
         const auto staging = runtime.TryGCDownloadStagingBuffer(download_bytes);
         if (!staging) {
             // Dirty tracking and ownership are unchanged. Rate-limit failed attempts too.
