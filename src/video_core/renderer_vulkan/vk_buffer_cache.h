@@ -89,6 +89,8 @@ public:
 
     u64 GetDeviceMemoryUsage() const;
 
+    GCDownloadRef TryGCDownloadStagingBuffer(size_t size);
+
     void CleanupUnusedBuffers();
 
     bool CanReportMemoryUsage() const;

@@ -4,11 +4,16 @@
 
 #pragma once
 
+#include <exception>
+#include <new>
+#include <numeric>
 #include <unordered_set>
+#include <utility>
 #include <boost/container/small_vector.hpp>
 
 #include "common/alignment.h"
 #include "common/settings.h"
+#include "video_core/cache_memory_pressure.h"
 #include "video_core/control/channel_state.h"
 #include "video_core/dirty_flags.h"
 #include "video_core/engines/kepler_compute.h"
@@ -50,52 +55,26 @@ TextureCache<P>::TextureCache(Runtime& runtime_, Tegra::MaxwellDeviceMemoryManag
     void(slot_images.insert(NullImageParams{}));
     void(slot_image_views.insert(runtime, NullImageViewParams{}));
     void(slot_samplers.insert(runtime, sampler_descriptor));
-
-    if constexpr (HAS_DEVICE_MEMORY_INFO) {
-        const s64 device_local_memory = static_cast<s64>(runtime.GetDeviceLocalMemory());
-        const s64 min_spacing_expected = device_local_memory - 1_GiB;
-        const s64 min_spacing_critical = device_local_memory - 512_MiB;
-        const s64 mem_threshold = (std::min)(device_local_memory, TARGET_THRESHOLD);
-        const s64 min_vacancy_expected = (6 * mem_threshold) / 10;
-        const s64 min_vacancy_critical = (2 * mem_threshold) / 10;
-        expected_memory = static_cast<u64>(
-            (std::min)(device_local_memory,
-                       (std::max)((std::min)(device_local_memory - min_vacancy_expected,
-                                             min_spacing_expected),
-                                  DEFAULT_EXPECTED_MEMORY)));
-        critical_memory = static_cast<u64>(
-            (std::min)(device_local_memory,
-                       (std::max)((std::min)(device_local_memory - min_vacancy_critical,
-                                             min_spacing_critical),
-                                  DEFAULT_CRITICAL_MEMORY)));
-        minimum_memory = static_cast<u64>((device_local_memory - mem_threshold) / 2);
-    } else {
-        expected_memory = DEFAULT_EXPECTED_MEMORY + 512_MiB;
-        critical_memory = DEFAULT_CRITICAL_MEMORY + 1_GiB;
-        minimum_memory = 0;
-    }
 }
 
 template <class P>
-void TextureCache<P>::RunGarbageCollector() {
-    bool high_priority_mode = false;
-    bool aggressive_mode = false;
-    u64 ticks_to_destroy = 0;
-    size_t num_iterations = 0;
-
-    const auto Configure = [&](bool allow_aggressive) {
-        high_priority_mode = total_used_memory >= expected_memory;
-        aggressive_mode = allow_aggressive && total_used_memory >= critical_memory;
-        ticks_to_destroy = aggressive_mode ? 10ULL : high_priority_mode ? 25ULL : 50ULL;
-        num_iterations = aggressive_mode ? 40 : (high_priority_mode ? 20 : 10);
+bool TextureCache<P>::RunGarbageCollector(bool aggressive_mode) {
+    const u64 ticks_to_destroy = aggressive_mode ? 10ULL : 25ULL;
+    const size_t max_evictions = aggressive_mode ? 40 : 20;
+    const size_t max_scans = aggressive_mode ? 128 : 64;
+    const size_t max_download_bytes = 32_MiB;
+    size_t download_bytes = 0;
+    struct PendingDownload {
+        ImageId image_id;
+        size_t offset;
     };
+    boost::container::small_vector<PendingDownload, 40> pending_downloads;
+    size_t num_evictions = 0;
 
-    const auto Cleanup = [this, &num_iterations, &high_priority_mode,
-                          &aggressive_mode](ImageId image_id) {
-        if (num_iterations == 0) {
+    const auto Cleanup = [&](ImageId image_id) {
+        if (num_evictions == max_evictions) {
             return true;
         }
-        --num_iterations;
         auto& image = slot_images[image_id];
 
         if (True(image.flags & ImageFlagBits::IsDecoding)) {
@@ -106,51 +85,109 @@ void TextureCache<P>::RunGarbageCollector() {
             return false;
         }
 
-        const bool must_download =
-            image.IsSafeDownload() && False(image.flags & ImageFlagBits::BadOverlap);
-
-        if (!high_priority_mode && must_download) {
+        const bool must_download = True(image.flags & ImageFlagBits::GpuModified) &&
+                                   False(image.flags & ImageFlagBits::CpuModified);
+        if (must_download &&
+            (!image.IsSafeDownload() ||
+             True(image.flags & ImageFlagBits::BadOverlap) ||
+             (True(image.flags & ImageFlagBits::Rescaled) && image.NeedsScaleHelper()))) {
+            // Preserve dirty images whose readback is unsupported, ambiguous, or
+            // could allocate scale-helper resources in the middle of an OOM pass.
             return false;
         }
 
         if (must_download) {
-            auto map = runtime.DownloadStagingBuffer(image.unswizzled_size_bytes);
-            const auto copies = FullDownloadCopies(image.info);
-            image.DownloadMemory(map, copies);
-            runtime.Finish();
-            SwizzleImage(*gpu_memory, image.gpu_addr, image.info, copies, map.mapped_span,
-                         swizzle_data_buffer);
+            // Texel-block sizes need not divide the staging alignment (e.g. RGB32 is 12).
+            const size_t alignment =
+                std::lcm(size_t{64}, size_t{VideoCore::Surface::BytesPerBlock(image.info.format)});
+            const size_t offset = Common::AlignUp(download_bytes, alignment);
+            const size_t size = image.unswizzled_size_bytes;
+            // Oversized dirty images remain owned: never make a large allocation
+            // a prerequisite for reclaiming clean images under memory pressure.
+            if (pending_downloads.size() == max_evictions ||
+                offset > max_download_bytes || size > max_download_bytes - offset ||
+                image.guest_size_bytes > max_download_bytes) {
+                return false;
+            }
+            download_bytes = offset + size;
+            pending_downloads.push_back({image_id, offset});
+        } else {
+            if (True(image.flags & ImageFlagBits::Tracked)) {
+                UntrackImage(image, image_id);
+            }
+            UnregisterImage(image_id);
+            DeleteImage(image_id, image.scale_tick > frame_tick + 5);
+            ++num_evictions;
         }
+        // Dirty candidates do not block the clean-only fallback if staging later fails.
+        return num_evictions == max_evictions;
+    };
 
+    lru_cache.ForEachItemBelow(frame_tick - ticks_to_destroy, max_scans, Cleanup);
+    pending_downloads.resize(std::min(pending_downloads.size(), max_evictions - num_evictions));
+    if (pending_downloads.empty()) {
+        return num_evictions != 0;
+    }
+    const auto& last_download = pending_downloads.back();
+    download_bytes = last_download.offset +
+                     slot_images[last_download.image_id].unswizzled_size_bytes;
+    size_t scratch_bytes = 0;
+    for (const auto& download : pending_downloads) {
+        scratch_bytes =
+            std::max(scratch_bytes, size_t{slot_images[download.image_id].guest_size_bytes});
+    }
+    if (scratch_bytes > swizzle_data_buffer.capacity()) {
+        // Prepare bounded CPU swizzle storage before recording readbacks. Replace
+        // only after successful allocation so OOM cannot corrupt the old capacity.
+        Common::ScratchBuffer<u8> scratch;
+        try {
+            scratch.resize_destructive(scratch_bytes);
+        } catch (const std::bad_alloc&) {
+            return true;
+        }
+        swizzle_data_buffer = std::move(scratch);
+    }
+
+    // Record all readbacks into one staging allocation and wait only once. Images stay
+    // registered until their contents have been written back to guest memory.
+    const auto staging = runtime.TryGCDownloadStagingBuffer(download_bytes);
+    if (!staging) {
+        // No GPU commands or dirty-state changes have been made for these images.
+        // Cool down this failed readback attempt too, rather than retrying OOM every frame.
+        return true;
+    }
+    // Retain staging until Finish and all mapped reads below have completed.
+    auto map = *staging;
+    const size_t original_offset = map.offset;
+    for (const auto& download : pending_downloads) {
+        Image& image = slot_images[download.image_id];
+        const auto copies = FullDownloadCopies(image.info);
+        map.offset = original_offset + download.offset;
+        image.DownloadMemory(map, copies);
+    }
+    runtime.Finish();
+    for (const auto& download : pending_downloads) {
+        const ImageId image_id = download.image_id;
+        Image& image = slot_images[image_id];
+        const auto copies = FullDownloadCopies(image.info);
+        SwizzleImage(*gpu_memory, image.gpu_addr, image.info, copies,
+                     map.mapped_span.subspan(original_offset + download.offset), swizzle_data_buffer);
         if (True(image.flags & ImageFlagBits::Tracked)) {
             UntrackImage(image, image_id);
         }
         UnregisterImage(image_id);
         DeleteImage(image_id, image.scale_tick > frame_tick + 5);
-        if (aggressive_mode && total_used_memory < critical_memory) {
-            num_iterations >>= 2;
-            aggressive_mode = false;
-        } else if (high_priority_mode && total_used_memory < expected_memory) {
-            num_iterations >>= 1;
-            high_priority_mode = false;
-        }
-        return false;
-    };
-
-    Configure(false);
-    lru_cache.ForEachItemBelow(frame_tick - ticks_to_destroy, Cleanup);
-    if (total_used_memory >= critical_memory) {
-        Configure(true);
-        lru_cache.ForEachItemBelow(frame_tick - ticks_to_destroy, Cleanup);
     }
+    return true;
 }
 
 template <class P>
-void TextureCache<P>::TickFrame() {
-    const u64 gc_memory_usage =
-        runtime.CanReportMemoryUsage() ? runtime.GetDeviceMemoryUsage() : total_used_memory;
-    if (gc_memory_usage > minimum_memory) {
-        RunGarbageCollector();
+void TextureCache<P>::TickFrame(u64 cache_usage, u64 cache_target,
+                               std::span<const HeapMemoryBudget> heaps) {
+    memory_pressure.Update(cache_usage, cache_target, heaps);
+    if (memory_pressure.CanReclaim(frame_tick, TICKS_TO_DESTROY) &&
+        RunGarbageCollector(memory_pressure.IsCritical())) {
+        memory_pressure.Reclaimed(frame_tick);
     }
     sentenced_images.Tick();
     sentenced_framebuffers.Tick();
@@ -214,16 +251,6 @@ template <class P>
 void TextureCache<P>::FillComputeImageViews(std::span<ImageViewInOut> views) {
     FillImageViews<true>(channel_state->compute_image_table, channel_state->compute_image_view_ids,
                          views);
-}
-
-template <class P>
-u64 TextureCache<P>::GraphicsImageTableGeneration() const noexcept {
-    return channel_state->graphics_image_table.Generation();
-}
-
-template <class P>
-u64 TextureCache<P>::ComputeImageTableGeneration() const noexcept {
-    return channel_state->compute_image_table.Generation();
 }
 
 template <class P>
@@ -505,12 +532,7 @@ void TextureCache<P>::FillImageViews(DescriptorTable<TICEntry>& table,
             has_blacklisted = false;
         }
         for (ImageViewInOut& view : views) {
-            if (view.id_cached) {
-                // Already resolved and prepared during cache population.
-                // Batch-prepare unique images below instead of per-entry PrepareImageView.
-            } else {
-                view.id = VisitImageView(table, cached_image_view_ids, view.index);
-            }
+            view.id = VisitImageView(table, cached_image_view_ids, view.index);
             if constexpr (has_blacklists) {
                 if (view.blacklist && view.id != NULL_IMAGE_VIEW_ID) {
                     const ImageViewBase& image_view{slot_image_views[view.id]};
@@ -521,27 +543,6 @@ void TextureCache<P>::FillImageViews(DescriptorTable<TICEntry>& table,
             }
         }
     } while (has_deleted_images || (has_blacklists && has_blacklisted));
-
-    // Batch-prepare unique images from id_cached views.  The cache-miss path
-    // already called VisitImageView (which does PrepareImageView) for each
-    // entry; here we only need to touch/refresh each *unique* underlying
-    // image once, rather than 1024 individual PrepareImageView calls.
-    boost::container::small_vector<ImageId, 64> cached_image_ids;
-    for (const ImageViewInOut& view : views) {
-        if (view.id_cached && view.id != NULL_IMAGE_VIEW_ID) {
-            const ImageViewBase& iv = slot_image_views[view.id];
-            if (!iv.IsBuffer()) {
-                cached_image_ids.push_back(iv.image_id);
-            }
-        }
-    }
-    std::sort(cached_image_ids.begin(), cached_image_ids.end());
-    cached_image_ids.erase(
-        std::unique(cached_image_ids.begin(), cached_image_ids.end()),
-        cached_image_ids.end());
-    for (const ImageId id : cached_image_ids) {
-        PrepareImage(id, false, false);
-    }
 }
 
 template <class P>
@@ -1177,6 +1178,57 @@ ImageViewId TextureCache<P>::CreateImageView(const TICEntry& config) {
     }
     const u32 layer_offset = config.BaseLayer() * info.layer_stride;
     const GPUVAddr image_gpu_addr = config.Address() - layer_offset;
+
+    using PixelFormat = VideoCore::Surface::PixelFormat;
+    if (info.format == PixelFormat::R32_FLOAT || info.format == PixelFormat::R16_UNORM) {
+        const PixelFormat depth_format = info.format == PixelFormat::R32_FLOAT
+                                             ? PixelFormat::D32_FLOAT
+                                             : PixelFormat::D16_UNORM;
+        ImageInfo depth_info = info;
+        depth_info.format = depth_format;
+        std::optional<DAddr> cpu_addr = gpu_memory->GpuToCpuAddress(image_gpu_addr);
+        if (cpu_addr) {
+            const bool broken_views = runtime.HasBrokenTextureViewFormats();
+            const bool native_bgr = runtime.HasNativeBgr();
+            ImageId depth_image_id;
+            ForEachImageInRegion(
+                *cpu_addr, CalculateGuestSizeInBytes(info),
+                [&](ImageId existing_id, ImageBase& existing) {
+                    if (existing.info.format == depth_format &&
+                        existing.gpu_addr == image_gpu_addr &&
+                        existing.info.size.width == info.size.width &&
+                        existing.info.size.height == info.size.height &&
+                        IsSubresource(depth_info, existing, image_gpu_addr, RelaxedOptions{},
+                                      broken_views, native_bgr) &&
+                        !True(existing.flags & ImageFlagBits::Remapped)) {
+                        depth_image_id = existing_id;
+                        return true;
+                    }
+                    return false;
+                });
+            if (depth_image_id) {
+                ImageBase& depth_image = slot_images[depth_image_id];
+                const auto base_opt = depth_image.TryFindBase(config.Address());
+                if (base_opt) {
+                    PrepareImage(depth_image_id, false, false);
+                    ImageViewInfo view_info(config, base_opt->layer);
+                    view_info.format = depth_format;
+                    const s32 max_levels =
+                        depth_image.info.resources.levels - view_info.range.base.level;
+                    if (max_levels > 0 && view_info.range.extent.levels > max_levels) {
+                        view_info.range.extent.levels = max_levels;
+                    }
+                    const ImageViewId view_id =
+                        FindOrEmplaceImageView(depth_image_id, view_info);
+                    ImageViewBase& image_view = slot_image_views[view_id];
+                    image_view.flags |= ImageViewFlagBits::Strong;
+                    depth_image.flags |= ImageFlagBits::Strong;
+                    return view_id;
+                }
+            }
+        }
+    }
+
     const ImageId image_id = FindOrInsertImage(info, image_gpu_addr);
     if (!image_id) {
         return NULL_IMAGE_VIEW_ID;
@@ -1184,7 +1236,11 @@ ImageViewId TextureCache<P>::CreateImageView(const TICEntry& config) {
     ImageBase& image = slot_images[image_id];
     const SubresourceBase base = image.TryFindBase(config.Address()).value();
     ASSERT(base.level == 0);
-    const ImageViewInfo view_info(config, base.layer);
+    ImageViewInfo view_info(config, base.layer);
+    const s32 max_levels = image.info.resources.levels - view_info.range.base.level;
+    if (max_levels > 0 && view_info.range.extent.levels > max_levels) {
+        view_info.range.extent.levels = max_levels;
+    }
     const ImageViewId image_view_id = FindOrEmplaceImageView(image_id, view_info);
     ImageViewBase& image_view = slot_image_views[image_view_id];
     image_view.flags |= ImageViewFlagBits::Strong;

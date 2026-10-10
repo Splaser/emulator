@@ -111,7 +111,9 @@ GPUVAddr MemoryManager::PageTableOp(GPUVAddr gpu_addr, [[maybe_unused]] DAddr de
                                     PTEKind kind) {
     [[maybe_unused]] u64 remaining_size{size};
     if constexpr (entry_type == EntryType::Mapped) {
-        page_table.ReserveRange(gpu_addr, size);
+        if (!page_table.ReserveRange(gpu_addr, size)) {
+            return 0;
+        }
     }
     for (u64 offset{}; offset < size; offset += page_size) {
         const GPUVAddr current_gpu_addr = gpu_addr + offset;
