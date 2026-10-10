@@ -86,19 +86,28 @@ void StagingBufferPool::FreeDeferred(StagingBufferRef& ref) {
     it->deferred = false;
 }
 
-std::optional<StagingBufferRef> StagingBufferPool::RequestGCDownload(size_t size) {
+GCDownloadRef StagingBufferPool::RequestGCDownload(size_t size) {
     if (size == 0 || size > 32_MiB) {
-        return std::nullopt;
+        return {};
+    }
+    std::scoped_lock lock{gc_download_mutex};
+    if (gc_download && gc_download.use_count() != 1) {
+        // Another collector still owns the allocation: it may be recording copies,
+        // waiting in Finish, or consuming mapped data after GPU completion.
+        return {};
     }
     if (gc_download && gc_download->mapped_span.size() >= size) {
         return gc_download;
     }
     try {
-        auto replacement = Request(size, MemoryUsage::Download, true);
+        // Allocate the handle before reserving a buffer. A host allocation failure
+        // must not strand a newly deferred staging entry without an owner.
+        auto replacement = std::make_shared<StagingBufferRef>();
+        *replacement = Request(size, MemoryUsage::Download, true);
         if (gc_download) {
             FreeDeferred(*gc_download);
         }
-        gc_download = replacement;
+        gc_download = std::move(replacement);
         return gc_download;
     } catch (const vk::Exception& error) {
         if (error.GetResult() != VK_ERROR_OUT_OF_DEVICE_MEMORY &&
@@ -107,7 +116,7 @@ std::optional<StagingBufferRef> StagingBufferPool::RequestGCDownload(size_t size
         }
     } catch (const std::bad_alloc&) {
     }
-    return std::nullopt;
+    return {};
 }
 
 void StagingBufferPool::TickFrame() {

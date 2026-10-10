@@ -156,6 +156,7 @@ bool TextureCache<P>::RunGarbageCollector(bool aggressive_mode) {
         // Cool down this failed readback attempt too, rather than retrying OOM every frame.
         return true;
     }
+    // Retain staging until Finish and all mapped reads below have completed.
     auto map = *staging;
     const size_t original_offset = map.offset;
     for (const auto& download : pending_downloads) {
