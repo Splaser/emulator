@@ -372,6 +372,10 @@ u64 BufferCacheRuntime::GetDeviceMemoryUsage() const {
     return device.GetDeviceMemoryUsage();
 }
 
+GCDownloadRef BufferCacheRuntime::TryGCDownloadStagingBuffer(size_t size) {
+    return staging_pool.RequestGCDownload(size);
+}
+
 bool BufferCacheRuntime::CanReportMemoryUsage() const {
     return device.CanReportMemoryUsage();
 }

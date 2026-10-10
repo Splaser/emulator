@@ -10,8 +10,10 @@
 #include <memory>
 #include <numeric>
 
+#include "common/alignment.h"
 #include "common/range_sets.inc"
 #include "video_core/buffer_cache/buffer_cache_base.h"
+#include "video_core/cache_memory_pressure.h"
 #include "video_core/guest_memory.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
 
@@ -28,54 +30,129 @@ BufferCache<P>::BufferCache(Tegra::MaxwellDeviceMemoryManager& device_memory_, R
     void(slot_buffers.insert(runtime, NullBufferParams{}));
     gpu_modified_ranges.Clear();
     inline_buffer_id = NULL_BUFFER_ID;
-
-    if (!runtime.CanReportMemoryUsage()) {
-        minimum_memory = DEFAULT_EXPECTED_MEMORY;
-        critical_memory = DEFAULT_CRITICAL_MEMORY;
-        return;
-    }
-
-    const s64 device_local_memory = static_cast<s64>(runtime.GetDeviceLocalMemory());
-    const s64 min_spacing_expected = device_local_memory - 1_GiB;
-    const s64 min_spacing_critical = device_local_memory - 512_MiB;
-    const s64 mem_threshold = (std::min)(device_local_memory, TARGET_THRESHOLD);
-    const s64 min_vacancy_expected = (6 * mem_threshold) / 10;
-    const s64 min_vacancy_critical = (2 * mem_threshold) / 10;
-    minimum_memory = static_cast<u64>(
-        (std::min)(device_local_memory,
-                   (std::max)((std::min)(device_local_memory - min_vacancy_expected,
-                                         min_spacing_expected),
-                              DEFAULT_EXPECTED_MEMORY)));
-    critical_memory = static_cast<u64>(
-        (std::min)(device_local_memory,
-                   (std::max)((std::min)(device_local_memory - min_vacancy_critical,
-                                         min_spacing_critical),
-                              DEFAULT_CRITICAL_MEMORY)));
 }
 
 template <class P>
 BufferCache<P>::~BufferCache() = default;
 
 template <class P>
-void BufferCache<P>::RunGarbageCollector() {
-    const bool aggressive_gc = total_used_memory >= critical_memory;
+bool BufferCache<P>::RunGarbageCollector(bool aggressive_gc) {
     const u64 ticks_to_destroy = aggressive_gc ? 60 : 120;
-    int num_iterations = aggressive_gc ? 64 : 32;
-    const auto clean_up = [this, &num_iterations](BufferId buffer_id) {
-        if (num_iterations == 0) {
+    const size_t max_evictions = aggressive_gc ? 64 : 32;
+    const size_t max_scans = aggressive_gc ? 128 : 64;
+    constexpr u64 max_download_bytes = 32_MiB;
+    struct Download {
+        BufferId id;
+        size_t first_copy;
+        size_t num_copies;
+    };
+    // Fixed metadata capacity prevents an unbounded allocation before reclaim.
+    std::array<Download, 64> downloads{};
+    std::array<BufferCopy, 256> copies{};
+    size_t num_downloads = 0;
+    size_t num_copies = 0;
+    size_t num_evictions = 0;
+    u64 download_bytes = 0;
+    const auto clean_up = [&](BufferId buffer_id) {
+        auto& buffer = slot_buffers[buffer_id];
+        if (!memory_tracker.IsRegionGpuModified(buffer.CpuAddr(), buffer.SizeBytes())) {
+            DeleteBuffer(buffer_id);
+            ++num_evictions;
+        } else {
+            // Preserve whole dirty buffers atomically. Oversized buffers stay owned;
+            // do not clear page-granular tracking after a partial readback.
+            if (buffer.SizeBytes() > max_download_bytes || num_downloads == max_evictions) {
+                return false;
+            }
+            const size_t first_copy = num_copies;
+            const u64 initial_bytes = download_bytes;
+            bool fits = true;
+            memory_tracker.ForEachDownloadRange(
+                buffer.CpuAddr(), buffer.SizeBytes(), false,
+                [&](DAddr addr, u64 size) {
+                    gpu_modified_ranges.ForEachInRange(addr, size, [&](DAddr start, DAddr end) {
+                        const u64 aligned_size = Common::AlignUp<u64>(end - start, 64);
+                        if (!fits || num_copies == copies.size() ||
+                            aligned_size > max_download_bytes - download_bytes) {
+                            fits = false;
+                            return;
+                        }
+                        copies[num_copies++] = BufferCopy{
+                            .src_offset = start - buffer.CpuAddr(),
+                            .dst_offset = download_bytes,
+                            .size = end - start,
+                        };
+                        download_bytes += aligned_size;
+                    });
+                });
+            if (!fits) {
+                num_copies = first_copy;
+                download_bytes = initial_bytes;
+                return false;
+            }
+            downloads[num_downloads++] = {buffer_id, first_copy, num_copies - first_copy};
+        }
+        return num_evictions == max_evictions;
+    };
+    lru_cache.ForEachItemBelow(frame_tick - ticks_to_destroy, max_scans, clean_up);
+    // Clean resources have priority. Keep the combined actual eviction count bounded.
+    num_downloads = std::min(num_downloads, max_evictions - num_evictions);
+    if (num_downloads == 0) {
+        return num_evictions != 0;
+    }
+    const auto& last_download = downloads[num_downloads - 1];
+    num_copies = last_download.first_copy + last_download.num_copies;
+    download_bytes = num_copies == 0
+                         ? 0
+                         : copies[num_copies - 1].dst_offset +
+                               Common::AlignUp<u64>(copies[num_copies - 1].size, 64);
+    if (download_bytes != 0) {
+        // Retain staging until Finish and all mapped reads below have completed.
+        const auto staging = runtime.TryGCDownloadStagingBuffer(download_bytes);
+        if (!staging) {
+            // Dirty tracking and ownership are unchanged. Rate-limit failed attempts too.
             return true;
         }
-        --num_iterations;
-        auto& buffer = slot_buffers[buffer_id];
-        DownloadBufferMemory(buffer);
-        DeleteBuffer(buffer_id);
-        return false;
-    };
-    lru_cache.ForEachItemBelow(frame_tick - ticks_to_destroy, clean_up);
+        for (size_t i = 0; i < num_downloads; ++i) {
+            const auto& download = downloads[i];
+            auto& buffer = slot_buffers[download.id];
+            auto buffer_copies =
+                std::span{copies}.subspan(download.first_copy, download.num_copies);
+            for (auto& copy : buffer_copies) {
+                copy.dst_offset += staging->offset;
+                buffer.MarkUsage(copy.src_offset, copy.size);
+            }
+            if (!buffer_copies.empty()) {
+                runtime.CopyBuffer(staging->buffer, buffer, buffer_copies, true);
+            }
+        }
+        runtime.Finish(); // One wait for the entire dirty-buffer batch.
+        for (size_t i = 0; i < num_downloads; ++i) {
+            const auto& download = downloads[i];
+            const auto& buffer = slot_buffers[download.id];
+            for (const auto& copy : std::span{copies}.subspan(download.first_copy,
+                                                            download.num_copies)) {
+                device_memory.WriteBlockUnsafe(
+                    buffer.CpuAddr() + copy.src_offset,
+                    staging->mapped_span.data() + copy.dst_offset - staging->offset, copy.size);
+            }
+        }
+    }
+    for (size_t i = 0; i < num_downloads; ++i) {
+        const auto& buffer = slot_buffers[downloads[i].id];
+        memory_tracker.ForEachDownloadRangeAndClear(
+            buffer.CpuAddr(), buffer.SizeBytes(), [&](DAddr addr, u64 size) {
+                ClearDownload(addr, size);
+                gpu_modified_ranges.Subtract(addr, size);
+            });
+        DeleteBuffer(downloads[i].id);
+    }
+    return true;
 }
 
 template <class P>
-void BufferCache<P>::TickFrame() {
+void BufferCache<P>::TickFrame(u64 cache_usage, u64 cache_target,
+                              std::span<const HeapMemoryBudget> heaps) {
     // Homebrew console apps don't create or bind any channels, so this will be nullptr.
     if (!channel_state) {
         return;
@@ -99,10 +176,10 @@ void BufferCache<P>::TickFrame() {
     const bool skip_preferred = hits * 256 < shots * 251;
     channel_state->uniform_buffer_skip_cache_size = skip_preferred ? DEFAULT_SKIP_CACHE_SIZE : 0;
 
-    const u64 gc_memory_usage =
-        runtime.CanReportMemoryUsage() ? runtime.GetDeviceMemoryUsage() : total_used_memory;
-    if (gc_memory_usage >= minimum_memory) {
-        RunGarbageCollector();
+    memory_pressure.Update(cache_usage, cache_target, heaps);
+    if (memory_pressure.CanReclaim(frame_tick, TICKS_TO_DESTROY) &&
+        RunGarbageCollector(memory_pressure.IsCritical())) {
+        memory_pressure.Reclaimed(frame_tick);
     }
     ++frame_tick;
     delayed_destruction_ring.Tick();

@@ -1460,6 +1460,10 @@ u64 TextureCacheRuntime::GetDeviceMemoryUsage() const {
     return device.GetDeviceMemoryUsage();
 }
 
+GCDownloadRef TextureCacheRuntime::TryGCDownloadStagingBuffer(size_t size) {
+    return staging_buffer_pool.RequestGCDownload(size);
+}
+
 bool TextureCacheRuntime::CanReportMemoryUsage() const {
     return device.CanReportMemoryUsage();
 }

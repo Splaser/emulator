@@ -230,9 +230,14 @@ MemoryAllocator::MemoryAllocator(const Device& device_)
     // only allow the stream buffer in this memory heap.
     if (device.HasDebuggingToolAttached()) {
         using namespace Common::Literals;
-        ForEachDeviceLocalHostVisibleHeap(device, [this](size_t index, VkMemoryHeap& heap) {
+        ForEachDeviceLocalHostVisibleHeap(device, [this](size_t heap_index, VkMemoryHeap& heap) {
             if (heap.size <= 256_MiB) {
-                valid_memory_types &= ~(1u << index);
+                // The mask indexes memory types, not heaps. A heap can back several types.
+                for (u32 type_index = 0; type_index < properties.memoryTypeCount; ++type_index) {
+                    if (properties.memoryTypes[type_index].heapIndex == heap_index) {
+                        valid_memory_types &= ~(1u << type_index);
+                    }
+                }
             }
         });
     }
