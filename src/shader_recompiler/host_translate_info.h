@@ -26,6 +26,8 @@ struct HostTranslateInfo {
                                                 ///< passthrough shaders
     bool support_conditional_barrier{}; ///< True when the device supports barriers in conditional
                                         ///< control flow
+    u32 max_bindless_array_length{1024}; ///< Maximum length of dynamically indexed bindless
+                                         ///< texture arrays
 };
 
 } // namespace Shader
