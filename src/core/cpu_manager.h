@@ -8,7 +8,6 @@
 #include <functional>
 #include <memory>
 #include <thread>
-#include <barrier>
 
 #include "common/fiber.h"
 #include "common/polyfill_thread.h"
@@ -92,7 +91,7 @@ private:
         std::jthread host_thread;
     };
 
-    std::unique_ptr<std::barrier> gpu_barrier{};
+    std::unique_ptr<Common::Barrier> gpu_barrier{};
     std::array<CoreData, Core::Hardware::NUM_CPU_CORES> core_data{};
 
     bool is_async_gpu{};
