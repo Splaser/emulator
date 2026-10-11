@@ -327,8 +327,8 @@ size_t Maxwell3D::EstimateIndexBufferSize() {
     // streams enabled; capping by the vertex count would then estimate zero indices and bind no
     // index buffer at all. Only cap when there are vertex streams to cap against.
     const u32 max_vertices = GetMaxCurrentVertices();
-    const size_t index_range = size_t(end_address - start_address);
-    const size_t cap{max_vertices != 0 ? max_vertices * 4 * byte_size : index_range};
+    const size_t index_range = size_t(end_address - start_address) / byte_size;
+    const size_t cap{max_vertices != 0 ? size_t{max_vertices} * 4 : index_range};
     const size_t lower_cap = std::min<size_t>(index_range, cap);
     return std::min<size_t>(memory_manager.GetMemoryLayoutSize(start_address, byte_size * max_sizes[log2_byte_size]) / byte_size, lower_cap);
 }
