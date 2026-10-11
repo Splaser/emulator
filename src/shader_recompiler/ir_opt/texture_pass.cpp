@@ -542,11 +542,10 @@ std::optional<ConstBufferAddr> TryGetConstBuffer(const IR::Inst* inst, Environme
         .secondary_offset = 0,
         .secondary_shift_left = 0,
         .dynamic_offset = dynamic_offset,
-        .count =
-            DynamicDescriptorCount(base_offset, size_shift,
-                                   std::min({DESCRIPTOR_MAX_COUNT,
-                                             std::max(sampled_limit, storage_limit),
-                                             resource_limit})),
+        .count = DynamicDescriptorCount(
+            base_offset, size_shift,
+            std::min({DESCRIPTOR_MAX_COUNT, std::max(sampled_limit, storage_limit), resource_limit,
+                      std::max(1U, host_info.max_bindless_array_length)})),
         .has_secondary = false,
     };
 }
