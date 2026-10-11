@@ -980,7 +980,7 @@ VkBuffer TextureCacheRuntime::GetTemporaryBuffer(size_t needed_size) {
     }
 
     // Use power-of-2 buffer sizes for efficient allocation
-    const size_t new_size = Common::NextPow2(needed_size);
+    const size_t new_size = std::bit_ceil(needed_size);
 
     static constexpr VkBufferUsageFlags flags =
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |

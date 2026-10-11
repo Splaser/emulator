@@ -26,7 +26,7 @@ CpuManager::~CpuManager() = default;
 
 void CpuManager::Initialize() {
     num_cores = is_multicore ? Core::Hardware::NUM_CPU_CORES : 1;
-    gpu_barrier = std::make_unique<Common::Barrier>(num_cores + 1);
+    gpu_barrier = std::make_unique<std::barrier>(num_cores + 1);
 
     for (std::size_t core = 0; core < num_cores; core++) {
         core_data[core].host_thread =

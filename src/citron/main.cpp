@@ -2322,6 +2322,13 @@ void GMainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletP
                      "Applying workaround: forcing single-core mode for Final Fantasy Tactics");
             Settings::values.use_multi_core.SetValue(false);
         }
+
+        // Nintendo Switch Sports requires Fast GPU Time.
+        if (title_id == 0x0100D2F00D5C0000ULL) {
+            LOG_INFO(Frontend, "Forcing Fast GPU Time for Nintendo Switch Sports");
+            Settings::values.use_fast_gpu_time.SetGlobal(false);
+            Settings::values.use_fast_gpu_time.SetValue(true);
+        }
     }
 
     Settings::LogSettings();
