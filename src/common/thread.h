@@ -65,6 +65,35 @@ private:
     std::atomic_bool is_set{false};
 };
 
+class Barrier {
+public:
+    explicit Barrier(std::size_t count_) : count(count_) {}
+
+    /// Blocks until all "count" threads have called Sync()
+    bool Sync(std::stop_token token = {}) {
+        std::unique_lock lk{mutex};
+        const std::size_t current_generation = generation;
+
+        if (++waiting == count) {
+            generation++;
+            waiting = 0;
+            condvar.notify_all();
+            return true;
+        } else {
+            CondvarWait(condvar, lk, token,
+                        [this, current_generation] { return current_generation != generation; });
+            return !token.stop_requested();
+        }
+    }
+
+private:
+    std::condition_variable_any condvar;
+    std::mutex mutex;
+    std::size_t count;
+    std::size_t waiting = 0;
+    std::size_t generation = 0; // Incremented once each time the barrier is used
+};
+
 enum class ThreadPriority : u32 {
     Low = 0,
     Normal = 1,
