@@ -79,6 +79,11 @@ struct Binding {
     DAddr device_addr{};
     u32 size{};
     BufferId buffer_id;
+    // Base, extent and binding offset of a shared scratch allocation for split/overlapping views.
+    GPUVAddr gather_gpu_addr{};
+    GPUVAddr gpu_addr{}; ///< original GPU address, preserved when overlapping views share scratch
+    u32 gather_size{};
+    u32 gather_offset{};
 };
 
 struct TextureBufferBinding : Binding {
@@ -239,6 +244,11 @@ public:
 
     void BindHostComputeBuffers();
 
+    /// Records that written gathered storage buffers hold new data. The copy back to their
+    /// (non-contiguous) device chunks is deferred until something else touches those chunks.
+    /// Must be called after the draw/dispatch that used them has been recorded.
+    void FlushGatherWrites();
+
     void SetUniformBuffersState(const std::array<u32, NUM_STAGES>& mask,
                                 const UniformBufferSizes* sizes);
 
@@ -292,6 +302,10 @@ public:
     bool DMACopy(GPUVAddr src_address, GPUVAddr dest_address, u64 amount);
 
     bool DMAClear(GPUVAddr src_address, u64 amount, u32 value);
+
+    /// DMACopy/DMAClear for ranges that are not contiguous in device memory.
+    bool DMACopySplit(GPUVAddr src_address, GPUVAddr dest_address, u64 amount);
+    bool DMAClearSplit(GPUVAddr dst_address, u64 amount, u32 value);
 
     /// Return true when a CPU region is modified from the GPU
     [[nodiscard]] bool IsRegionGpuModified(DAddr addr, size_t size);
@@ -501,6 +515,33 @@ public:
     [[nodiscard]] Binding StorageBufferBinding(GPUVAddr ssbo_addr, u32 cbuf_index,
                                                bool is_written) const;
 
+    /// Resolves (creates/joins) the cache buffers backing each contiguous chunk of a gathered
+    /// range.
+    void ResolveGatherChunks(GPUVAddr gpu_addr, u32 size);
+    void ResetGatherBindings(bool compute);
+    void PrepareGatherBindings(bool compute);
+    boost::container::small_vector<Binding*, 32> GatherBindings(bool compute);
+
+    /// Whether [gpu_addr, +size) maps to one contiguous device range (cached per page table
+    /// generation).
+    bool IsGpuRangeContiguous(GPUVAddr gpu_addr, u32 size) const;
+    struct ContiguityKey {
+        GPUVAddr gpu_addr;
+        u32 size;
+        bool operator==(const ContiguityKey&) const = default;
+    };
+    struct ContiguityKeyHash {
+        size_t operator()(const ContiguityKey& key) const noexcept {
+            return std::hash<u64>{}(key.gpu_addr ^ (static_cast<u64>(key.size) << 40));
+        }
+    };
+    mutable std::unordered_map<ContiguityKey, bool, ContiguityKeyHash> contiguity_cache;
+    mutable u64 contiguity_cache_generation = ~0ULL;
+    mutable size_t contiguity_cache_address_space = ~size_t{};
+
+    /// Copies every contiguous chunk of a non-contiguous GPU range into a scratch buffer.
+    Buffer& GatherBuffer(GPUVAddr gpu_addr, u32 size);
+
     [[nodiscard]] TextureBufferBinding GetTextureBufferBinding(GPUVAddr gpu_addr, u32 size,
                                                                PixelFormat format);
 
@@ -518,6 +559,40 @@ public:
     Tegra::MaxwellDeviceMemoryManager& device_memory;
 
     Common::SlotVector<Buffer> slot_buffers;
+    struct GatherChunk {
+        DAddr device_addr;
+        u32 size;
+        u32 offset; ///< offset inside the gathered range
+        u8 dirty;   ///< number of upcoming gathers that must re-copy this chunk
+    };
+    struct GatherEntry {
+        std::unique_ptr<Buffer> buffer;
+        std::vector<GatherChunk> chunks;
+        u64 last_used{};
+        u32 prepared_size{};
+        bool scatter_pending{}; ///< scratch holds GPU writes not yet copied back to the chunks
+    };
+    std::unordered_map<GPUVAddr, GatherEntry> gather_buffers;
+    u64 gather_used_memory{};
+    void TrimGatherBuffers(bool aggressive);
+    void InvalidateGatherMemory(DAddr device_addr, u64 size);
+
+    /// Marks gathered chunks overlapping [device_addr, +size) as needing a re-copy.
+    /// Chunks of the gather entry at `skip` are left alone.
+    void NotifyGatherWrite(DAddr device_addr, u64 size, u8 level = 1, GPUVAddr skip = 0);
+
+    /// Gathered storage buffers bound as written since the last FlushGatherWrites.
+    std::vector<GPUVAddr> pending_gather_writes;
+
+    /// Gathered storage buffers whose write-back to the device chunks is deferred.
+    std::vector<GPUVAddr> scatter_pending;
+    bool scatter_busy = false; ///< inside a write-back (its FindBuffer calls must not recurse)
+    GPUVAddr scatter_skip = 0; ///< entry being gathered right now; its own chunks don't flush it
+
+    /// Copies a deferred gather entry back to its device chunks.
+    void ScatterGatherEntry(GPUVAddr gpu_addr, GatherEntry& entry);
+    /// Writes back deferred entries with a chunk overlapping [device_addr, +size); size 0 = all.
+    void ResolveScatter(DAddr device_addr, u64 size);
     static constexpr u64 TICKS_TO_DESTROY = 8;
     DelayedDestructionRing<Buffer, TICKS_TO_DESTROY> delayed_destruction_ring;
 

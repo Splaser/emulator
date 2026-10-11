@@ -320,6 +320,7 @@ GraphicsPipeline* RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_fun
             query_cache.CounterEnable(VideoCommon::QueryType::ZPassPixelCount64,
                                       maxwell3d->regs.zpass_pixel_count_enable);
             draw_func();
+            buffer_cache.FlushGatherWrites();
         }
     }
     if (configure_exception) {
@@ -742,11 +743,13 @@ void RasterizerVulkan::DispatchCompute() {
                           indirect_offset = offset](vk::CommandBuffer cmdbuf) {
             cmdbuf.DispatchIndirect(indirect_buffer, indirect_offset);
         });
+        buffer_cache.FlushGatherWrites();
         return;
     }
     const std::array<u32, 3> dim{qmd.grid_dim_x, qmd.grid_dim_y, qmd.grid_dim_z};
     scheduler.RequestOutsideRenderPassOperationContext();
     scheduler.Record([dim](vk::CommandBuffer cmdbuf) { cmdbuf.Dispatch(dim[0], dim[1], dim[2]); });
+    buffer_cache.FlushGatherWrites();
 }
 
 void RasterizerVulkan::ResetCounter(VideoCommon::QueryType type) {
@@ -826,18 +829,21 @@ VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64
         };
     }
 
-    {
-        std::scoped_lock lock{texture_cache.mutex};
-        auto area = texture_cache.GetFlushArea(addr, size);
-        if (area) {
-            return *area;
-        }
-    }
     VideoCore::RasterizerDownloadArea new_area{
         .start_address = Common::AlignDown(addr, Core::DEVICE_PAGESIZE),
         .end_address = Common::AlignUp(addr + size, Core::DEVICE_PAGESIZE),
         .preemtive = true,
     };
+    std::scoped_lock lock{texture_cache.mutex, buffer_cache.mutex};
+    const auto merge_area = [&](const auto& area) {
+        if (area) {
+            new_area.start_address = std::min(new_area.start_address, area->start_address);
+            new_area.end_address = std::max(new_area.end_address, area->end_address);
+            new_area.preemtive &= area->preemtive;
+        }
+    };
+    merge_area(texture_cache.GetFlushArea(addr, size));
+    merge_area(buffer_cache.GetFlushArea(addr, size));
     return new_area;
 }
 
@@ -934,6 +940,7 @@ void RasterizerVulkan::UnmapMemory(DAddr addr, u64 size) {
     }
     {
         std::scoped_lock lock{buffer_cache.mutex};
+        buffer_cache.InvalidateGatherMemory(addr, size);
         buffer_cache.WriteMemory(addr, size);
     }
     pipeline_cache.OnCacheInvalidation(addr, size);
