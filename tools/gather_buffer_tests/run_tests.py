@@ -102,9 +102,10 @@ struct Runtime;
 struct FakeBuffer {
     static inline bool fail_next = false;
     DAddr base = 0;
+    std::vector<u64> page_gpu_tick;
     std::vector<u8> bytes;
     FakeBuffer() = default;
-    FakeBuffer(Runtime&, DAddr d, u64 size) : base(d), bytes(size) {
+    FakeBuffer(Runtime&, DAddr d, u64 size) : base(d), page_gpu_tick((size + 4095) / 4096), bytes(size) {
         if (fail_next) {
             fail_next = false;
             throw std::bad_alloc();
@@ -120,6 +121,7 @@ struct FakeBuffer {
 };
 struct Runtime {
     bool fail_copy = false;
+    u64 CurrentTick() const { return 20; }
     int copies = 0;
     std::vector<BufferCopy> writes;
     template <class C>
@@ -305,6 +307,8 @@ struct BufferCache {
         }
     }
     void ClearDownload(u64, u64) {}
+    u64 WidenHotWrite(u64, u64 size) { return size; }
+    void MarkGpuUse(Buffer&, u64, u64);
     bool IsRegionGpuModified(u64 d, u64 size) {
         return memory_tracker.IsRegionGpuModified(d, size);
     }
@@ -339,9 +343,11 @@ names = [
     'GatherBindings', 'ResetGatherBindings', 'PrepareGatherBindings', 'ResolveGatherChunks',
     'NotifyGatherWrite', 'GatherBuffer', 'FlushGatherWrites', 'ScatterGatherEntry',
     'ResolveScatter', 'IsGpuRangeContiguous', 'TrimGatherBuffers', 'InvalidateGatherMemory',
-    'WriteMemory', 'DMACopySplit', 'DMAClearSplit', 'GetFlushArea',
+    'WriteMemory', 'MarkGpuUse', 'DMACopySplit', 'DMAClearSplit', 'GetFlushArea',
 ]
-parts = [head] + [func('BufferCache<P>::' + name + '(') for name in names]
+uma = (root / 'src/video_core/buffer_cache/uma.h').read_text(encoding='utf-8')
+uma = uma[uma.index('namespace VideoCommon::Uma'): ] + '\nnamespace Uma = VideoCommon::Uma;\n'
+parts = [head, uma] + [func('BufferCache<P>::' + name + '(') for name in names]
 # Exercise the current reactive filtering lambda with a controlled download sink.
 start = s.index('const auto add_preflushable =')
 end = s.index('\n                        };', start) + len('\n                        };')
@@ -392,10 +398,16 @@ int main() {
     auto& scratch = c.GatherBuffer(64, 12);
     check(scratch.bytes[0] == 18 && scratch.bytes[4] == 14 && scratch.bytes[8] == 10,
           "descending physical chunks gathered in GPU order");
+    check(!Uma::CanWriteDirectly(true, c.slot_buffers[c.ids.at(1008)].page_gpu_tick, 0, 4, 20),
+          "gather GPU read prevents a concurrent direct UMA write");
+    check(Uma::CanWriteDirectly(true, c.slot_buffers[c.ids.at(1008)].page_gpu_tick, 0, 4, 21),
+          "gather source allows direct UMA writes after GPU completion");
     std::fill(scratch.bytes.begin(), scratch.bytes.end(), 99);
     c.pending_gather_writes = {64};
     c.FlushGatherWrites();
     c.GatherBuffer(64, 8);
+    check(!Uma::CanWriteDirectly(true, c.slot_buffers[c.ids.at(1000)].page_gpu_tick, 0, 4, 20),
+          "scatter GPU write prevents a concurrent direct UMA write");
     check(c.slot_buffers[c.ids.at(1000)].bytes[0] == 99 &&
               c.gather_buffers.at(64).buffer->bytes[0] == 99,
           "shrinking view preserves all old pending writes");
