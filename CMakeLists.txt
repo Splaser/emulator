@@ -342,6 +342,9 @@ if (MSVC)
     if(CITRON_ENABLE_PGO_GENERATE OR CITRON_ENABLE_PGO_USE OR CITRON_ENABLE_LTO)
         add_link_options(/LTCG)
     endif()
+else()
+    set(CMAKE_CXX_STANDARD 23)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
 endif()
 
 # Output binaries to bin/
@@ -490,11 +493,6 @@ set(CITRON_HAS_DYNARMIC FALSE)
 
 if ((ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64) AND NOT (MSVC AND ARCHITECTURE_arm64))
     if (TARGET dynarmic::dynarmic)
-        set(dynarmic_FOUND TRUE)
-    else()
-        find_package(dynarmic 6.4.0 CONFIG)
-    endif()
-    if (dynarmic_FOUND)
         message(STATUS "Dynarmic found, enabling dynamic recompilation support.")
         set(CITRON_HAS_DYNARMIC TRUE) # Set our variable to TRUE
     else()

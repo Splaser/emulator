@@ -484,21 +484,13 @@ if (NOT TARGET sirit::sirit AND NOT TARGET sirit)
     endif()
 endif()
 
-# ── dynarmic (Citron integration fork) ─────────────────────────────────────────────────
+# ── dynarmic (part of this tree: externals/dynarmic) ─────────────────────────
 if ((ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64) AND NOT (MSVC AND ARCHITECTURE_arm64))
     if (NOT TARGET dynarmic::dynarmic)
-        CPMAddPackage(
-            NAME dynarmic
-            GITHUB_REPOSITORY Splaser/dynarmic
-            GIT_TAG 8c54a77b52928866d16462a6f6b9a6adfe6f1755
-            OPTIONS
-                "DYNARMIC_USE_PRECOMPILED_HEADERS ${CITRON_USE_PRECOMPILED_HEADERS}"
-                "DYNARMIC_IGNORE_ASSERTS ON"
-                "DYNARMIC_TESTS OFF"
-        )
-        if (TARGET dynarmic AND NOT TARGET dynarmic::dynarmic)
-            add_library(dynarmic::dynarmic ALIAS dynarmic)
-        endif()
+        set(DYNARMIC_USE_PRECOMPILED_HEADERS ${CITRON_USE_PRECOMPILED_HEADERS})
+        set(DYNARMIC_TESTS OFF)
+        add_subdirectory("${CMAKE_SOURCE_DIR}/externals/dynarmic" "${CMAKE_BINARY_DIR}/dynarmic")
+        add_library(dynarmic::dynarmic ALIAS dynarmic)
     endif()
 endif()
 
