@@ -595,6 +595,12 @@ public:
         }
         return false;
     }
+    bool NeedsGuestCpuAccess(const Buffer& buffer) const {
+        if constexpr (requires { runtime.NeedsGuestCpuAccess(buffer); }) {
+            return runtime.NeedsGuestCpuAccess(buffer);
+        }
+        return IsDirectGuest(buffer);
+    }
     void BeginGuestCpuAccess(Buffer& buffer) {
         if constexpr (requires { runtime.BeginGuestCpuAccess(buffer); }) {
             runtime.BeginGuestCpuAccess(buffer);

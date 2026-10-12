@@ -32,6 +32,14 @@ enum class GuestMappingMode { Scratch, Direct };
 // Vulkan supplies these facts after querying the exact buffer usage, external handle,
 // memory requirements and imported memory type. No platform name implies eligibility.
 struct ZeroCopyEligibility {
+    // DMA_BUF_IOCTL_SYNC has no range argument. Limit whole-allocation cache
+    // maintenance until a backing-specific range/coherent-alias protocol exists.
+    // A small bound buffer must not trigger a cache sweep over a 1 GiB guest chunk.
+    static constexpr u64 MaxWholeAllocationCpuSyncSize = 4 * 1024 * 1024;
+    [[nodiscard]] static constexpr bool SupportsWholeAllocationCpuSync(u64 size) {
+        return size != 0 && size <= MaxWholeAllocationCpuSyncSize;
+    }
+
     bool opted_in{};
     bool unified{};
     bool host_visible{};

@@ -340,8 +340,16 @@ struct BufferCache {
     static bool IsDirectGuest(const Buffer& b) { return b.IsDirectGuest(); }
     void GuestMemoryBarrier(bool to_cpu) { runtime.GuestMemoryBarrier(to_cpu); }
     int cpu_begins = 0, cpu_ends = 0;
-    void BeginGuestCpuAccess(Buffer& b) { cpu_begins += b.IsDirectGuest(); }
-    void EndGuestCpuAccess(Buffer& b) { cpu_ends += b.IsDirectGuest(); }
+    std::set<const Buffer*> cpu_owned;
+    bool NeedsGuestCpuAccess(const Buffer& b) const { return !cpu_owned.contains(&b); }
+    void BeginGuestCpuAccess(Buffer& b) {
+        cpu_begins += b.IsDirectGuest();
+        if (b.IsDirectGuest()) cpu_owned.insert(&b);
+    }
+    void EndGuestCpuAccess(Buffer& b) {
+        cpu_ends += b.IsDirectGuest();
+        cpu_owned.erase(&b);
+    }
     void WaitGuestBacking(u64, u64);
     void ResolveCachedBinding(Binding&);
     int fallback_readbacks = 0;
@@ -733,6 +741,13 @@ int main() {
     joined.WaitGuestBacking(1000, 8);
     check(joined.runtime.finishes == 1 && joined.runtime.barriers_to_cpu == 1 && joined.cpu_begins == 1,
           "merged GPU writes require barrier and completion before CPU access resumes");
+    joined.WaitGuestBacking(1000, 8);
+    check(joined.runtime.finishes == 1 && joined.runtime.barriers_to_cpu == 1 && joined.cpu_begins == 1,
+          "repeated CPU writes without intervening GPU use do not repeat queue waits");
+    joined.MarkGpuUse(joined.slot_buffers[new_id], 0, 8);
+    joined.WaitGuestBacking(1000, 8);
+    check(joined.runtime.finishes == 2 && joined.runtime.barriers_to_cpu == 2 && joined.cpu_begins == 2,
+          "GPU reuse restores the barrier and completion requirement for the next CPU write");
     BufferCache<int> unaligned;
     const auto unaligned_id = unaligned.FindBuffer(1000, 8);
     unaligned.gpu_modified_ranges.Add(1001, 2);
@@ -759,6 +774,7 @@ int main() {
           "different MemoryManager with identical VA and generation revalidates backing");
     direct_cache.gpu_memory = &direct_memory;
     const int previous_finish = direct_cache.runtime.finishes;
+    direct_cache.MarkGpuUse(direct_cache.slot_buffers[direct_cache.ids.at(1000)], 0, 4);
     direct_cache.WaitGuestBacking(1000, 4);
     check(direct_cache.runtime.finishes > previous_finish && direct_cache.runtime.barriers_to_cpu > 0,
           "CPU access waits for GPU reads and writes to shared backing");
@@ -768,6 +784,13 @@ int main() {
     fallback.TestReadback(scratch_fallback);
     check(fallback.fallback_readbacks == 1, "scratch readback remains enabled");
     const GuestMappingIdentity stable{&direct_cache, 1, 2};
+    check(!ZeroCopyEligibility::SupportsWholeAllocationCpuSync(1ull << 30) &&
+          !ZeroCopyEligibility::SupportsWholeAllocationCpuSync(0) &&
+          ZeroCopyEligibility::SupportsWholeAllocationCpuSync(
+              ZeroCopyEligibility::MaxWholeAllocationCpuSyncSize) &&
+          !ZeroCopyEligibility::SupportsWholeAllocationCpuSync(
+              ZeroCopyEligibility::MaxWholeAllocationCpuSyncSize + 1),
+          "whole-allocation cache maintenance is bounded independently of the binding size");
     ZeroCopyEligibility eligible{true, true, true, true, true, true, true, true, 4, 16384};
     const std::array physical_segments{DirectGuestSegment{100, 0, 4}, DirectGuestSegment{104, 4, 4}};
     check(eligible.Select(stable, stable, physical_segments, 8) == GuestMappingMode::Direct,

@@ -119,6 +119,7 @@ public:
 
     bool TryDirectGuestBuffer(Buffer& buffer, Common::GuestBackingRange backing);
     void GuestMemoryBarrier(bool to_cpu);
+    [[nodiscard]] bool NeedsGuestCpuAccess(const Buffer& buffer) const;
     void BeginGuestCpuAccess(const Buffer& buffer);
     void EndGuestCpuAccess(const Buffer& buffer);
 
@@ -222,6 +223,7 @@ private:
     Scheduler& scheduler;
     StagingBufferPool& staging_pool;
     std::unordered_set<int> guest_cpu_access;
+    bool reported_large_guest_backing{};
     GuestDescriptorQueue& guest_descriptor_queue;
 
     std::shared_ptr<QuadArrayIndexBuffer> quad_array_index_buffer;

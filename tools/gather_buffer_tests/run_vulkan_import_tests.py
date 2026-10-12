@@ -18,6 +18,10 @@ body = source[start:end]
 # Exercise the Linux branch on every test host; the real wrapper remains host-native.
 body = body.replace('#ifdef __linux__\n', '')
 body = body[:body.index('#else')] + '}\n'
+start = source.index('bool BufferCacheRuntime::NeedsGuestCpuAccess(')
+end = source.index('\n}\n', start) + 3
+ownership = source[start:end].replace('#ifdef __linux__\n', '')
+body += ownership[:ownership.index('#else')] + '}\n'
 head = r'''
 #include <array>
 #include <cassert>
@@ -26,6 +30,7 @@ head = r'''
 #include <unordered_set>
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 #include "video_core/buffer_cache/direct_guest_mapping.h"
+#define LOG_INFO(...) ((void)0)
 namespace Common { struct GuestBackingRange { int fd; u64 offset, allocation_size; }; }
 namespace Settings {
 struct Flag { bool value = true; bool GetValue() const { return value; } };
@@ -117,26 +122,44 @@ struct Buffer {
     struct Scratch { void reset() {} } buffer;
     u64 SizeBytes() const { return 64; }
     bool IsDirectGuest() const { return direct != nullptr; }
+    const Common::GuestBackingRange* DirectBacking() const {
+        return direct ? &direct->backing : nullptr;
+    }
 };
 struct BufferCacheRuntime {
     Device device;
     struct Scheduler { int waits = 0; void Finish() { ++waits; } } scheduler;
     std::unordered_set<int> guest_cpu_access;
+    bool reported_large_guest_backing = false;
     int barriers = 0;
     void GuestMemoryBarrier(bool to_cpu) { assert(to_cpu); ++barriers; }
     bool TryDirectGuestBuffer(Buffer&, Common::GuestBackingRange);
+    bool NeedsGuestCpuAccess(const Buffer&) const;
 };
 '''
 tail = r'''
 }
 int main() {
     Vulkan::BufferCacheRuntime runtime;
+    Vulkan::Buffer large_backing;
+    assert(!runtime.TryDirectGuestBuffer(large_backing, {7, 128, 1ULL << 30}));
+    assert(!large_backing.IsDirectGuest() && allocations == 0 &&
+           runtime.scheduler.waits == 0 && runtime.barriers == 0 && runtime.guest_cpu_access.empty());
+    assert(runtime.reported_large_guest_backing);
     auto run = [&] (u64 offset = 128) {
         Vulkan::Buffer buffer;
         return runtime.TryDirectGuestBuffer(buffer, {7, offset, 4096});
     };
     assert(run() && allocations == 1 && closes == 0 && memory_deaths == 1);
     assert(runtime.scheduler.waits == 1 && runtime.barriers == 1 && runtime.guest_cpu_access.contains(7));
+    Vulkan::Buffer same_fd;
+    same_fd.direct = std::make_unique<Vulkan::DirectGuestMapping>();
+    same_fd.direct->backing = {7, 512, 4096};
+    assert(!runtime.NeedsGuestCpuAccess(same_fd)); // ownership belongs to the fd, not a view
+    same_fd.direct->backing.fd = 8;
+    assert(runtime.NeedsGuestCpuAccess(same_fd)); // another backing still needs a GPU wait
+    same_fd.direct.reset();
+    assert(!runtime.NeedsGuestCpuAccess(same_fd)); // staged buffers never transfer ownership
     assert(run());
     assert(runtime.scheduler.waits == 1 && runtime.barriers == 1); // fd already CPU-owned
     runtime.guest_cpu_access.clear();
@@ -170,7 +193,7 @@ int main() {
     // Device handle is fake; prevent its owning destructor from touching Vulkan.
     runtime.device.logical.reset();
     std::cout << "PASS production Vulkan importer: properties, alignment, dedicated allocations, "
-                 "FD ownership, failure cleanup, dma-buf synchronization and opt-in\n";
+                 "FD ownership, failure cleanup, dma-buf synchronization, large-backing fallback and opt-in\n";
 }
 '''
 # The fake device destructor is also instantiated by the real owning wrapper.

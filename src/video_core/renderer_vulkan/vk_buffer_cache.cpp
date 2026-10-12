@@ -121,6 +121,17 @@ bool BufferCacheRuntime::TryDirectGuestBuffer(Buffer& target, Common::GuestBacki
         !device.CanImportGuestDmaBuf() || backing.fd < 0 || target.IsDirectGuest()) {
         return false;
     }
+    if (!VideoCommon::ZeroCopyEligibility::SupportsWholeAllocationCpuSync(backing.allocation_size)) {
+        if (!reported_large_guest_backing) {
+            LOG_INFO(Render_Vulkan,
+                     "UMA zero-copy fallback: dma-buf CPU synchronization covers {} bytes; "
+                     "whole-allocation limit is {} bytes",
+                     backing.allocation_size,
+                     VideoCommon::ZeroCopyEligibility::MaxWholeAllocationCpuSyncSize);
+            reported_large_guest_backing = true;
+        }
+        return false;
+    }
     constexpr auto handle_type = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
     const auto usage = BufferUsage(device);
     const auto external = device.GetPhysical().GetExternalBufferProperties(usage, handle_type);
@@ -214,6 +225,16 @@ bool BufferCacheRuntime::TryDirectGuestBuffer(Buffer& target, Common::GuestBacki
 #else
     (void)target;
     (void)backing;
+    return false;
+#endif
+}
+
+bool BufferCacheRuntime::NeedsGuestCpuAccess(const Buffer& buffer) const {
+#ifdef __linux__
+    const auto* backing = buffer.DirectBacking();
+    return backing && !guest_cpu_access.contains(backing->fd);
+#else
+    (void)buffer;
     return false;
 #endif
 }

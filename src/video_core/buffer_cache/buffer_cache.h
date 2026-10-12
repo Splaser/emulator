@@ -200,11 +200,13 @@ void BufferCache<P>::WaitGuestBacking(DAddr address, u64 size) {
     if (!has_direct_guest_buffers) { return; }
     bool shared = false;
     ForEachBufferInRange(address, size, [&](BufferId, Buffer& buffer) {
-        shared |= IsDirectGuest(buffer);
+        shared |= IsDirectGuest(buffer) && NeedsGuestCpuAccess(buffer);
     });
     if (shared) {
         GuestMemoryBarrier(true);
-        runtime.Finish(); // CPU stores/reuse must also wait for outstanding GPU *reads*.
+        // EndGuestCpuAccess precedes every GPU use of a direct backing. An fd
+        // already in its CPU interval has no intervening GPU reads or writes.
+        runtime.Finish(); // Also wait for outstanding GPU *reads* on ownership transfer.
         ForEachBufferInRange(address, size, [&](BufferId, Buffer& buffer) {
             if (IsDirectGuest(buffer)) { BeginGuestCpuAccess(buffer); }
         });
