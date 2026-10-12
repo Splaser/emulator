@@ -1492,9 +1492,6 @@ void BufferCache<P>::BindHostComputeUniformBuffers() {
     u32 binding_index = 0;
     ForEachEnabledBit(channel_state->enabled_compute_uniform_buffer_mask, [&](u32 index) {
         Binding& binding = channel_state->compute_uniform_buffers[index];
-        ResolveCachedBinding(binding);
-        Buffer& buffer = slot_buffers[binding.buffer_id];
-        TouchBuffer(buffer, binding.buffer_id);
         const u32 size =
             std::min(binding.size, (*channel_state->compute_uniform_buffer_sizes)[index]);
         if (binding.gather_size != 0 && size != 0) {
@@ -1508,6 +1505,9 @@ void BufferCache<P>::BindHostComputeUniformBuffers() {
             }
             return;
         }
+        ResolveCachedBinding(binding);
+        Buffer& buffer = slot_buffers[binding.buffer_id];
+        TouchBuffer(buffer, binding.buffer_id);
         SynchronizeBuffer(buffer, binding.device_addr, size);
 
         const u32 offset = buffer.Offset(binding.device_addr);
