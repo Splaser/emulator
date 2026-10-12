@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "common/common_types.h"
+#include "common/host_memory.h"
 
 namespace Common {
 class DynamicLibrary;
@@ -37,5 +38,9 @@ struct GuestMemoryExport {
 /// result cannot be mapped the ways Common::HostMemory maps guest memory.
 [[nodiscard]] GuestMemoryExport ExportGuestMemory(const Common::DynamicLibrary& library,
                                                   u64 total_size, u64 chunk_size);
+
+/// One long-lived export-only device; does not allocate any guest chunks at creation.
+[[nodiscard]] std::shared_ptr<Common::GuestBackingExporter> CreateGuestBackingExporter(
+    std::shared_ptr<Common::DynamicLibrary> library);
 
 } // namespace Vulkan

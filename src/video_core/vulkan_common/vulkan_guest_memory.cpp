@@ -5,13 +5,18 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <mutex>
 #include <span>
 #include <string>
 #include <type_traits>
 #include <vector>
 
 #ifdef __linux__
+#include <fcntl.h>
+#include <linux/dma-buf.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -20,6 +25,7 @@
 #include "common/dynamic_library.h"
 #include "common/logging.h"
 #include "common/memory_detect.h"
+#include "common/scope_exit.h"
 #include "video_core/vulkan_common/vulkan_guest_memory.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
@@ -68,6 +74,7 @@ struct Functions {
     PFN_vkCreateBuffer CreateBuffer{};
     PFN_vkDestroyBuffer DestroyBuffer{};
     PFN_vkGetBufferMemoryRequirements GetBufferMemoryRequirements{};
+    PFN_vkGetBufferMemoryRequirements2 GetBufferMemoryRequirements2{};
     PFN_vkAllocateMemory AllocateMemory{};
     PFN_vkBindBufferMemory BindBufferMemory{};
     PFN_vkFreeMemory FreeMemory{};
@@ -97,10 +104,30 @@ Failure ExportChunk(const Functions& vk, VkDevice device,
         .pQueueFamilyIndices = nullptr,
     };
     if (vk.CreateBuffer(device, &buffer_ci, nullptr, &buffer) != VK_SUCCESS) {
+        buffer = VK_NULL_HANDLE;
         return Transient("a buffer of the chunk size could not be created");
     }
     VkMemoryRequirements requirements{};
     vk.GetBufferMemoryRequirements(device, buffer, &requirements);
+    if (vk.GetBufferMemoryRequirements2) {
+        VkMemoryDedicatedRequirements dedicated_requirements{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS,
+        };
+        VkMemoryRequirements2 requirements2{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,
+            .pNext = &dedicated_requirements,
+        };
+        const VkBufferMemoryRequirementsInfo2 info{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2,
+            .buffer = buffer,
+        };
+        vk.GetBufferMemoryRequirements2(device, &info, &requirements2);
+        requirements = requirements2.memoryRequirements;
+        dedicated |= dedicated_requirements.requiresDedicatedAllocation == VK_TRUE;
+    }
+    if (requirements.size < chunk_size || requirements.alignment == 0) {
+        return Permanent("invalid buffer memory requirements");
+    }
     direct_importable &= !dedicated && requirements.size == chunk_size;
     u32 type = memory_properties.memoryTypeCount;
     for (u32 i = 0; i < memory_properties.memoryTypeCount; ++i) {
@@ -132,6 +159,7 @@ Failure ExportChunk(const Functions& vk, VkDevice device,
         .memoryTypeIndex = type,
     };
     if (vk.AllocateMemory(device, &memory_ai, nullptr, &memory) != VK_SUCCESS) {
+        memory = VK_NULL_HANDLE;
         return Transient("the allocation failed");
     }
     if (vk.BindBufferMemory(device, buffer, memory, 0) != VK_SUCCESS) {
@@ -150,14 +178,17 @@ Failure ExportChunk(const Functions& vk, VkDevice device,
     return {};
 }
 
-/// Creates a device on the first physical device and exports every chunk from it. Descriptors
-/// exported before a failure are left in `fds`.
-Failure ExportFromInstance(const vk::InstanceDispatch& dld, VkInstance instance, u64 chunk_size,
-                           std::span<int> fds, bool& direct_importable) {
+/// Creates an export-only device; the caller retains it and tears it down even on failure.
+Failure InitializeExportDevice(const vk::InstanceDispatch& dld, VkInstance instance,
+                               VkDevice& device, Functions& vk,
+                               VkPhysicalDeviceMemoryProperties& memory_properties,
+                               bool& dedicated) {
     u32 device_count = 1;
     VkPhysicalDevice physical_device{};
-    dld.vkEnumeratePhysicalDevices(instance, &device_count, &physical_device);
-    if (device_count == 0) {
+    const VkResult enumeration =
+        dld.vkEnumeratePhysicalDevices(instance, &device_count, &physical_device);
+    if ((enumeration != VK_SUCCESS && enumeration != VK_INCOMPLETE) ||
+        device_count == 0 || physical_device == VK_NULL_HANDLE) {
         return Transient("no physical device");
     }
     VkPhysicalDeviceProperties properties{};
@@ -205,7 +236,7 @@ Failure ExportFromInstance(const vk::InstanceDispatch& dld, VkInstance instance,
     if ((features & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) == 0) {
         return Permanent("the driver does not export the memory of such buffers as dma_buf");
     }
-    const bool dedicated = (features & VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT) != 0;
+    dedicated = (features & VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT) != 0;
     u32 family_count = 0;
     dld.vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &family_count, nullptr);
     std::vector<VkQueueFamilyProperties> families(family_count);
@@ -237,8 +268,8 @@ Failure ExportFromInstance(const vk::InstanceDispatch& dld, VkInstance instance,
         .ppEnabledExtensionNames = DeviceExtensions.data(),
         .pEnabledFeatures = nullptr,
     };
-    VkDevice device{};
     if (dld.vkCreateDevice(physical_device, &device_ci, nullptr, &device) != VK_SUCCESS) {
+        device = VK_NULL_HANDLE;
         return Transient("the device could not be created");
     }
     const auto load = [&dld, device](auto& function, const char* name) {
@@ -246,7 +277,6 @@ Failure ExportFromInstance(const vk::InstanceDispatch& dld, VkInstance instance,
             dld.vkGetDeviceProcAddr(device, name));
         return function != nullptr;
     };
-    Functions vk;
     Failure failure;
     if (!(load(vk.CreateBuffer, "vkCreateBuffer") && load(vk.DestroyBuffer, "vkDestroyBuffer") &&
           load(vk.GetBufferMemoryRequirements, "vkGetBufferMemoryRequirements") &&
@@ -255,8 +285,17 @@ Failure ExportFromInstance(const vk::InstanceDispatch& dld, VkInstance instance,
           load(vk.GetMemoryFdKHR, "vkGetMemoryFdKHR"))) {
         failure = Permanent("a device function is missing");
     }
-    VkPhysicalDeviceMemoryProperties memory_properties{};
     dld.vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
+    return failure;
+}
+
+Failure ExportFromInstance(const vk::InstanceDispatch& dld, VkInstance instance, u64 chunk_size,
+                           std::span<int> fds, bool& direct_importable) {
+    VkDevice device{};
+    Functions vk;
+    VkPhysicalDeviceMemoryProperties memory_properties{};
+    bool dedicated{};
+    Failure failure = InitializeExportDevice(dld, instance, device, vk, memory_properties, dedicated);
     std::vector<VkBuffer> buffers(fds.size());
     std::vector<VkDeviceMemory> memories(fds.size());
     direct_importable = true;
@@ -270,7 +309,9 @@ Failure ExportFromInstance(const vk::InstanceDispatch& dld, VkInstance instance,
         vk.DestroyBuffer(device, buffers[i], nullptr);
         vk.FreeMemory(device, memories[i], nullptr);
     }
-    dld.vkDestroyDevice(device, nullptr);
+    if (device != VK_NULL_HANDLE) {
+        dld.vkDestroyDevice(device, nullptr);
+    }
     return failure;
 }
 
@@ -291,6 +332,171 @@ Failure CheckMappings(std::span<const int> fds) {
     }
     return {};
 }
+
+bool SyncCpuAccess(int fd, u64 flags) {
+    dma_buf_sync sync{.flags = flags | DMA_BUF_SYNC_RW};
+    int result;
+    do {
+        result = ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync);
+    } while (result < 0 && (errno == EINTR || errno == EAGAIN));
+    return result == 0;
+}
+
+// Owns the library/instance/device, but never creates a queue submission or renderer object.
+// HostMemory calls this only before a chunk is published; no callback enters HostMemory again.
+class LazyGuestBackingExporter final : public Common::GuestBackingExporter {
+public:
+    explicit LazyGuestBackingExporter(std::shared_ptr<Common::DynamicLibrary> library_)
+        : library{std::move(library_)} {}
+
+    ~LazyGuestBackingExporter() override {
+        if (device != VK_NULL_HANDLE) {
+            dld.vkDestroyDevice(device, nullptr);
+        }
+        if (instance != VK_NULL_HANDLE && dld.vkDestroyInstance) {
+            dld.vkDestroyInstance(instance, nullptr);
+        }
+    }
+
+    Failure Initialize() {
+        if (!library || !library->IsOpen() ||
+            !library->GetSymbol("vkGetInstanceProcAddr", &dld.vkGetInstanceProcAddr) ||
+            !vk::Load(dld)) {
+            return Transient("no Vulkan library");
+        }
+        const VkApplicationInfo app{
+            .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+            .pApplicationName = "Citron lazy guest backing",
+            .apiVersion = VK_API_VERSION_1_3,
+        };
+        const VkInstanceCreateInfo ci{
+            .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+            .pApplicationInfo = &app,
+        };
+        if (dld.vkCreateInstance(&ci, nullptr, &instance) != VK_SUCCESS) {
+            instance = VK_NULL_HANDLE;
+            return Transient("the instance could not be created");
+        }
+        dld.vkDestroyInstance = reinterpret_cast<PFN_vkDestroyInstance>(
+            dld.vkGetInstanceProcAddr(instance, "vkDestroyInstance"));
+        if (!dld.vkDestroyInstance || !vk::Load(instance, dld)) {
+            return Permanent("an instance function is missing");
+        }
+        Failure failure = InitializeExportDevice(dld, instance, device, functions,
+                                                 memory_properties, dedicated);
+        if (!failure) {
+            functions.GetBufferMemoryRequirements2 =
+                reinterpret_cast<PFN_vkGetBufferMemoryRequirements2>(
+                    dld.vkGetDeviceProcAddr(device, "vkGetBufferMemoryRequirements2"));
+            if (!functions.GetBufferMemoryRequirements2) {
+                return Permanent("missing dedicated allocation requirements query");
+            }
+        }
+        return failure;
+    }
+
+    int CreateChunk(size_t size) override {
+        std::scoped_lock lock{mutex};
+        if (disabled || size == 0 || size % 4096 != 0) {
+            return -1;
+        }
+        VkBuffer buffer{};
+        VkDeviceMemory memory{};
+        int fd = -1;
+        bool cpu_access = false;
+        bool published = false;
+        SCOPE_EXIT {
+            // fd holds a reference to the payload after the export-only Vulkan objects die.
+            if (buffer != VK_NULL_HANDLE) {
+                functions.DestroyBuffer(device, buffer, nullptr);
+            }
+            if (memory != VK_NULL_HANDLE) {
+                functions.FreeMemory(device, memory, nullptr);
+            }
+            if (!published && fd >= 0) {
+                if (cpu_access) {
+                    SyncCpuAccess(fd, DMA_BUF_SYNC_END);
+                }
+                close(fd);
+            }
+        };
+        bool unused_direct_importable = false;
+        Failure failure = ExportChunk(functions, device, memory_properties, size, dedicated,
+                                      unused_direct_importable, buffer, memory, fd);
+        if (!failure && fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
+            failure = Transient("could not set close-on-exec on exported fd");
+        }
+        if (!failure) {
+            // There is no GPU use in Phase 2. Keep one CPU-access interval open for the
+            // entire fd lifetime, rather than repeatedly START/END on every guest access.
+            cpu_access = SyncCpuAccess(fd, DMA_BUF_SYNC_START);
+            if (!cpu_access) {
+                failure = Transient("DMA_BUF_SYNC_START failed");
+            }
+        }
+        if (!failure) {
+            failure = InitializeCpuPayload(fd, size);
+        }
+        if (failure) {
+            disabled = failure.permanent;
+            if (!logged_failure) {
+                LOG_WARNING(Render_Vulkan, "Lazy backing export failed; memfd fallback: {}",
+                            failure.what);
+                logged_failure = true;
+            }
+            return -1;
+        }
+        published = true;
+        return fd;
+    }
+
+    void ReleaseChunk(int fd) noexcept override {
+        // Caller has stopped guest CPU use and unmapped every CPU alias first.
+        if (!SyncCpuAccess(fd, DMA_BUF_SYNC_END)) {
+            LOG_WARNING(Render_Vulkan, "Lazy backing DMA_BUF_SYNC_END failed: {}", errno);
+        }
+        close(fd);
+    }
+
+private:
+    static Failure InitializeCpuPayload(int fd, size_t size) {
+        struct stat status{};
+        if (fstat(fd, &status) != 0 || status.st_size < 0 ||
+            static_cast<u64>(status.st_size) < size) {
+            return Permanent("exported payload is shorter than the requested chunk");
+        }
+        void* const payload = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (payload == MAP_FAILED) {
+            return Transient("full CPU mapping failed");
+        }
+        SCOPE_EXIT { munmap(payload, size); };
+        // Validate a second alias, including the executable mappings required by NCE.
+        void* const alias = mmap(nullptr, 4096, PROT_READ | PROT_EXEC, MAP_SHARED, fd, 0);
+        if (alias == MAP_FAILED) {
+            return Permanent("executable CPU alias refused");
+        }
+        SCOPE_EXIT { munmap(alias, 4096); };
+        std::memset(payload, 0, size); // Vulkan allocations are not guaranteed to be zeroed.
+        auto* const word = static_cast<volatile u32*>(payload);
+        *word = 0x43697472;
+        if (*static_cast<const volatile u32*>(alias) != *word) {
+            return Permanent("CPU aliases do not share the same payload");
+        }
+        *word = 0;
+        return {};
+    }
+
+    std::shared_ptr<Common::DynamicLibrary> library; // outlives all dispatch and driver objects
+    vk::InstanceDispatch dld;
+    VkInstance instance{};
+    VkDevice device{};
+    Functions functions;
+    VkPhysicalDeviceMemoryProperties memory_properties{};
+    bool dedicated{};
+    bool disabled{};
+    bool logged_failure{};
+    std::mutex mutex;
+};
 
 } // Anonymous namespace
 #endif
@@ -369,6 +575,20 @@ GuestMemoryExport ExportGuestMemory([[maybe_unused]] const Common::DynamicLibrar
     result.retry = false;
 #endif
     return result;
+}
+
+std::shared_ptr<Common::GuestBackingExporter> CreateGuestBackingExporter(
+    [[maybe_unused]] std::shared_ptr<Common::DynamicLibrary> library) {
+#ifdef __linux__
+    auto exporter = std::make_shared<LazyGuestBackingExporter>(std::move(library));
+    const Failure failure = exporter->Initialize();
+    if (!failure) {
+        LOG_INFO(Render_Vulkan, "Lazy backing exporter ready (reused export-only Vulkan device)");
+        return exporter;
+    }
+    LOG_INFO(Render_Vulkan, "Lazy backing exporter unavailable; CPU-only memfd: {}", failure.what);
+#endif
+    return {};
 }
 
 } // namespace Vulkan

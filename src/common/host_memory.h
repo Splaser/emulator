@@ -25,8 +25,19 @@ DECLARE_ENUM_FLAG_OPERATORS(MemoryPermission)
 /// Most file descriptors a backing can be made of.
 constexpr size_t MaxBackingChunks = 16;
 
+/// CPU-ready exported chunks. Implementations serialize their driver context internally.
+/// CreateChunk returns an owned fd, or -1; successful chunks are zeroed and CPU-accessible.
+/// No renderer imports or GPU submissions are permitted through this interface.
+class GuestBackingExporter {
+public:
+    virtual ~GuestBackingExporter() = default;
+    virtual int CreateChunk(size_t size) = 0;
+    virtual void ReleaseChunk(int fd) noexcept = 0;
+};
+
 struct LazyBackingParams {
     size_t chunk_size{32ULL << 20};
+    std::shared_ptr<GuestBackingExporter> exporter;
 };
 
 struct BackingStats {
@@ -35,6 +46,11 @@ struct BackingStats {
     u64 active_chunks{};
     u64 peak_fd_count{}; // backing fds owned by this arena
     u64 peak_vma_count{}; // sampled process VMAs
+    u64 chunks_exported{};
+    u64 export_failures{};
+    u64 cpu_only_fallback_chunks{};
+    u64 export_duration_ns{};
+    u64 peak_export_duration_ns{};
 };
 
 /// A piece of the backing memory when the backing is a row of equally sized file descriptors.
@@ -67,11 +83,13 @@ public:
     /// With `backing_fds` empty the backing is created here (a memfd on Linux). Otherwise the
     /// backing is the given file descriptors in order, `chunk_size` bytes each and `backing_size_`
     /// bytes together; HostMemory owns them from here on and closes them. Linux only.
-    /// With lazy_backing=true, reserve the arena and create CPU-only memfd chunks on
-    /// first range access. backing_fds must be empty and chunk_size must divide the arena.
+    /// With lazy_backing=true, reserve the arena and create chunks on first range access.
+    /// An optional exporter provides CPU-ready dma-bufs, with memfd fallback before publication.
+    /// backing_fds must be empty and chunk_size must divide the arena. No direct renderer access.
     explicit HostMemory(size_t backing_size_, size_t virtual_size_,
                         std::span<const int> backing_fds = {}, size_t chunk_size = 0,
-                        bool direct_importable = false, bool lazy_backing = false);
+                        bool direct_importable = false, bool lazy_backing = false,
+                        std::shared_ptr<GuestBackingExporter> exporter = {});
     ~HostMemory();
 
     /**

@@ -336,10 +336,15 @@ struct System::Impl {
         }
 #if defined(__linux__)
         if (Settings::values.use_lazy_guest_backing.GetValue()) {
+            Common::LazyBackingParams params;
+            params.exporter = VideoCore::CreateGuestBackingExporter(emu_window);
+            const bool export_available = params.exporter != nullptr;
             device_memory.reset();
-            device_memory.emplace(Common::LazyBackingParams{});
+            device_memory.emplace(std::move(params));
             guest_memory_lazy_backing = true;
-            LOG_INFO(Core, "Lazy physical backing: on (32 MiB CPU-only chunks)");
+            LOG_INFO(Core, "Lazy physical backing: on (32 MiB {}, renderer direct access disabled)",
+                     export_available ? "GPU-exportable chunks with CPU-only fallback"
+                                      : "CPU-only memfd chunks");
             return;
         }
 #endif

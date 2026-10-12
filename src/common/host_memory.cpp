@@ -31,6 +31,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
@@ -460,10 +461,11 @@ static void* ChooseVirtualBase(size_t virtual_size) {
 class HostMemory::Impl {
 public:
     explicit Impl(size_t backing_size_, size_t virtual_size_, std::span<const int> backing_fds,
-                  size_t chunk_size_, bool lazy_backing_ = false)
+                  size_t chunk_size_, bool lazy_backing_ = false,
+                  std::shared_ptr<GuestBackingExporter> exporter_ = {})
         : backing_size{backing_size_}, virtual_size{virtual_size_},
           chunk_size{lazy_backing_ ? chunk_size_ : (backing_fds.empty() ? backing_size_ : chunk_size_)},
-          lazy_backing{lazy_backing_} {
+          lazy_backing{lazy_backing_}, exporter{std::move(exporter_)} {
         assert(backing_fds.size() <= MaxBackingChunks &&
                (backing_fds.empty() || chunk_size * backing_fds.size() == backing_size));
         if (lazy_backing && (!backing_fds.empty() || chunk_size == 0 ||
@@ -472,6 +474,7 @@ public:
         }
         fds.assign(lazy_backing ? backing_size / chunk_size : MaxBackingChunks, -1);
         if (lazy_backing) {
+            exported_slots.resize(fds.size());
             ready = std::make_unique<std::atomic<bool>[]>(fds.size());
         }
         std::ranges::copy(backing_fds, fds.begin());
@@ -544,6 +547,13 @@ public:
             vma_sampler_thread =
                 std::jthread([this](std::stop_token stop_token) { VmaSamplerLoop(stop_token); });
         }
+        if (lazy_backing) {
+            backing_stats_thread = std::jthread([this](std::stop_token token) {
+                while (Common::StoppableTimedWait(token, std::chrono::seconds{5})) {
+                    LogBackingStats();
+                }
+            });
+        }
         good = true;
     }
 
@@ -567,27 +577,58 @@ public:
                 chunk_cache_hits.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
-#if defined(__FreeBSD__) && __FreeBSD__ < 13
-            const int fd = shm_open(SHM_ANON, O_RDWR, 0600);
-#else
-            const int fd = memfd_create("citron-guest-chunk", MFD_CLOEXEC);
-#endif
-            if (fd < 0) {
-                throw std::bad_alloc{};
-            }
+            int fd = -1;
+            bool exported = false;
             bool published = false;
             SCOPE_EXIT {
-                if (!published) {
-                    close(fd);
+                if (!published && fd >= 0) {
+                    if (exported) {
+                        exporter->ReleaseChunk(fd);
+                    } else {
+                        close(fd);
+                    }
                 }
             };
-            if (ftruncate(fd, chunk_size) != 0 ||
-                mmap(backing_base + index * chunk_size, chunk_size, PROT_READ | PROT_WRITE,
-                     MAP_SHARED | MAP_FIXED, fd, 0) == MAP_FAILED) {
-                throw std::bad_alloc{};
+            if (exporter) {
+                const auto start = std::chrono::steady_clock::now();
+                fd = exporter->CreateChunk(chunk_size);
+                const u64 elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                        std::chrono::steady_clock::now() - start).count();
+                export_duration_ns.fetch_add(elapsed, std::memory_order_relaxed);
+                u64 peak = peak_export_duration_ns.load(std::memory_order_relaxed);
+                while (elapsed > peak && !peak_export_duration_ns.compare_exchange_weak(
+                                            peak, elapsed, std::memory_order_relaxed)) {
+                }
+                if (fd >= 0) {
+                    exported = true;
+                    if (mmap(backing_base + index * chunk_size, chunk_size,
+                             PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0) == MAP_FAILED) {
+                        exporter->ReleaseChunk(fd);
+                        fd = -1;
+                        exported = false;
+                    }
+                }
+                if (fd < 0) {
+                    export_failures.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+            if (!exported) {
+#if defined(__FreeBSD__) && __FreeBSD__ < 13
+                fd = shm_open(SHM_ANON, O_RDWR, 0600);
+#else
+                fd = memfd_create("citron-guest-chunk", MFD_CLOEXEC);
+#endif
+                if (fd < 0 || ftruncate(fd, chunk_size) != 0 ||
+                    mmap(backing_base + index * chunk_size, chunk_size, PROT_READ | PROT_WRITE,
+                         MAP_SHARED | MAP_FIXED, fd, 0) == MAP_FAILED) {
+                    throw std::bad_alloc{};
+                }
             }
             fds[index] = fd;
+            exported_slots[index] = exported;
             published = true;
+            (exported ? chunks_exported : cpu_only_fallback_chunks)
+                .fetch_add(1, std::memory_order_relaxed);
             chunks_created.fetch_add(1, std::memory_order_relaxed);
             ready[index].store(true, std::memory_order_release);
             // Physical-only kernel access may never reach the virtual-map sampler.
@@ -602,10 +643,19 @@ public:
     BackingStats GetBackingStats() const {
         const u64 created = chunks_created.load(std::memory_order_relaxed);
         return {created, chunk_cache_hits.load(std::memory_order_relaxed), created, created,
-                peak_vma_count.load(std::memory_order_relaxed)};
+                peak_vma_count.load(std::memory_order_relaxed),
+                chunks_exported.load(std::memory_order_relaxed),
+                export_failures.load(std::memory_order_relaxed),
+                cpu_only_fallback_chunks.load(std::memory_order_relaxed),
+                export_duration_ns.load(std::memory_order_relaxed),
+                peak_export_duration_ns.load(std::memory_order_relaxed)};
     }
 
     ~Impl() {
+        backing_stats_thread.request_stop();
+        if (backing_stats_thread.joinable()) {
+            backing_stats_thread.join();
+        }
         vma_sampler_thread.request_stop();
         if (vma_sampler_thread.joinable()) {
             vma_sampler_thread.join();
@@ -622,12 +672,7 @@ public:
                      unmap_count.load(std::memory_order_relaxed));
         }
         if (lazy_backing) {
-            const auto stats = GetBackingStats();
-            LOG_INFO(HW_Memory,
-                     "Lazy backing summary: chunks_created={} chunk_cache_hits={} active_chunks={} "
-                     "peak_backing_fd_count={} peak_vma_count={}",
-                     stats.chunks_created, stats.chunk_cache_hits, stats.active_chunks,
-                     stats.peak_fd_count, stats.peak_vma_count);
+            LogBackingStats();
         }
         Release();
     }
@@ -792,6 +837,22 @@ private:
         return count;
     }
 
+    void LogBackingStats() const {
+        const auto stats = GetBackingStats();
+        LOG_INFO(HW_Memory,
+                 "Lazy backing runtime: types={} chunks_created={} chunk_cache_hits={} "
+                 "chunks_exported={} export_failures={} cpu_only_fallback_chunks={} "
+                 "active_chunks={} peak_fd_count={} peak_vma_count={} export_duration_ns={} "
+                 "peak_export_duration_ns={}",
+                 stats.chunks_exported == 0 ? "CPU-only memfd"
+                     : stats.cpu_only_fallback_chunks == 0 ? "GPU-driver-exported dma-buf"
+                                                         : "dma-buf + CPU-only memfd",
+                 stats.chunks_created, stats.chunk_cache_hits, stats.chunks_exported,
+                 stats.export_failures, stats.cpu_only_fallback_chunks, stats.active_chunks,
+                 stats.peak_fd_count, stats.peak_vma_count, stats.export_duration_ns,
+                 stats.peak_export_duration_ns);
+    }
+
     void RequestVmaSample(u64 map_id) {
         if (max_map_count == 0 || map_id % VmaSampleInterval != 0) {
             return;
@@ -872,10 +933,15 @@ private:
             assert(ret == 0 && "munmap failed: {}" && (void(errno), true));
         }
 
-        for (const int fd : fds) {
+        for (size_t index = 0; index < fds.size(); ++index) {
+            const int fd = fds[index];
             if (fd != -1) {
-                [[maybe_unused]] int ret = close(fd);
-                assert(ret == 0 && "close failed: {}" && (void(errno), true));
+                if (lazy_backing && exported_slots[index]) {
+                    exporter->ReleaseChunk(fd);
+                } else {
+                    [[maybe_unused]] int ret = close(fd);
+                    assert(ret == 0 && "close failed: {}" && (void(errno), true));
+                }
             }
         }
     }
@@ -904,10 +970,18 @@ private:
     /// Backing fds in physical order: eager memfd/provided fds, or lazy slots. -1 means unused.
     std::vector<int> fds;
     bool lazy_backing{};
+    std::shared_ptr<GuestBackingExporter> exporter;
+    std::vector<bool> exported_slots; // only accessed under backing_mutex or after worker shutdown
     std::unique_ptr<std::atomic<bool>[]> ready;
     std::mutex backing_mutex;
     std::atomic<u64> chunks_created{};
     std::atomic<u64> chunk_cache_hits{};
+    std::atomic<u64> chunks_exported{};
+    std::atomic<u64> export_failures{};
+    std::atomic<u64> cpu_only_fallback_chunks{};
+    std::atomic<u64> export_duration_ns{};
+    std::atomic<u64> peak_export_duration_ns{};
+    std::jthread backing_stats_thread;
     FreeRegionManager free_manager{};
     std::atomic<u64> map_count{0};
     std::atomic<u64> unmap_count{0};
@@ -948,7 +1022,7 @@ private:
 
 HostMemory::HostMemory(size_t backing_size_, size_t virtual_size_,
                        std::span<const int> backing_fds, size_t chunk_size, bool direct_importable,
-                       bool lazy_backing)
+                       bool lazy_backing, std::shared_ptr<GuestBackingExporter> exporter)
     : backing_size(backing_size_)
     , driver_fds(backing_fds.begin(), backing_fds.end())
     , driver_chunk_size(chunk_size)
@@ -962,7 +1036,7 @@ HostMemory::HostMemory(size_t backing_size_, size_t virtual_size_,
 #if defined(__linux__) || defined(__FreeBSD__)
         impl = std::make_unique<HostMemory::Impl>(AlignUp(backing_size, PageAlignment),
                                                 AlignUp(virtual_size, PageAlignment) + HugePageSize,
-                                                backing_fds, chunk_size, true);
+                                                backing_fds, chunk_size, true, std::move(exporter));
 #else
         throw std::invalid_argument("Lazy physical backing is unavailable on this host");
 #endif
