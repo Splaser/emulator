@@ -202,7 +202,8 @@ int main() {
 '''
 cpp = out / 'tests.cpp'
 cpp.write_text(head + device_body + tail)
-cmd = [args.cxx, '-std=c++23', '-O1', '-pthread', '-I', str(out / 'stubs'), '-I', str(root / 'src')]
+cmd = [args.cxx, '-std=c++23', '-O1', '-Werror=reorder', '-pthread',
+       '-I', str(out / 'stubs'), '-I', str(root / 'src')]
 if args.boost_include:
     cmd += ['-I', str(args.boost_include)]
 cmd += [str(root / 'src/common/host_memory.cpp'), str(cpp), '-o', str(out / 'tests')]

@@ -461,8 +461,9 @@ class HostMemory::Impl {
 public:
     explicit Impl(size_t backing_size_, size_t virtual_size_, std::span<const int> backing_fds,
                   size_t chunk_size_, bool lazy_backing_ = false)
-        : lazy_backing{lazy_backing_}, backing_size{backing_size_}, virtual_size{virtual_size_},
-          chunk_size{lazy_backing_ ? chunk_size_ : (backing_fds.empty() ? backing_size_ : chunk_size_)} {
+        : backing_size{backing_size_}, virtual_size{virtual_size_},
+          chunk_size{lazy_backing_ ? chunk_size_ : (backing_fds.empty() ? backing_size_ : chunk_size_)},
+          lazy_backing{lazy_backing_} {
         assert(backing_fds.size() <= MaxBackingChunks &&
                (backing_fds.empty() || chunk_size * backing_fds.size() == backing_size));
         if (lazy_backing && (!backing_fds.empty() || chunk_size == 0 ||
