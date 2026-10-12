@@ -556,7 +556,7 @@ public:
     mutable size_t contiguity_cache_address_space = ~size_t{};
 
     /// Copies every contiguous chunk of a non-contiguous GPU range into a scratch buffer.
-    Buffer& GatherBuffer(GPUVAddr gpu_addr, u32 size);
+    Buffer& GatherBuffer(GPUVAddr gpu_addr, u32 size, bool is_written = true);
 
     [[nodiscard]] TextureBufferBinding GetTextureBufferBinding(GPUVAddr gpu_addr, u32 size,
                                                                PixelFormat format);
@@ -628,7 +628,7 @@ public:
         GuestMappingIdentity identity;
         u64 device_generation{};
         bool scatter_pending{}; ///< scratch holds GPU writes not yet copied back to the chunks
-        bool aliases_checked{};
+        bool aliases_checked{}; ///< complete scratch range was validated for GPU writes
     };
     void ValidateGatherAliases(std::span<const GatherAliasRange> ranges);
     std::vector<GatherAliasRange> checked_alias_ranges;

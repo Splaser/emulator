@@ -272,8 +272,10 @@ void ForEachEnabledBit(u32 mask, F f) {
 struct Channel {
     bool has_deleted_buffers = false;
     u32 enabled_compute_uniform_buffer_mask = 0, enabled_compute_storage_buffers = 0;
+    u32 written_compute_storage_buffers = 0;
     std::array<Binding, 4> compute_uniform_buffers{}, compute_storage_buffers{};
     std::array<u32, NUM_STAGES> enabled_uniform_buffer_masks{}, enabled_storage_buffers{};
+    std::array<u32, NUM_STAGES> written_storage_buffers{};
     std::array<std::array<Binding, 4>, NUM_STAGES> uniform_buffers{}, storage_buffers{};
 };
 template <class P>
@@ -430,7 +432,7 @@ struct BufferCache {
         ++dma_clears;
         return true;
     }
-    Buffer& GatherBuffer(u64, u32);
+    Buffer& GatherBuffer(u64, u32, bool = true);
     void ResolveGatherChunks(u64, u32);
     void NotifyGatherWrite(u64, u64, u8 = 1, u64 = 0);
     void FlushGatherWrites();
@@ -515,12 +517,83 @@ int main() {
         aliases.pages = {{64, 1000}, {68, 1000}};
         BufferCache<int> cache;
         cache.gpu_memory = &aliases;
+        cache.channel.enabled_compute_uniform_buffer_mask = 1;
+        cache.channel.compute_uniform_buffers[0] = Binding{
+            .size=8, .gather_gpu_addr=64, .gpu_addr=64};
+        bool rejected = false;
+        try { cache.PrepareGatherBindings(true); }
+        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        check(!rejected, "read-only uniform physical aliases do not require shader write alias semantics");
+        seed(cache);
+        auto& read_only = cache.GatherBuffer(64, 8, false);
+        check(read_only.bytes[0] == read_only.bytes[4] && !cache.gather_buffers.at(64).aliases_checked &&
+              !cache.gather_buffers.at(64).scatter_pending && cache.scatter_pending.empty(),
+              "read-only gather materializes both aliases without enabling scatter");
+        const int copies = cache.runtime.copies;
+        rejected = false;
+        try { cache.GatherBuffer(64, 8, true); }
+        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        check(rejected && cache.runtime.copies == copies && !cache.gather_buffers.at(64).scatter_pending,
+              "read-only cached gather revalidates and rejects a later writable binding");
+        cache.channel.enabled_compute_storage_buffers = 1;
+        cache.channel.compute_storage_buffers[0] = cache.channel.compute_uniform_buffers[0];
+        cache.PrepareGatherBindings(true);
+        check(true, "read-only compute storage aliases are accepted");
+        cache.channel.written_compute_storage_buffers = 1;
+        rejected = false;
+        try { cache.PrepareGatherBindings(true); }
+        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        check(rejected, "compute write mask cannot reuse read-only alias validation");
+        cache.channel.enabled_uniform_buffer_masks[0] = 1;
+        cache.channel.uniform_buffers[0][0] = cache.channel.compute_uniform_buffers[0];
+        cache.PrepareGatherBindings(false);
+        cache.channel.enabled_storage_buffers[0] = 1;
+        cache.channel.storage_buffers[0][0] = cache.channel.compute_uniform_buffers[0];
+        cache.PrepareGatherBindings(false);
+        check(true, "read-only graphics storage aliases are accepted");
+        cache.channel.written_storage_buffers[0] = 1;
+        rejected = false;
+        try { cache.PrepareGatherBindings(false); }
+        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        check(rejected, "graphics write mask cannot reuse read-only alias validation");
+    }
+    {
+        Memory mapping;
+        mapping.pages = {{64, 1000}, {68, 1008}, {128, 1000}};
+        BufferCache<int> cache;
+        cache.gpu_memory = &mapping;
+        cache.channel.enabled_compute_uniform_buffer_mask = 1;
+        cache.channel.compute_uniform_buffers[0] = Binding{
+            .size=5, .gather_gpu_addr=65, .gpu_addr=65};
+        cache.channel.enabled_compute_storage_buffers = 1;
+        cache.channel.written_compute_storage_buffers = 1;
+        cache.channel.compute_storage_buffers[0] = Binding{.size=1, .gpu_addr=128};
+        cache.PrepareGatherBindings(true);
+        check(cache.channel.compute_uniform_buffers[0].gather_gpu_addr == 64,
+              "read-only alignment padding is excluded from shader alias checks");
+        cache.channel.compute_storage_buffers[0].size = 2;
+        bool rejected = false;
+        try { cache.PrepareGatherBindings(true); }
+        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        check(rejected, "read-only scratch aliasing an actual contiguous GPU write still stops");
+    }
+    {
+        Memory aliases;
+        aliases.pages = {{64, 1000}, {68, 1000}};
+        BufferCache<int> cache;
+        cache.gpu_memory = &aliases;
         seed(cache);
         bool rejected = false;
+        std::string reason;
         try { cache.GatherBuffer(64, 8); }
-        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        catch (const UnsupportedGatherMapping& e) { rejected = true; reason = e.what(); }
         check(rejected && cache.runtime.copies == 0 && !cache.gather_buffers.at(64).buffer,
               "split physical aliases rejected before gather copies or shader dispatch");
+        check(reason.find("physical_byte=1000") != std::string::npos &&
+              reason.find("gpu_byte=68") != std::string::npos &&
+              reason.find("other_gpu_byte=64") != std::string::npos &&
+              reason.find("writable=1") != std::string::npos,
+              "alias stop reports exact physical/GPU bytes and write flags");
 
         // Original 99-versus-10 regression: a pre-existing pending entry must
         // fail before either whole-chunk scatter, retaining the GPU-written 99.
@@ -565,6 +638,7 @@ int main() {
               "different device/GPU addresses aliasing physical memory invalidate cached validation");
         cache.channel.enabled_compute_uniform_buffer_mask = 1;
         cache.channel.enabled_compute_storage_buffers = 1;
+        cache.channel.written_compute_storage_buffers = 1;
         cache.channel.compute_uniform_buffers[0] = Binding{.size=8, .gpu_addr=64};
         cache.channel.compute_storage_buffers[0] = Binding{
             .size=8, .gather_gpu_addr=128, .gpu_addr=128};

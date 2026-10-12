@@ -1299,7 +1299,7 @@ void BufferCache<P>::BindHostGraphicsUniformBuffer(size_t stage, u32 index, u32 
     const u32 size = std::min(binding.size, shader_size);
     const GPUVAddr ubo_gpu_addr = binding.gather_gpu_addr;
     if (binding.gather_size != 0 && size != 0) {
-        Buffer& scratch = GatherBuffer(ubo_gpu_addr, binding.gather_size);
+        Buffer& scratch = GatherBuffer(ubo_gpu_addr, binding.gather_size, false);
         const auto bind_uniform = [&](Buffer& source, u32 offset, u32 bound_size) {
             if constexpr (HAS_PERSISTENT_UNIFORM_BUFFER_BINDINGS) {
                 channel_state->uniform_buffer_binding_sizes[stage][binding_index] = bound_size;
@@ -1425,9 +1425,9 @@ void BufferCache<P>::BindHostGraphicsStorageBuffers(size_t stage) {
     ForEachEnabledBit(channel_state->enabled_storage_buffers[stage], [&](u32 index) {
         Binding& binding = channel_state->storage_buffers[stage][index];
         if (binding.gather_gpu_addr != 0) {
-            Buffer& scratch = GatherBuffer(binding.gather_gpu_addr, binding.gather_size);
             const bool written =
                 ((channel_state->written_storage_buffers[stage] >> index) & 1) != 0;
+            Buffer& scratch = GatherBuffer(binding.gather_gpu_addr, binding.gather_size, written);
             if (written && std::ranges::find(pending_gather_writes, binding.gather_gpu_addr) ==
                                pending_gather_writes.end()) {
                 pending_gather_writes.push_back(binding.gather_gpu_addr);
@@ -1537,7 +1537,7 @@ void BufferCache<P>::BindHostComputeUniformBuffers() {
         const u32 size =
             std::min(binding.size, (*channel_state->compute_uniform_buffer_sizes)[index]);
         if (binding.gather_size != 0 && size != 0) {
-            Buffer& scratch = GatherBuffer(binding.gather_gpu_addr, binding.gather_size);
+            Buffer& scratch = GatherBuffer(binding.gather_gpu_addr, binding.gather_size, false);
             if constexpr (NEEDS_BIND_UNIFORM_INDEX) {
                 runtime.BindComputeUniformBuffer(binding_index, scratch, binding.gather_offset,
                                                  size);
@@ -1569,9 +1569,9 @@ void BufferCache<P>::BindHostComputeStorageBuffers() {
     ForEachEnabledBit(channel_state->enabled_compute_storage_buffers, [&](u32 index) {
         Binding& binding = channel_state->compute_storage_buffers[index];
         if (binding.gather_gpu_addr != 0) {
-            Buffer& scratch = GatherBuffer(binding.gather_gpu_addr, binding.gather_size);
             const bool written =
                 ((channel_state->written_compute_storage_buffers >> index) & 1) != 0;
+            Buffer& scratch = GatherBuffer(binding.gather_gpu_addr, binding.gather_size, written);
             if (written && std::ranges::find(pending_gather_writes, binding.gather_gpu_addr) ==
                                pending_gather_writes.end()) {
                 pending_gather_writes.push_back(binding.gather_gpu_addr);
@@ -2573,7 +2573,7 @@ void BufferCache<P>::ValidateGatherAliases(std::span<const GatherAliasRange> ran
                 length = std::min<u64>(length, DEVICE_PAGESIZE - *dev % DEVICE_PAGESIZE);
                 const auto physical = device_memory.GetPhysicalAddressForAlias(*dev);
                 if (physical) {
-                    validator.Add(*physical, gpu, length, range.scratch);
+                    validator.Add(*physical, gpu, length, range.scratch, range.writable);
                 }
             }
             offset += length;
@@ -2632,12 +2632,33 @@ void BufferCache<P>::PrepareGatherBindings(bool compute) {
         }
     } while (changed);
     if (!ranges.empty()) {
+        std::vector<const Binding*> written_bindings;
+        if (compute) {
+            ForEachEnabledBit(channel_state->written_compute_storage_buffers &
+                              channel_state->enabled_compute_storage_buffers, [&](u32 index) {
+                written_bindings.push_back(&channel_state->compute_storage_buffers[index]);
+            });
+        } else {
+            for (size_t stage = 0; stage < NUM_STAGES; ++stage) {
+                ForEachEnabledBit(channel_state->written_storage_buffers[stage] &
+                                  channel_state->enabled_storage_buffers[stage], [&](u32 index) {
+                    written_bindings.push_back(&channel_state->storage_buffers[stage][index]);
+                });
+            }
+        }
         std::vector<GatherAliasRange> aliases;
         for (const Range& range : ranges) {
             if (range.end - range.begin > std::numeric_limits<u32>::max()) {
                 throw UnsupportedGatherMapping("Gathered buffer exceeds the supported buffer size");
             }
-            aliases.push_back({range.begin, static_cast<u32>(range.end - range.begin), true});
+            // Whole-chunk scatter writes the prepared range, including padding.
+            // Keep that range conservative when any binding can write it.
+            if (std::ranges::any_of(written_bindings, [&](const Binding* binding) {
+                    return binding->gpu_addr < range.end &&
+                           range.begin < binding->gpu_addr + binding->size;
+                })) {
+                aliases.push_back({range.begin, static_cast<u32>(range.end - range.begin), true, true});
+            }
         }
         for (const Binding* binding : bindings) {
             if (binding->gpu_addr && binding->size) {
@@ -2645,8 +2666,15 @@ void BufferCache<P>::PrepareGatherBindings(bool compute) {
                     return binding->gpu_addr >= range.begin &&
                            binding->gpu_addr + binding->size <= range.end;
                 });
-                if (!scratch) {
-                    aliases.push_back({binding->gpu_addr, binding->size, false});
+                const bool covered = std::ranges::any_of(aliases, [&](const GatherAliasRange& range) {
+                    return range.writable && binding->gpu_addr >= range.gpu_addr &&
+                           binding->gpu_addr + binding->size <= range.gpu_addr + range.size;
+                });
+                if (!covered) {
+                    const bool written =
+                        std::ranges::find(written_bindings, binding) != written_bindings.end();
+                    // Read-only padding is not shader-accessible and is never scattered.
+                    aliases.push_back({binding->gpu_addr, binding->size, scratch, written});
                 }
             }
         }
@@ -2760,7 +2788,8 @@ void BufferCache<P>::NotifyGatherWrite(DAddr device_addr, u64 size, u8 level, GP
 }
 
 template <class P>
-typename BufferCache<P>::Buffer& BufferCache<P>::GatherBuffer(GPUVAddr gpu_addr, u32 size) {
+typename BufferCache<P>::Buffer& BufferCache<P>::GatherBuffer(GPUVAddr gpu_addr, u32 size,
+                                                            bool is_written) {
     GatherEntry& entry = gather_buffers[gpu_addr];
     const GuestMappingIdentity identity{gpu_memory, gpu_memory->GetID(), gpu_memory->MapGeneration()};
     const u64 device_generation = device_memory.MapGeneration();
@@ -2801,8 +2830,8 @@ typename BufferCache<P>::Buffer& BufferCache<P>::GatherBuffer(GPUVAddr gpu_addr,
                                             return x.device_addr == y.device_addr &&
                                                    x.size == y.size && x.offset == y.offset;
                                         });
-    if (!same_layout || !entry.aliases_checked) {
-        const std::array ranges{GatherAliasRange{gpu_addr, size, true}};
+    if (!same_layout || (is_written && !entry.aliases_checked)) {
+        const std::array ranges{GatherAliasRange{gpu_addr, size, true, is_written}};
         ValidateGatherAliases(ranges);
     }
     const bool needs_allocation = !entry.buffer || entry.buffer->SizeBytes() < size ||
@@ -2864,7 +2893,7 @@ typename BufferCache<P>::Buffer& BufferCache<P>::GatherBuffer(GPUVAddr gpu_addr,
         entry.identity = identity;
         entry.device_generation = device_generation;
     }
-    entry.aliases_checked = true;
+    entry.aliases_checked = is_written || (same_layout && entry.aliases_checked);
     scatter_skip = gpu_addr;
     SCOPE_EXIT {
         scatter_skip = 0;

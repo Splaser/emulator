@@ -19,13 +19,22 @@ address-space cache isolation, scratch retirement, allocation/copy failures,
 DMA fallback and reactive readback filtering. Four-byte fixture pages keep the
 mapping cases small and deterministic.
 
-Overlapping physical aliases at different GPU addresses cannot be represented by
+Writable physical aliases at different GPU addresses cannot be represented by
 dense scratch buffers. They are rejected before gather copies or shader dispatch,
 including aliases across different bindings or device addresses. The GPU command
 loop requests frontend shutdown and retires subsequent commands without executing
 them. This is an explicit unsupported-mapping stop, not a rendering fallback.
 The original 99-versus-10 regression also checks that rejecting an existing pending
 scatter performs no copies and retains its GPU writes and pending state.
+
+Uniforms and storage bindings marked read-only by shader metadata can safely read
+duplicate bytes. Their aliases are allowed unless they overlap a GPU-written view.
+Read-only alignment padding is excluded from the shader alias comparison; writable
+scratch keeps checking the complete range because scatter copies whole chunks.
+Changing a cached read-only view into a writable one revalidates it. Writable
+validation remains keyed by address-space identity, mapping generation, ranges
+and access modes. Errors include the conflicting physical/GPU bytes and write
+flags so device failures can be investigated without disabling the guard.
 
 The CPU scatter check runs the actual CPU dispatch and scatter helpers on a worker
 thread, verifying GPU-thread execution and write preservation during CPU unmap.

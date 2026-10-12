@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <vector>
 #include "common/common_types.h"
@@ -18,29 +19,35 @@ struct GatherAliasRange {
     u64 gpu_addr;
     u32 size;
     bool scratch;
+    bool writable{true};
     bool operator==(const GatherAliasRange&) const = default;
 };
 
 // Inputs fit within one physical page. Different GPU positions cannot represent
-// the same byte in a dense scratch allocation. Identical GPU positions remain
+// the same writable byte in a dense scratch allocation. Read-only aliases can
+// safely hold identical copies. Identical GPU positions remain
 // legal: PrepareGatherBindings gives overlapping views one shared allocation.
 class GatherAliasValidator {
 public:
     explicit GatherAliasValidator(u64 page_size_) : page_size{page_size_} {}
 
-    void Add(u64 physical, u64 gpu, u64 size, bool scratch) {
+    void Add(u64 physical, u64 gpu, u64 size, bool scratch, bool writable = true) {
         auto& page = pages[physical / page_size];
         for (const Segment& other : page) {
             const u64 begin = std::max(physical, other.physical);
             const u64 end = std::min(physical + size, other.physical + other.size);
-            if ((scratch || other.scratch) && begin < end &&
+            if ((scratch || other.scratch) && (writable || other.writable) && begin < end &&
                 gpu + (begin - physical) != other.gpu + (begin - other.physical)) {
                 throw UnsupportedGatherMapping(
                     "Split GPU buffer has overlapping physical aliases; dense scratch cannot "
-                    "preserve shader alias semantics");
+                    "preserve shader alias semantics: physical_byte=" + std::to_string(begin) +
+                    " gpu_byte=" + std::to_string(gpu + begin - physical) +
+                    " other_gpu_byte=" + std::to_string(other.gpu + begin - other.physical) +
+                    " writable=" + std::to_string(writable) +
+                    " other_writable=" + std::to_string(other.writable));
             }
         }
-        page.push_back({physical, gpu, size, scratch});
+        page.push_back({physical, gpu, size, scratch, writable});
     }
 
 private:
@@ -49,6 +56,7 @@ private:
         u64 gpu;
         u64 size;
         bool scratch;
+        bool writable;
     };
     u64 page_size;
     std::unordered_map<u64, std::vector<Segment>> pages;
