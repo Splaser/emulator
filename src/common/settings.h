@@ -493,9 +493,15 @@ struct Values {
                                                "async_presentation", Category::RendererAdvanced};
     SwitchableSetting<bool> renderer_force_max_clock{linkage, false, "force_max_clock",
                                                      Category::RendererAdvanced};
-    // Experimental shared guest backing. Explicit opt-in until real-device validation.
-    SwitchableSetting<bool> use_uma_zero_copy{linkage, false, "use_uma_zero_copy",
-                                             Category::RendererAdvanced};
+    // Experimental shared guest backing. Android defaults on for device validation;
+    // actual mapping eligibility and synchronization still decide the fast path.
+    SwitchableSetting<bool> use_uma_zero_copy{linkage,
+#ifdef ANDROID
+                                             true,
+#else
+                                             false,
+#endif
+                                             "use_uma_zero_copy", Category::RendererAdvanced};
     SwitchableSetting<bool> use_reactive_flushing{linkage,
 #ifdef ANDROID
                                                   false,

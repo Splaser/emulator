@@ -1,6 +1,9 @@
 # Experimental shared guest buffers
 
-The opt-in `use_uma_zero_copy` setting defaults to false. It builds on patches
+The experimental `use_uma_zero_copy` setting defaults to true on Android for
+real-device APK testing, and false on other platforms. An explicit saved value
+still overrides the default. Enablement does not bypass backing eligibility or
+synchronization checks. It builds on patches
 1–9 and preserves gather/scatter/readback. It does not change the existing
 8-frame buffer retirement mechanism. Android builds and real-device validation
 remain the remote workflow's responsibility.
@@ -94,7 +97,7 @@ Uniform zero-padding still needs a temporary padded buffer.
 Direct fence handling currently waits conservatively at commit time. This
 avoids readback bandwidth but may stall more than the existing async path.
 Real-device performance and skip-frame behavior need validation before enabling
-the option by default or removing fallback. No retirement-ring tuning is included.
+the option broadly or removing fallback. No retirement-ring tuning is included.
 
 ## Validation
 
