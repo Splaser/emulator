@@ -13,6 +13,7 @@
 #include <string_view>
 
 #include "common/common_types.h"
+#include "common/host_memory.h"
 #include "common/range_mutex.h"
 #include "common/scratch_buffer.h"
 #include "common/virtual_buffer.h"
@@ -52,6 +53,11 @@ public:
     ~DeviceMemoryManager();
 
     void BindInterface(DeviceInterface* device_inter);
+
+    // Resolve under the device page-table lock, checking every page rather than
+    // assuming DAddr continuity implies continuity in physical guest backing.
+    std::optional<Common::GuestBackingRange> GetDriverBackingRange(DAddr address, u64 size);
+    u64 MapGeneration() const { return mapping_generation.load(std::memory_order_acquire); }
 
     DAddr Allocate(size_t size);
     void AllocateFixed(DAddr start, size_t size);
@@ -236,6 +242,8 @@ private:
     using CachedPages = Common::VirtualBuffer<CounterEntry>;
     CachedPages cached_pages;
     Common::RangeMutex counter_guard;
+    const Common::HostMemory* guest_backing{};
+    std::atomic<u64> mapping_generation{};
     std::mutex mapping_guard;
 };
 

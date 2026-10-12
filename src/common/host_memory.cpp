@@ -866,8 +866,11 @@ private:
 #endif // ^^^ Generic ^^^
 
 HostMemory::HostMemory(size_t backing_size_, size_t virtual_size_,
-                       std::span<const int> backing_fds, size_t chunk_size)
+                       std::span<const int> backing_fds, size_t chunk_size, bool direct_importable)
     : backing_size(backing_size_)
+    , driver_fds(backing_fds.begin(), backing_fds.end())
+    , driver_chunk_size(chunk_size)
+    , driver_direct_importable(direct_importable)
     , virtual_size(virtual_size_)
 {
     // Try to allocate a fastmem arena.

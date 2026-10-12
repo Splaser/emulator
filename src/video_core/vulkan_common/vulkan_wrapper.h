@@ -176,6 +176,7 @@ struct InstanceDispatch {
     PFN_vkGetPhysicalDeviceMemoryProperties2 vkGetPhysicalDeviceMemoryProperties2{};
     PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties{};
     PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2{};
+    PFN_vkGetPhysicalDeviceExternalBufferProperties vkGetPhysicalDeviceExternalBufferProperties{};
     PFN_vkGetPhysicalDeviceToolProperties vkGetPhysicalDeviceToolProperties{};
     PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties{};
     PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR{};
@@ -318,6 +319,7 @@ struct DeviceDispatch : InstanceDispatch {
     PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements{};
     PFN_vkGetPipelineCacheData vkGetPipelineCacheData{};
     PFN_vkGetMemoryFdKHR vkGetMemoryFdKHR{};
+    PFN_vkGetMemoryFdPropertiesKHR vkGetMemoryFdPropertiesKHR{};
 #ifdef _WIN32
     PFN_vkGetMemoryWin32HandleKHR vkGetMemoryWin32HandleKHR{};
 #endif
@@ -964,6 +966,8 @@ public:
                          Span<const char*> enabled_extensions, const void* next,
                          DeviceDispatch& dispatch);
 
+    const DeviceDispatch& Dispatch() const noexcept { return *dld; }
+
     Queue GetQueue(u32 family_index) const noexcept;
 
     BufferView CreateBufferView(const VkBufferViewCreateInfo& ci) const;
@@ -1077,6 +1081,9 @@ public:
     constexpr operator VkPhysicalDevice() const noexcept {
         return physical_device;
     }
+
+    VkExternalBufferProperties GetExternalBufferProperties(VkBufferUsageFlags usage,
+        VkExternalMemoryHandleTypeFlagBits handle_type) const noexcept;
 
     VkPhysicalDeviceProperties GetProperties() const noexcept;
 

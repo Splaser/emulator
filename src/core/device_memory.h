@@ -28,7 +28,7 @@ class DeviceMemory {
 public:
     /// With `backing_fds` empty guest memory is created here. Otherwise it is those file
     /// descriptors, GuestMemoryChunkSize bytes each, which this object then owns.
-    explicit DeviceMemory(std::span<const int> backing_fds = {});
+    explicit DeviceMemory(std::span<const int> backing_fds = {}, bool direct_importable = false);
     ~DeviceMemory();
 
     DeviceMemory& operator=(const DeviceMemory&) = delete;

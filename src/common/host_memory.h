@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
+#include <vector>
 #include <span>
 #include "common/common_funcs.h"
 #include "common/common_types.h"
@@ -42,13 +44,20 @@ struct BackingChunkRange {
  * A low level linear memory buffer, which supports multiple mappings
  * Its purpose is to rebuild a given sparse memory layout, including mirrors.
  */
+struct GuestBackingRange {
+    int fd{-1}; // borrowed; Vulkan must duplicate before import
+    u64 offset{};
+    u64 allocation_size{};
+};
+
 class HostMemory {
 public:
     /// With `backing_fds` empty the backing is created here (a memfd on Linux). Otherwise the
     /// backing is the given file descriptors in order, `chunk_size` bytes each and `backing_size_`
     /// bytes together; HostMemory owns them from here on and closes them. Linux only.
     explicit HostMemory(size_t backing_size_, size_t virtual_size_,
-                        std::span<const int> backing_fds = {}, size_t chunk_size = 0);
+                        std::span<const int> backing_fds = {}, size_t chunk_size = 0,
+                        bool direct_importable = false);
     ~HostMemory();
 
     /**
@@ -97,9 +106,26 @@ public:
         return address >= virtual_base && address < virtual_base + virtual_size;
     }
 
+    // Only the caller-supplied driver backing is exportable. Ordinary memfd/file
+    // mappings must never be mistaken for dma-buf memory.
+    [[nodiscard]] std::optional<GuestBackingRange> DriverBackingRange(u64 offset, u64 size) const {
+        if (!driver_direct_importable || driver_fds.empty() || driver_chunk_size == 0 || size == 0 ||
+            offset >= backing_size || size > backing_size - offset) {
+            return std::nullopt;
+        }
+        const auto range = FirstChunkRange(offset, size, driver_chunk_size);
+        if (range.length != size || range.chunk >= driver_fds.size()) {
+            return std::nullopt;
+        }
+        return GuestBackingRange{driver_fds[range.chunk], range.offset, driver_chunk_size};
+    }
+
     size_t backing_size{};
 
 private:
+    std::vector<int> driver_fds;
+    size_t driver_chunk_size{};
+    bool driver_direct_importable{};
     size_t virtual_size{};
 
     // Low level handler for the platform dependent memory routines

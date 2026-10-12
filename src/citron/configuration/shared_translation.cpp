@@ -247,6 +247,9 @@ std::unique_ptr<TranslationMap> InitializeTranslations(QWidget* parent) {
         tr("Enable compute pipelines, required by some games.\nThis setting only exists for Intel "
            "proprietary drivers, and may crash if enabled.\nCompute pipelines are always enabled "
            "on all other drivers."));
+    INSERT(Settings, use_uma_zero_copy, tr("Experimental UMA zero-copy"),
+           tr("Use supported shared guest backing for Vulkan buffers. Requires device validation; "
+              "unsupported mappings retain the copy path."));
     INSERT(
         Settings, use_reactive_flushing, tr("Enable Reactive Flushing"),
         tr("Uses reactive flushing instead of predictive flushing, allowing more accurate memory "

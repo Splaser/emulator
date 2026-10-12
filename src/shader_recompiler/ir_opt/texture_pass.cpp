@@ -236,7 +236,8 @@ u32 DynamicDescriptorSizeShift(const IR::InstStorage& storage, const IR::U32& dy
 
 u32 DynamicDescriptorCount(u32 base_offset, u32 size_shift, u32 max_descriptors) {
     const u32 descriptor_limit{std::max(1U, max_descriptors)};
-    const u32 max_cbuf_bytes{16 * descriptor_limit};
+    // Guest constant buffers are 64 KiB regardless of the host's descriptor-array cap.
+    constexpr u32 max_cbuf_bytes{0x10000};
     if (size_shift >= 31 || base_offset >= max_cbuf_bytes) {
         return 1;
     }

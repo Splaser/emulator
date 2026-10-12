@@ -3,7 +3,10 @@
 
 #pragma once
 
+#include <unordered_set>
+
 #include "video_core/buffer_cache/buffer_cache_base.h"
+#include "video_core/buffer_cache/direct_guest_mapping.h"
 #include "video_core/buffer_cache/memory_tracker_base.h"
 #include "video_core/buffer_cache/usage_tracker.h"
 #include "video_core/engines/maxwell_3d.h"
@@ -23,6 +26,16 @@ struct HostVertexBinding;
 
 class BufferCacheRuntime;
 
+// Owns the imported payload independently of the guest fd. Buffers retained by the
+// existing delayed-destruction ring retain this allocation too. Member order destroys
+// the buffer before freeing its memory.
+struct DirectGuestMapping {
+    vk::DeviceMemory memory;
+    vk::Handle<VkBuffer, VkDevice, vk::DeviceDispatch> buffer;
+    Common::GuestBackingRange backing;
+    VkMemoryPropertyFlags properties{};
+};
+
 class Buffer : public VideoCommon::BufferBase {
 public:
     explicit Buffer(BufferCacheRuntime&, VideoCommon::NullBufferParams null_params);
@@ -31,7 +44,12 @@ public:
     [[nodiscard]] VkBufferView View(u32 offset, u32 size, VideoCore::Surface::PixelFormat format);
 
     [[nodiscard]] VkBuffer Handle() const noexcept {
-        return *buffer;
+        return direct ? *direct->buffer : *buffer;
+    }
+
+    [[nodiscard]] bool IsDirectGuest() const { return direct != nullptr; }
+    [[nodiscard]] const Common::GuestBackingRange* DirectBacking() const {
+        return direct ? &direct->backing : nullptr;
     }
 
     /// Host mapping of a unified memory buffer, empty for staged buffers.
@@ -52,7 +70,7 @@ public:
     }
 
     operator VkBuffer() const noexcept {
-        return *buffer;
+        return Handle();
     }
 
 private:
@@ -63,6 +81,8 @@ private:
         vk::BufferView handle;
     };
 
+    friend BufferCacheRuntime;
+    std::unique_ptr<DirectGuestMapping> direct;
     const Device* device{};
     vk::Buffer buffer;
     std::vector<BufferView> views;
@@ -86,6 +106,8 @@ public:
                                 ComputePassDescriptorQueue& compute_pass_descriptor_queue,
                                 DescriptorPool& descriptor_pool);
 
+    ~BufferCacheRuntime();
+
     void TickFrame(Common::SlotVector<Buffer>& slot_buffers) noexcept;
 
     /// Tick of the command buffer being recorded; work recorded now completes at this tick.
@@ -94,6 +116,11 @@ public:
     /// Last tick the GPU is known to have completed (MasterSemaphore::KnownGpuTick, a cached
     /// value that can lag behind the GPU, never run ahead of it).
     [[nodiscard]] u64 KnownGpuTick() const noexcept;
+
+    bool TryDirectGuestBuffer(Buffer& buffer, Common::GuestBackingRange backing);
+    void GuestMemoryBarrier(bool to_cpu);
+    void BeginGuestCpuAccess(const Buffer& buffer);
+    void EndGuestCpuAccess(const Buffer& buffer);
 
     void Finish();
 
@@ -194,6 +221,7 @@ private:
     MemoryAllocator& memory_allocator;
     Scheduler& scheduler;
     StagingBufferPool& staging_pool;
+    std::unordered_set<int> guest_cpu_access;
     GuestDescriptorQueue& guest_descriptor_queue;
 
     std::shared_ptr<QuadArrayIndexBuffer> quad_array_index_buffer;

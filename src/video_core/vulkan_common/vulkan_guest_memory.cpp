@@ -80,7 +80,7 @@ struct Functions {
 /// destroy.
 Failure ExportChunk(const Functions& vk, VkDevice device,
                     const VkPhysicalDeviceMemoryProperties& memory_properties, u64 chunk_size,
-                    bool dedicated, VkBuffer& buffer, VkDeviceMemory& memory, int& fd) {
+                    bool dedicated, bool& direct_importable, VkBuffer& buffer, VkDeviceMemory& memory, int& fd) {
     const VkExternalMemoryBufferCreateInfo external_ci{
         .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
         .pNext = nullptr,
@@ -101,6 +101,7 @@ Failure ExportChunk(const Functions& vk, VkDevice device,
     }
     VkMemoryRequirements requirements{};
     vk.GetBufferMemoryRequirements(device, buffer, &requirements);
+    direct_importable &= !dedicated && requirements.size == chunk_size;
     u32 type = memory_properties.memoryTypeCount;
     for (u32 i = 0; i < memory_properties.memoryTypeCount; ++i) {
         if (((requirements.memoryTypeBits >> i) & 1) != 0 &&
@@ -152,7 +153,7 @@ Failure ExportChunk(const Functions& vk, VkDevice device,
 /// Creates a device on the first physical device and exports every chunk from it. Descriptors
 /// exported before a failure are left in `fds`.
 Failure ExportFromInstance(const vk::InstanceDispatch& dld, VkInstance instance, u64 chunk_size,
-                           std::span<int> fds) {
+                           std::span<int> fds, bool& direct_importable) {
     u32 device_count = 1;
     VkPhysicalDevice physical_device{};
     dld.vkEnumeratePhysicalDevices(instance, &device_count, &physical_device);
@@ -258,8 +259,9 @@ Failure ExportFromInstance(const vk::InstanceDispatch& dld, VkInstance instance,
     dld.vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
     std::vector<VkBuffer> buffers(fds.size());
     std::vector<VkDeviceMemory> memories(fds.size());
+    direct_importable = true;
     for (size_t i = 0; !failure && i < fds.size(); ++i) {
-        failure = ExportChunk(vk, device, memory_properties, chunk_size, dedicated, buffers[i],
+        failure = ExportChunk(vk, device, memory_properties, chunk_size, dedicated, direct_importable, buffers[i],
                               memories[i], fds[i]);
     }
     // The descriptors keep the memory alive; the Vulkan objects are not needed any more.
@@ -341,7 +343,7 @@ GuestMemoryExport ExportGuestMemory([[maybe_unused]] const Common::DynamicLibrar
             failure = Permanent("an instance function is missing");
         } else {
             result.fds.assign(total_size / chunk_size, -1);
-            failure = ExportFromInstance(dld, instance, chunk_size, result.fds);
+            failure = ExportFromInstance(dld, instance, chunk_size, result.fds, result.direct_importable);
         }
         if (dld.vkDestroyInstance != nullptr) {
             dld.vkDestroyInstance(instance, nullptr);

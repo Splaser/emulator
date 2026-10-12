@@ -19,6 +19,7 @@ struct GuestMemoryExport {
     std::vector<int> fds;
     /// False when the reason it did not happen will not change for the rest of the process
     bool retry{true};
+    bool direct_importable{}; ///< known non-dedicated, unpadded buffer payloads
 };
 
 /// Allocates guest memory from the Vulkan driver in `library`. A Vulkan device can import such

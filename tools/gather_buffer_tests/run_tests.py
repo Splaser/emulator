@@ -17,14 +17,22 @@ s = (root / 'src/video_core/buffer_cache/buffer_cache.h').read_text(encoding='ut
 
 
 def func(marker):
-    start = s.index(marker)
-    start = s.rfind('template <class P>', 0, start)
-    end = s.index('\n}\n', start) + 3
+    marker_start = s.find(marker)
+    if marker_start < 0:
+        raise SystemExit(f"Cannot extract {marker!r}: requested marker is missing")
+    start = s.rfind('template <class P>', 0, marker_start)
+    if start < 0:
+        raise SystemExit(f"Cannot extract {marker!r}: preceding template header is missing")
+    closing = s.find('\n}\n', marker_start)
+    if closing < 0:
+        raise SystemExit(f"Cannot extract {marker!r}: closing brace is missing")
+    end = closing + 3
     return s[start:end]
 
 
 head = r'''
 
+#include "video_core/buffer_cache/direct_guest_mapping.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -98,12 +106,32 @@ struct ScopeMaker {
 struct BufferCopy {
     u64 src_offset, dst_offset, size;
 };
+using namespace VideoCommon;
+namespace Common {
+struct GuestBackingRange { int fd; u64 offset, allocation_size; };
+}
+namespace Settings {
+struct Flag { bool enabled = false; bool GetValue() const { return enabled; } };
+struct Values { Flag use_uma_zero_copy; };
+inline Values values;
+}
+struct Bytes {
+    std::vector<u8> storage;
+    u8* alias = nullptr;
+    explicit Bytes(u64 size = 0) : storage(size) {}
+    u64 size() const { return storage.size(); }
+    u8* data() { return alias ? alias : storage.data(); }
+    u8* begin() { return data(); }
+    u8* end() { return data() + size(); }
+    u8& operator[](u64 offset) { return data()[offset]; }
+};
 struct Runtime;
 struct FakeBuffer {
     static inline bool fail_next = false;
     DAddr base = 0;
     std::vector<u64> page_gpu_tick;
-    std::vector<u8> bytes;
+    Bytes bytes;
+    bool IsDirectGuest() const { return bytes.alias != nullptr; }
     FakeBuffer() = default;
     FakeBuffer(Runtime&, DAddr d, u64 size) : base(d), page_gpu_tick((size + 4095) / 4096), bytes(size) {
         if (fail_next) {
@@ -120,6 +148,16 @@ struct FakeBuffer {
     void MarkUsage(u64, u64) {}
 };
 struct Runtime {
+    bool direct_enabled = false;
+    std::vector<u8> backing = std::vector<u8>(16384);
+    bool TryDirectGuestBuffer(FakeBuffer& b, Common::GuestBackingRange range) {
+        if (!direct_enabled || range.fd != 1 || range.offset + b.SizeBytes() > backing.size()) return false;
+        b.bytes.alias = backing.data() + range.offset;
+        return true;
+    }
+    int barriers_to_cpu = 0, finishes = 0;
+    void GuestMemoryBarrier(bool to_cpu) { barriers_to_cpu += to_cpu; }
+    void Finish() { ++finishes; }
     bool fail_copy = false;
     u64 CurrentTick() const { return 20; }
     int copies = 0;
@@ -221,6 +259,7 @@ void ForEachEnabledBit(u32 mask, F f) {
             f(i);
 }
 struct Channel {
+    bool has_deleted_buffers = false;
     u32 enabled_compute_uniform_buffer_mask = 0, enabled_compute_storage_buffers = 0;
     std::array<Binding, 4> compute_uniform_buffers{}, compute_storage_buffers{};
     std::array<u32, NUM_STAGES> enabled_uniform_buffer_masks{}, enabled_storage_buffers{};
@@ -230,6 +269,16 @@ template <class P>
 struct BufferCache {
     using Buffer = FakeBuffer;
     std::mutex mutex;
+    struct DeviceMemory {
+        u64 generation = 2;
+        std::map<u64, u64> physical;
+        u64 MapGeneration() const { return generation; }
+        std::optional<Common::GuestBackingRange> GetDriverBackingRange(u64 d, [[maybe_unused]] u64 size) {
+            auto it = physical.find(d);
+            if (it == physical.end()) return {};
+            return Common::GuestBackingRange{1, it->second, 16384};
+        }
+    } device_memory;
     Memory* gpu_memory;
     Runtime runtime;
     Tracker memory_tracker;
@@ -255,10 +304,13 @@ struct BufferCache {
         std::vector<GatherChunk> chunks;
         u64 last_used = 0;
         u32 prepared_size = 0;
+        GuestMappingIdentity identity;
+        u64 device_generation = 0;
         bool scatter_pending = false;
     };
     std::unordered_map<u64, GatherEntry> gather_buffers;
     u64 gather_used_memory = 0, frame_tick = 0;
+    bool has_direct_guest_buffers = false;
     std::vector<u64> scatter_pending, pending_gather_writes;
     bool scatter_busy = false;
     u64 scatter_skip = 0;
@@ -275,6 +327,31 @@ struct BufferCache {
     mutable std::unordered_map<ContiguityKey, bool, ContiguityKeyHash> contiguity_cache;
     mutable u64 contiguity_cache_generation = ~0ull;
     mutable size_t contiguity_cache_address_space = ~size_t{};
+    static bool IsDirectGuest(const Buffer& b) { return b.IsDirectGuest(); }
+    void GuestMemoryBarrier(bool to_cpu) { runtime.GuestMemoryBarrier(to_cpu); }
+    int cpu_begins = 0, cpu_ends = 0;
+    void BeginGuestCpuAccess(Buffer& b) { cpu_begins += b.IsDirectGuest(); }
+    void EndGuestCpuAccess(Buffer& b) { cpu_ends += b.IsDirectGuest(); }
+    void WaitGuestBacking(u64, u64);
+    void ResolveCachedBinding(Binding&);
+    int fallback_readbacks = 0;
+    void TestReadback(Buffer&);
+    template <class F> void ForEachBufferInRange(u64 d, u64 n, F f) {
+        for (const auto& [address, id] : ids) {
+            if (address < d + n && d < address + slot_buffers[id].SizeBytes()) f(id, slot_buffers[id]);
+        }
+    }
+    void DeleteBuffer(BufferId id) {
+        for (auto it = ids.begin(); it != ids.end();) {
+            if (it->second == id) it = ids.erase(it); else ++it;
+        }
+    }
+    void DownloadMemory(u64, u64) { runtime.Finish(); }
+    void MarkWrittenBuffer(BufferId, u64 d, u64 n) {
+        NotifyGatherWrite(d, n);
+        memory_tracker.MarkRegionAsGpuModified(d, n);
+    }
+    std::optional<bool> TryDirectDMACopy(u64, u64, u64);
     bool IsRegionPageTableAddressable(u64 d, u64 n) {
         return d != 0 && d + n < 1ull << 39;
     }
@@ -290,6 +367,9 @@ struct BufferCache {
         slot_buffers.emplace_back(runtime, d, size);
         for (u32 i = 0; i < size; ++i)
             slot_buffers.back().bytes[i] = ram[d + i];
+        if (auto backing = device_memory.GetDriverBackingRange(d, size)) {
+            has_direct_guest_buffers |= runtime.TryDirectGuestBuffer(slot_buffers.back(), *backing);
+        }
         ids[d] = id;
         return id;
     }
@@ -343,11 +423,19 @@ names = [
     'GatherBindings', 'ResetGatherBindings', 'PrepareGatherBindings', 'ResolveGatherChunks',
     'NotifyGatherWrite', 'GatherBuffer', 'FlushGatherWrites', 'ScatterGatherEntry',
     'ResolveScatter', 'IsGpuRangeContiguous', 'TrimGatherBuffers', 'InvalidateGatherMemory',
-    'WriteMemory', 'MarkGpuUse', 'DMACopySplit', 'DMAClearSplit', 'GetFlushArea',
+    'ResolveCachedBinding', 'WaitGuestBacking', 'WriteMemory', 'MarkGpuUse', 'TryDirectDMACopy', 'DMACopySplit', 'DMAClearSplit', 'GetFlushArea',
 ]
 uma = (root / 'src/video_core/buffer_cache/uma.h').read_text(encoding='utf-8')
 uma = uma[uma.index('namespace VideoCommon::Uma'): ] + '\nnamespace Uma = VideoCommon::Uma;\n'
 parts = [head, uma] + [func('BufferCache<P>::' + name + '(') for name in names]
+texture_pass = (root / 'src/shader_recompiler/ir_opt/texture_pass.cpp').read_text(encoding='utf-8')
+descriptor_start = texture_pass.index('u32 DynamicDescriptorCount(')
+descriptor_end = texture_pass.index('\n}\n', descriptor_start) + 3
+parts.append('constexpr u32 DESCRIPTOR_SIZE = 8;\n' + texture_pass[descriptor_start:descriptor_end])
+readback_start = s.index('    if (IsDirectGuest(buffer)) {', s.index('void BufferCache<P>::DownloadBufferMemory(Buffer& buffer, DAddr'))
+readback_end = s.index('\n    }', readback_start) + len('\n    }')
+parts.append('template <class P>\nvoid BufferCache<P>::TestReadback(Buffer& buffer) {\n' +
+             s[readback_start:readback_end] + '\n    ++fallback_readbacks;\n}\n')
 # Exercise the current reactive filtering lambda with a controlled download sink.
 start = s.index('const auto add_preflushable =')
 end = s.index('\n                        };', start) + len('\n                        };')
@@ -516,6 +604,127 @@ int main() {
           "failed scatter preserves pending writes and releases recursion guard");
     growth.ResolveScatter(0, 0);
     check(!growth.gather_buffers.at(64).scatter_pending, "failed scatter can be retried");
+    check(DynamicDescriptorCount(512, 3, 32) == 32,
+          "descriptor base at configured count boundary retains dynamic indexing");
+    check(DynamicDescriptorCount(8192, 3, 32) == 32,
+          "descriptor base beyond configured limit is valid within constant buffer");
+    check(DynamicDescriptorCount(65528, 3, 32) == 1 && DynamicDescriptorCount(65520, 3, 32) == 2,
+          "actual constant-buffer end limits descriptor count");
+    auto direct_memory = split();
+    direct_memory.pages = {{64, 1000}, {68, 1008}};
+    BufferCache<int> direct_cache;
+    direct_cache.gpu_memory = &direct_memory;
+    direct_cache.runtime.direct_enabled = true;
+    direct_cache.device_memory.physical = {{1000, 100}, {1008, 104}, {3000, 200}, {3008, 204}};
+    direct_cache.runtime.backing[100] = 11;
+    auto& direct_view = direct_cache.GatherBuffer(64, 8);
+    check(direct_view.IsDirectGuest() && direct_cache.runtime.copies == 0 && direct_view.bytes[0] == 11,
+          "physically contiguous split mapping selects shared backing without gather copies");
+    direct_view.bytes[4] = 93;
+    direct_cache.pending_gather_writes = {64};
+    direct_cache.FlushGatherWrites();
+    direct_cache.ResolveScatter(0, 0);
+    check(direct_cache.runtime.backing[104] == 93 && direct_cache.runtime.copies == 0,
+          "GPU writes are preserved through shared backing without scatter");
+    direct_cache.GatherBuffer(64, 4);
+    check(direct_cache.runtime.backing[104] == 93, "binding shrink does not discard GPU writes");
+    direct_memory.pages[72] = 1016;
+    direct_cache.device_memory.physical[1016] = 108;
+    direct_memory.generation += 2;
+    direct_cache.GatherBuffer(64, 12);
+    check(direct_cache.runtime.backing[104] == 93 && !direct_cache.delayed_destruction_ring.retired.empty(),
+          "binding growth preserves GPU writes and retains old direct allocation");
+    direct_memory.id = 77;
+    direct_memory.generation += 2;
+    direct_cache.GatherBuffer(64, 8);
+    check(direct_cache.gather_buffers.at(64).identity.address_space == 77,
+          "identical guest VA in another address space rebuilds its view");
+    direct_cache.device_memory.generation += 2;
+    direct_cache.GatherBuffer(64, 8);
+    check(direct_cache.gather_buffers.at(64).device_generation == direct_cache.device_memory.generation,
+          "device mapping generation invalidates direct views");
+    Settings::values.use_uma_zero_copy.enabled = true;
+    direct_memory.pages[128] = 3000;
+    direct_memory.pages[132] = 3008;
+    check(direct_cache.TryDirectDMACopy(64, 128, 8) == std::optional<bool>{true} &&
+          direct_cache.runtime.backing[204] == 93,
+          "split DMA reuses direct mappings on both sides");
+    const int before_overlap = direct_cache.runtime.copies;
+    check(direct_cache.TryDirectDMACopy(64, 68, 8) == std::optional<bool>{false} &&
+          direct_cache.runtime.copies == before_overlap && direct_cache.runtime.finishes != 0,
+          "overlapping backing DMA falls back before any copies and waits for GPU");
+    // Another guest VA aliases physical source bytes although DAddr ranges differ.
+    direct_memory.pages[160] = 4000;
+    direct_cache.device_memory.physical[4000] = 100;
+    check(direct_cache.TryDirectDMACopy(64, 160, 4) == std::optional<bool>{false},
+          "DMA detects physical aliases across different guest VAs");
+    direct_cache.device_memory.physical.erase(3008);
+    const int before_missing = direct_cache.runtime.copies;
+    check(direct_cache.TryDirectDMACopy(64, 128, 8) != std::optional<bool>{true} &&
+          direct_cache.runtime.copies == before_missing,
+          "one unsupported DMA segment prevents partial direct copy");
+    Settings::values.use_uma_zero_copy.enabled = false;
+    BufferCache<int> fallback;
+    fallback.gpu_memory = &direct_memory;
+    auto& scratch_fallback = fallback.GatherBuffer(64, 8);
+    check(!scratch_fallback.IsDirectGuest() && fallback.runtime.copies != 0,
+          "unsupported memory keeps gather/scatter fallback");
+    BufferCache<int> mirror;
+    mirror.gpu_memory = &direct_memory;
+    mirror.runtime.direct_enabled = true;
+    mirror.device_memory.physical = {{1000, 100}, {1008, 104}};
+    auto& mirror_view = mirror.GatherBuffer(64, 8);
+    mirror_view.bytes[0] = 81;
+    mirror.pending_gather_writes = {64};
+    mirror.FlushGatherWrites();
+    // Simulate a broader cache allocation becoming a scratch/fallback mirror.
+    mirror.slot_buffers[mirror.ids.at(1000)].bytes.alias = nullptr;
+    mirror.ResolveScatter(0, 0);
+    check(mirror.slot_buffers[mirror.ids.at(1000)].bytes[0] == 81,
+          "direct writes refresh a later staged mirror without losing shared guest writes");
+    check(!mirror.GatherBuffer(64, 8).IsDirectGuest(),
+          "direct view downgrades safely when a cached segment becomes a staged mirror");
+    auto cached_memory = split();
+    BufferCache<int> cached;
+    cached.gpu_memory = &cached_memory;
+    auto& cached_scratch = cached.GatherBuffer(64, 8);
+    cached_scratch.bytes[0] = 67;
+    cached.pending_gather_writes = {64};
+    cached.FlushGatherWrites();
+    Binding cached_vertex{1008, 4, cached.ids.at(1008)};
+    cached.ResolveCachedBinding(cached_vertex);
+    check(cached.slot_buffers[cached_vertex.buffer_id].bytes[0] == 67 &&
+          !cached.gather_buffers.at(64).scatter_pending,
+          "cached binding resolves pending scatter before retrieving its buffer");
+    auto other_manager = direct_memory;
+    other_manager.pages[64] = 1008;
+    direct_cache.gpu_memory = &other_manager;
+    direct_cache.GatherBuffer(64, 4);
+    check(direct_cache.gather_buffers.at(64).identity.memory_manager == &other_manager &&
+          direct_cache.gather_buffers.at(64).buffer->bytes[0] == 93,
+          "different MemoryManager with identical VA and generation revalidates backing");
+    direct_cache.gpu_memory = &direct_memory;
+    const int previous_finish = direct_cache.runtime.finishes;
+    direct_cache.WaitGuestBacking(1000, 4);
+    check(direct_cache.runtime.finishes > previous_finish && direct_cache.runtime.barriers_to_cpu > 0,
+          "CPU access waits for GPU reads and writes to shared backing");
+    direct_cache.TestReadback(direct_cache.slot_buffers[direct_cache.ids.at(1000)]);
+    check(direct_cache.fallback_readbacks == 0 && direct_cache.cpu_begins != 0,
+          "direct readback retains GPU completion and CPU ownership without copy-back");
+    fallback.TestReadback(scratch_fallback);
+    check(fallback.fallback_readbacks == 1, "scratch readback remains enabled");
+    const GuestMappingIdentity stable{&direct_cache, 1, 2};
+    ZeroCopyEligibility eligible{true, true, true, true, true, true, true, true, 4, 16384};
+    const std::array physical_segments{DirectGuestSegment{100, 0, 4}, DirectGuestSegment{104, 4, 4}};
+    check(eligible.Select(stable, stable, physical_segments, 8) == GuestMappingMode::Direct,
+          "complete aligned coherent mapping is eligible");
+    eligible.coherent = false;
+    check(eligible.Select(stable, stable, physical_segments, 8) == GuestMappingMode::Scratch,
+          "non-coherent host-visible mmap aliases retain scratch and readback");
+    eligible.coherent = true;
+    eligible.unified = false;
+    check(eligible.Select(stable, stable, physical_segments, 8) == GuestMappingMode::Scratch,
+          "discrete GPU selects scratch fallback");
     auto dma = split();
     dma.pages[128] = 3000;
     dma.pages[132] = 3008;
@@ -557,5 +766,5 @@ int main() {
 
 source = p / "phase2_tests.cpp"
 executable = p / ("gather_buffer_tests.exe" if os.name == "nt" else "gather_buffer_tests")
-subprocess.run([args.cxx, "-std=c++23", "-O0", "-Wall", "-Wextra", str(source), "-o", str(executable)], check=True)
+subprocess.run([args.cxx, "-std=c++23", "-O0", "-Wall", "-Wextra", "-I", str(root / "src"), str(source), "-o", str(executable)], check=True)
 subprocess.run([str(executable)], check=True)

@@ -166,6 +166,7 @@ DeviceMemoryManager<Traits>::DeviceMemoryManager(const DeviceMemory& device_memo
     , entries(device_as_size >> Memory::CITRON_PAGEBITS)
     , compressed_device_addr(1ULL << ((Settings::values.memory_layout_mode.GetValue() == Settings::MemoryLayout::Memory_4Gb ? physical_min_bits : physical_max_bits) - Memory::CITRON_PAGEBITS))
 {
+    guest_backing = &device_memory_.buffer;
     impl = std::make_unique<DeviceMemoryManagerAllocator<Traits>>();
     cached_pages.resize(num_counter_entries);
 
@@ -201,10 +202,18 @@ void DeviceMemoryManager<Traits>::Free(DAddr start, size_t size) {
 template <typename Traits>
 void DeviceMemoryManager<Traits>::Map(DAddr address, VAddr virtual_address, size_t size, Asid asid,
                                       bool track) {
+    // Direct VkBuffer views must be retired while the old DAddr translations still exist.
+    if constexpr (requires { device_inter->UnmapMemory(address, size); }) {
+        if (device_inter && Settings::values.use_uma_zero_copy.GetValue()) {
+            device_inter->UnmapMemory(address, size);
+        }
+    }
     Core::Memory::Memory* process_memory = registered_processes[asid.id];
     size_t start_page_d = address >> Memory::CITRON_PAGEBITS;
     size_t num_pages = Common::AlignUp(size, Memory::CITRON_PAGESIZE) >> Memory::CITRON_PAGEBITS;
     std::scoped_lock lk(mapping_guard);
+    mapping_generation.fetch_add(1, std::memory_order_acq_rel);
+    SCOPE_EXIT { mapping_generation.fetch_add(1, std::memory_order_release); };
     size_t missing_pages = 0;
     size_t first_missing_page = 0;
     for (size_t i = 0; i < num_pages; i++) {
@@ -262,8 +271,15 @@ void DeviceMemoryManager<Traits>::Unmap(DAddr address, size_t size) {
     }
     size_t start_page_d = address >> Memory::CITRON_PAGEBITS;
     size_t num_pages = Common::AlignUp(size, Memory::CITRON_PAGESIZE) >> Memory::CITRON_PAGEBITS;
+    if constexpr (requires { device_inter->UnmapMemory(address, size); }) {
+        if (Settings::values.use_uma_zero_copy.GetValue()) {
+            device_inter->UnmapMemory(address, size);
+        }
+    }
     device_inter->InvalidateRegion(address, size);
     std::scoped_lock lk(mapping_guard);
+    mapping_generation.fetch_add(1, std::memory_order_acq_rel);
+    SCOPE_EXIT { mapping_generation.fetch_add(1, std::memory_order_release); };
     for (size_t i = 0; i < num_pages; i++) {
         auto phys_addr = entries[start_page_d + i].compressed_physical_ptr;
         entries[start_page_d + i].compressed_physical_ptr = 0;
@@ -307,6 +323,28 @@ void DeviceMemoryManager<Traits>::TrackContinuityImpl(DAddr address, VAddr virtu
         entries[start_page_d + index].continuity_tracker = static_cast<u32>(page_count);
     }
 }
+template <typename Traits>
+std::optional<Common::GuestBackingRange> DeviceMemoryManager<Traits>::GetDriverBackingRange(
+    DAddr address, u64 size) {
+    if (!guest_backing || size == 0 || address >= device_as_size || size > device_as_size - address) {
+        return std::nullopt;
+    }
+    std::scoped_lock lk(mapping_guard);
+    const auto* first = GetPointer<u8>(address);
+    if (!first) {
+        return std::nullopt;
+    }
+    const u64 physical = GetRawPhysicalAddr(first);
+    for (u64 offset = 0; offset < size;) {
+        const auto* ptr = GetPointer<u8>(address + offset);
+        if (!ptr || GetRawPhysicalAddr(ptr) != physical + offset) {
+            return std::nullopt;
+        }
+        offset += std::min<u64>(size - offset, page_size - ((address + offset) & page_mask));
+    }
+    return guest_backing->DriverBackingRange(physical, size);
+}
+
 template <typename Traits>
 u8* DeviceMemoryManager<Traits>::GetSpan(const DAddr src_addr, const std::size_t size) {
     size_t page_index = src_addr >> page_bits;

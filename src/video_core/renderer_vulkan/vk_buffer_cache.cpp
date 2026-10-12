@@ -4,8 +4,15 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <cerrno>
 #include <span>
 #include <vector>
+#ifdef __linux__
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/dma-buf.h>
+#endif
+#include "common/settings.h"
 
 #include "common/alignment.h"
 #include "common/common_types.h"
@@ -26,6 +33,17 @@ using namespace Common::Literals;
 
 namespace Vulkan {
 namespace {
+#ifdef __linux__
+bool SyncGuestDmaBuf(int fd, u64 flags) {
+    dma_buf_sync sync{.flags = flags};
+    int result;
+    do {
+        result = ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync);
+    } while (result != 0 && (errno == EINTR || errno == EAGAIN));
+    return result == 0;
+}
+#endif
+
 VkBufferCopy MakeBufferCopy(const VideoCommon::BufferCopy& copy) {
     return VkBufferCopy{
         .srcOffset = copy.src_offset,
@@ -58,7 +76,7 @@ size_t BytesPerIndex(VkIndexType index_type) {
     }
 }
 
-vk::Buffer CreateBuffer(const Device& device, const MemoryAllocator& memory_allocator, u64 size) {
+VkBufferUsageFlags BufferUsage(const Device& device) {
     VkBufferUsageFlags flags =
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
         VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT |
@@ -72,6 +90,11 @@ vk::Buffer CreateBuffer(const Device& device, const MemoryAllocator& memory_allo
         flags |= VK_BUFFER_USAGE_CONDITIONAL_RENDERING_BIT_EXT;
     }
 
+    return flags;
+}
+
+vk::Buffer CreateBuffer(const Device& device, const MemoryAllocator& memory_allocator, u64 size) {
+    const VkBufferUsageFlags flags = BufferUsage(device);
     const VkBufferCreateInfo buffer_ci = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext = nullptr,
@@ -91,6 +114,160 @@ vk::Buffer CreateBuffer(const Device& device, const MemoryAllocator& memory_allo
 }
 
 } // Anonymous namespace
+
+bool BufferCacheRuntime::TryDirectGuestBuffer(Buffer& target, Common::GuestBackingRange backing) {
+#ifdef __linux__
+    if (!Settings::values.use_uma_zero_copy.GetValue() || !device.IsIntegrated() ||
+        !device.CanImportGuestDmaBuf() || backing.fd < 0 || target.IsDirectGuest()) {
+        return false;
+    }
+    constexpr auto handle_type = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+    const auto usage = BufferUsage(device);
+    const auto external = device.GetPhysical().GetExternalBufferProperties(usage, handle_type);
+    const auto features = external.externalMemoryProperties.externalMemoryFeatures;
+    // Dedicated exports cannot be rebound at arbitrary offsets in a guest chunk.
+    if (!(features & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) ||
+        (features & VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT) ||
+        !(external.externalMemoryProperties.compatibleHandleTypes & handle_type)) {
+        return false;
+    }
+    const auto& logical = device.GetLogical();
+    const auto& vk = logical.Dispatch();
+    if (!vk.vkGetMemoryFdPropertiesKHR) {
+        return false;
+    }
+    VkMemoryFdPropertiesKHR fd_properties{.sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR};
+    if (vk.vkGetMemoryFdPropertiesKHR(*logical, handle_type, backing.fd, &fd_properties) != VK_SUCCESS) {
+        return false;
+    }
+    auto mapping = std::make_unique<DirectGuestMapping>();
+    const VkExternalMemoryBufferCreateInfo external_ci{
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO, .handleTypes = handle_type};
+    const VkBufferCreateInfo ci{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .pNext = &external_ci,
+        .size = target.SizeBytes(), .usage = usage, .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+    VkBuffer raw_buffer{};
+    if (vk.vkCreateBuffer(*logical, &ci, nullptr, &raw_buffer) != VK_SUCCESS) {
+        return false;
+    }
+    mapping->buffer = vk::Handle<VkBuffer, VkDevice, vk::DeviceDispatch>{raw_buffer, *logical, vk};
+    VkMemoryDedicatedRequirements dedicated{.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS};
+    const auto requirements = logical.GetBufferMemoryRequirements(raw_buffer, &dedicated);
+    if (dedicated.requiresDedicatedAllocation || requirements.size > backing.allocation_size ||
+        backing.offset > backing.allocation_size - requirements.size) {
+        return false;
+    }
+    const auto properties = device.GetPhysical().GetMemoryProperties().memoryProperties;
+    constexpr auto required = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    u32 type = properties.memoryTypeCount;
+    for (u32 i = 0; i < properties.memoryTypeCount; ++i) {
+        if ((requirements.memoryTypeBits & fd_properties.memoryTypeBits & (1U << i)) &&
+            (properties.memoryTypes[i].propertyFlags & required) == required) {
+            type = i;
+            break;
+        }
+    }
+    if (type == properties.memoryTypeCount) {
+        return false; // non-coherent mmap aliases have no cache-ownership protocol yet
+    }
+    const VideoCommon::ZeroCopyEligibility eligibility{
+        true, true, true, true, true, true, true, true, requirements.alignment, backing.allocation_size};
+    const VideoCommon::GuestMappingIdentity identity{&target, 0, 0};
+    const std::array segments{VideoCommon::DirectGuestSegment{backing.offset, 0, target.SizeBytes()}};
+    if (eligibility.Select(identity, identity, segments, target.SizeBytes()) !=
+        VideoCommon::GuestMappingMode::Direct) {
+        return false;
+    }
+    const int imported_fd = dup(backing.fd);
+    if (imported_fd < 0) {
+        return false;
+    }
+    const VkImportMemoryFdInfoKHR import{
+        .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
+        .handleType = handle_type, .fd = imported_fd};
+    mapping->memory = logical.TryAllocateMemory({
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .pNext = &import,
+        .allocationSize = backing.allocation_size, .memoryTypeIndex = type});
+    if (!mapping->memory) {
+        close(imported_fd); // ownership transfers only on successful import
+        return false;
+    }
+    if (vk.vkBindBufferMemory(*logical, raw_buffer, *mapping->memory, backing.offset) != VK_SUCCESS) {
+        return false;
+    }
+    // VkMemory HOST_COHERENT describes Vulkan mappings. The original guest mmap
+    // aliases additionally obey the dma-buf CPU-access protocol.
+    GuestMemoryBarrier(true);
+    scheduler.Finish();
+    if (!guest_cpu_access.contains(backing.fd) &&
+        !SyncGuestDmaBuf(backing.fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_RW)) {
+        return false;
+    }
+    guest_cpu_access.insert(backing.fd);
+    mapping->backing = backing;
+    mapping->properties = properties.memoryTypes[type].propertyFlags;
+    target.buffer.reset();
+    target.direct = std::move(mapping);
+    return true;
+#else
+    (void)target;
+    (void)backing;
+    return false;
+#endif
+}
+
+void BufferCacheRuntime::BeginGuestCpuAccess(const Buffer& buffer) {
+#ifdef __linux__
+    const auto* backing = buffer.DirectBacking();
+    if (!backing || guest_cpu_access.contains(backing->fd)) { return; }
+    if (!SyncGuestDmaBuf(backing->fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_RW)) {
+        // Once submitted shared writes exist, silently downgrading would lose data.
+        throw vk::Exception(VK_ERROR_INVALID_EXTERNAL_HANDLE);
+    }
+    guest_cpu_access.insert(backing->fd);
+#else
+    (void)buffer;
+#endif
+}
+
+void BufferCacheRuntime::EndGuestCpuAccess(const Buffer& buffer) {
+#ifdef __linux__
+    const auto* backing = buffer.DirectBacking();
+    if (!backing || !guest_cpu_access.contains(backing->fd)) { return; }
+    if (!SyncGuestDmaBuf(backing->fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_RW)) {
+        throw vk::Exception(VK_ERROR_INVALID_EXTERNAL_HANDLE);
+    }
+    guest_cpu_access.erase(backing->fd);
+#else
+    (void)buffer;
+#endif
+}
+
+BufferCacheRuntime::~BufferCacheRuntime() {
+#ifdef __linux__
+    for (const int fd : guest_cpu_access) {
+        if (!SyncGuestDmaBuf(fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_RW)) {
+            LOG_WARNING(Render_Vulkan, "Could not end guest dma-buf CPU access at shutdown");
+        }
+    }
+#endif
+}
+
+void BufferCacheRuntime::GuestMemoryBarrier(bool to_cpu) {
+    const VkMemoryBarrier barrier{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .srcAccessMask = VkAccessFlags(to_cpu ? VK_ACCESS_MEMORY_WRITE_BIT
+                                            : VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_MEMORY_WRITE_BIT),
+        .dstAccessMask = VkAccessFlags(to_cpu ? VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT
+                                            : VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT)};
+    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.Record([barrier, to_cpu](vk::CommandBuffer cmdbuf) {
+        cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT,
+                               to_cpu ? VK_PIPELINE_STAGE_HOST_BIT : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                               0, barrier);
+    });
+}
 
 void BufferCacheRuntime::CleanupUnusedBuffers() {
     // This function is kept for compatibility but no longer performs mode-specific cleanup
@@ -137,7 +314,7 @@ VkBufferView Buffer::View(u32 offset, u32 size, VideoCore::Surface::PixelFormat 
             .sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO,
             .pNext = nullptr,
             .flags = 0,
-            .buffer = *buffer,
+            .buffer = Handle(),
             .format = MaxwellToVK::SurfaceFormat(*device, FormatType::Buffer, false, format).format,
             .offset = offset,
             .range = size,

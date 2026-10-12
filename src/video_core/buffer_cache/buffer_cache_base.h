@@ -26,6 +26,7 @@
 #include "common/slot_vector.h"
 #include "video_core/buffer_cache/buffer_base.h"
 #include "video_core/buffer_cache/uma.h"
+#include "video_core/buffer_cache/direct_guest_mapping.h"
 #include "video_core/cache_memory_pressure.h"
 #include "video_core/control/channel_state_cache.h"
 #include "video_core/delayed_destruction_ring.h"
@@ -34,6 +35,7 @@
 #include "video_core/engines/kepler_compute.h"
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/memory_manager.h"
+#include "video_core/host1x/gpu_device_memory_manager.h"
 #include "video_core/surface.h"
 #include "video_core/texture_cache/types.h"
 
@@ -574,15 +576,51 @@ public:
         u32 offset; ///< offset inside the gathered range
         u8 dirty;   ///< number of upcoming gathers that must re-copy this chunk
     };
+    static bool IsDirectGuest(const Buffer& buffer) {
+        if constexpr (requires { buffer.IsDirectGuest(); }) {
+            return buffer.IsDirectGuest();
+        }
+        return false;
+    }
+    std::optional<bool> TryDirectDMACopy(GPUVAddr src, GPUVAddr dst, u64 size);
+    bool TryDirectGuest(Buffer& buffer, DAddr address, u64 size) {
+        if constexpr (requires { runtime.TryDirectGuestBuffer(buffer, Common::GuestBackingRange{}); }) {
+            const auto backing = device_memory.GetDriverBackingRange(address, size);
+            const bool direct = backing && runtime.TryDirectGuestBuffer(buffer, *backing);
+            has_direct_guest_buffers |= direct;
+            return direct;
+        }
+        return false;
+    }
+    void BeginGuestCpuAccess(Buffer& buffer) {
+        if constexpr (requires { runtime.BeginGuestCpuAccess(buffer); }) {
+            runtime.BeginGuestCpuAccess(buffer);
+        }
+    }
+    void EndGuestCpuAccess(Buffer& buffer) {
+        if constexpr (requires { runtime.EndGuestCpuAccess(buffer); }) {
+            runtime.EndGuestCpuAccess(buffer);
+        }
+    }
+    void ResolveCachedBinding(Binding& binding);
+    void WaitGuestBacking(DAddr address, u64 size);
+    void GuestMemoryBarrier(bool to_cpu) {
+        if constexpr (requires { runtime.GuestMemoryBarrier(to_cpu); }) {
+            runtime.GuestMemoryBarrier(to_cpu);
+        }
+    }
     struct GatherEntry {
         std::unique_ptr<Buffer> buffer;
         std::vector<GatherChunk> chunks;
         u64 last_used{};
         u32 prepared_size{};
+        GuestMappingIdentity identity;
+        u64 device_generation{};
         bool scatter_pending{}; ///< scratch holds GPU writes not yet copied back to the chunks
     };
     std::unordered_map<GPUVAddr, GatherEntry> gather_buffers;
     u64 gather_used_memory{};
+    bool has_direct_guest_buffers{};
     void TrimGatherBuffers(bool aggressive);
     void InvalidateGatherMemory(DAddr device_addr, u64 size);
 

@@ -343,7 +343,7 @@ struct System::Impl {
         }
         device_memory.reset();
         try {
-            device_memory.emplace(exported.fds);
+            device_memory.emplace(exported.fds, exported.direct_importable);
         } catch (const std::exception& e) {
             // HostMemory has closed the descriptors; guest memory comes from the usual place
             LOG_ERROR(Core, "Guest memory from the GPU driver could not be mapped: {}", e.what());
