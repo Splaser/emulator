@@ -187,6 +187,8 @@ struct Runtime {
 };
 struct Memory {
     u64 id = 1, generation = 2;
+    std::shared_ptr<std::mutex> mapping_guard = std::make_shared<std::mutex>();
+    auto AcquireMappingRead() const { return std::unique_lock{*mapping_guard}; }
     std::map<u64, u64> pages;
     u64 MapGeneration() {
         return generation;
@@ -284,11 +286,16 @@ struct BufferCache {
     std::mutex mutex;
     struct DeviceMemory {
         u64 generation = 2;
+        std::shared_ptr<std::mutex> mapping_guard = std::make_shared<std::mutex>();
         std::map<u64, u64> physical;
         u64 MapGeneration() const { return generation; }
         std::optional<u64> GetPhysicalAddressForAlias(u64 d) {
             auto it = physical.find(d);
             return it == physical.end() ? d : it->second;
+        }
+        template <typename Func> void ReadPhysicalAliases(Func&& query) {
+            std::scoped_lock lock{*mapping_guard};
+            query(MapGeneration(), [this](u64 d) { return GetPhysicalAddressForAlias(d); });
         }
         std::optional<Common::GuestBackingRange> GetDriverBackingRange(u64 d, [[maybe_unused]] u64 size) {
             auto it = physical.find(d);

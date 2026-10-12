@@ -6,6 +6,7 @@ Run with Python 3 and a GCC-compatible C++23 compiler:
 python tools/gather_buffer_tests/run_tests.py --cxx g++
 python tools/gather_buffer_tests/run_cpu_scatter_tests.py --cxx g++
 python tools/gather_buffer_tests/run_gpu_stop_tests.py --cxx g++
+python tools/gather_buffer_tests/run_mapping_snapshot_tests.py --cxx g++
 python tools/gather_buffer_tests/run_index_range_tests.py --cxx g++
 ```
 
@@ -35,6 +36,16 @@ Changing a cached read-only view into a writable one revalidates it. Writable
 validation remains keyed by address-space identity, mapping generation, ranges
 and access modes. Errors include the conflicting physical/GPU bytes and write
 flags so device failures can be investigated without disabling the guard.
+
+Alias validation locks a stable GPU page-table snapshot and queries all physical
+pages under one device mapping lock. A temporary odd generation is not a reason
+to stop gameplay: readers wait for actual table updates to finish. GPU mapping
+invalidation callbacks run before the mutation lock and odd generation begin,
+because they can wait for renderer cache locks held by the reader. Unmap still
+preserves pending writes through its callbacks before changing either page table.
+The snapshot runner exercises production map/big-map/sparse/unmap functions and
+alias/device snapshot helpers with concurrent writers, a callback waiting for the
+renderer lock, generation invalidation, and actual unsafe write-alias rejection.
 
 The CPU scatter check runs the actual CPU dispatch and scatter helpers on a worker
 thread, verifying GPU-thread execution and write preservation during CPU unmap.

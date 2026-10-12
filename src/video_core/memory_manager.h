@@ -150,6 +150,12 @@ public:
         return map_generation.load(std::memory_order_acquire);
     }
 
+    /// Updates never invoke rasterizer callbacks while holding this lock.
+    /// Readers may hold cache locks, but must not submit work under this lock.
+    auto AcquireMappingRead() const {
+        return std::unique_lock{page_table_guard};
+    }
+
     bool IsWithinGPUAddressRange(GPUVAddr gpu_addr) const {
         return gpu_addr < address_space_size;
     }
@@ -228,6 +234,9 @@ private:
     GPUVAddr PageTableOp(GPUVAddr gpu_addr, [[maybe_unused]] DAddr dev_addr, size_t size,
                          PTEKind kind);
 
+    template <bool is_big_page, EntryType entry_type>
+    void NotifyMappingChange(GPUVAddr gpu_addr, size_t size);
+
     template <EntryType entry_type>
     GPUVAddr BigPageTableOp(GPUVAddr gpu_addr, [[maybe_unused]] DAddr dev_addr, size_t size,
                             PTEKind kind);
@@ -247,6 +256,8 @@ private:
     boost::container::small_vector<std::pair<DAddr, std::size_t>, 32> page_stash2{};
 
     mutable std::mutex guard;
+    std::mutex mapping_update_guard;
+    mutable std::mutex page_table_guard;
 
     static constexpr size_t continuous_bits = 64;
 

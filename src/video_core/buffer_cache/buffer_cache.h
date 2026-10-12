@@ -2550,42 +2550,44 @@ void BufferCache<P>::ResetGatherBindings(bool compute) {
 
 template <class P>
 void BufferCache<P>::ValidateGatherAliases(std::span<const GatherAliasRange> ranges) {
-    const GuestMappingIdentity identity{gpu_memory, gpu_memory->GetID(), gpu_memory->MapGeneration()};
-    const u64 generation = device_memory.MapGeneration();
-    if (!identity.Stable() || (generation & 1)) {
-        throw UnsupportedGatherMapping("Page table is changing during split alias validation");
-    }
-    if (checked_alias_identity == identity && checked_alias_device_generation == generation &&
-        std::ranges::equal(checked_alias_ranges, ranges)) {
-        return;
-    }
-    GatherAliasValidator validator{DEVICE_PAGESIZE};
-    for (const auto& range : ranges) {
-        if (range.gpu_addr > std::numeric_limits<u64>::max() - range.size) {
-            throw UnsupportedGatherMapping("Split alias validation range overflows GPU address space");
+    const auto mapping_read = gpu_memory->AcquireMappingRead();
+    device_memory.ReadPhysicalAliases([&](u64 generation, const auto& physical_address) {
+        const GuestMappingIdentity identity{gpu_memory, gpu_memory->GetID(), gpu_memory->MapGeneration()};
+        if (!identity.Stable() || (generation & 1)) {
+            throw UnsupportedGatherMapping("Page table is changing during split alias validation");
         }
-        for (u64 offset = 0; offset < range.size;) {
-            const u64 gpu = range.gpu_addr + offset;
-            const auto dev = gpu_memory->GpuToCpuAddress(gpu);
-            u64 length = std::min<u64>(range.size - offset,
-                DEVICE_PAGESIZE - gpu % DEVICE_PAGESIZE);
-            if (dev) {
-                length = std::min<u64>(length, DEVICE_PAGESIZE - *dev % DEVICE_PAGESIZE);
-                const auto physical = device_memory.GetPhysicalAddressForAlias(*dev);
-                if (physical) {
-                    validator.Add(*physical, gpu, length, range.scratch, range.writable);
-                }
+        if (checked_alias_identity == identity && checked_alias_device_generation == generation &&
+            std::ranges::equal(checked_alias_ranges, ranges)) {
+            return;
+        }
+        GatherAliasValidator validator{DEVICE_PAGESIZE};
+        for (const auto& range : ranges) {
+            if (range.gpu_addr > std::numeric_limits<u64>::max() - range.size) {
+                throw UnsupportedGatherMapping("Split alias validation range overflows GPU address space");
             }
-            offset += length;
+            for (u64 offset = 0; offset < range.size;) {
+                const u64 gpu = range.gpu_addr + offset;
+                const auto dev = gpu_memory->GpuToCpuAddress(gpu);
+                u64 length = std::min<u64>(range.size - offset,
+                    DEVICE_PAGESIZE - gpu % DEVICE_PAGESIZE);
+                if (dev) {
+                    length = std::min<u64>(length, DEVICE_PAGESIZE - *dev % DEVICE_PAGESIZE);
+                    const auto physical = physical_address(*dev);
+                    if (physical) {
+                        validator.Add(*physical, gpu, length, range.scratch, range.writable);
+                    }
+                }
+                offset += length;
+            }
         }
-    }
-    const GuestMappingIdentity after{gpu_memory, gpu_memory->GetID(), gpu_memory->MapGeneration()};
-    if (after != identity || device_memory.MapGeneration() != generation) {
-        throw UnsupportedGatherMapping("Page table changed during split alias validation");
-    }
-    checked_alias_ranges.assign(ranges.begin(), ranges.end());
-    checked_alias_identity = identity;
-    checked_alias_device_generation = generation;
+        const GuestMappingIdentity after{gpu_memory, gpu_memory->GetID(), gpu_memory->MapGeneration()};
+        if (after != identity || device_memory.MapGeneration() != generation) {
+            throw UnsupportedGatherMapping("Page table changed during split alias validation");
+        }
+        checked_alias_ranges.assign(ranges.begin(), ranges.end());
+        checked_alias_identity = identity;
+        checked_alias_device_generation = generation;
+    });
 }
 
 template <class P>
@@ -2973,26 +2975,27 @@ void BufferCache<P>::ScatterGatherEntry(GPUVAddr gpu_addr, GatherEntry& entry) {
     // Defend pre-existing entries too: reject before the first copy, keeping the
     // pending writes and entry contents intact. Never silently skip write-back.
     if (!entry.aliases_checked || entry.device_generation != device_memory.MapGeneration()) {
-        const u64 generation = device_memory.MapGeneration();
-        if (generation & 1) {
-            throw UnsupportedGatherMapping("Page table is changing during pending scatter validation");
-        }
-        GatherAliasValidator validator{DEVICE_PAGESIZE};
-        for (const GatherChunk& chunk : entry.chunks) {
-            for (u64 offset = 0; offset < chunk.size;) {
-                const u64 device_addr = chunk.device_addr + offset;
-                const u64 length = std::min<u64>(chunk.size - offset,
-                    DEVICE_PAGESIZE - device_addr % DEVICE_PAGESIZE);
-                const auto physical = device_memory.GetPhysicalAddressForAlias(device_addr);
-                if (physical) {
-                    validator.Add(*physical, gpu_addr + chunk.offset + offset, length, true);
-                }
-                offset += length;
+        device_memory.ReadPhysicalAliases([&](u64 generation, const auto& physical_address) {
+            if (generation & 1) {
+                throw UnsupportedGatherMapping("Page table is changing during pending scatter validation");
             }
-        }
-        if (device_memory.MapGeneration() != generation) {
-            throw UnsupportedGatherMapping("Page table changed during pending scatter validation");
-        }
+            GatherAliasValidator validator{DEVICE_PAGESIZE};
+            for (const GatherChunk& chunk : entry.chunks) {
+                for (u64 offset = 0; offset < chunk.size;) {
+                    const u64 device_addr = chunk.device_addr + offset;
+                    const u64 length = std::min<u64>(chunk.size - offset,
+                        DEVICE_PAGESIZE - device_addr % DEVICE_PAGESIZE);
+                    const auto physical = physical_address(device_addr);
+                    if (physical) {
+                        validator.Add(*physical, gpu_addr + chunk.offset + offset, length, true);
+                    }
+                    offset += length;
+                }
+            }
+            if (device_memory.MapGeneration() != generation) {
+                throw UnsupportedGatherMapping("Page table changed during pending scatter validation");
+            }
+        });
     }
     if (IsDirectGuest(scratch)) { GuestMemoryBarrier(false); }
     for (const GatherChunk& chunk : entry.chunks) {
