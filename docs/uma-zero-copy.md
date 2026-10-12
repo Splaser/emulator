@@ -73,7 +73,12 @@ the old imported view; they do not clear guest bytes.
 
 Coherence does not replace ordering. GPU use ends dma-buf CPU access; CPU
 access/reuse waits for outstanding GPU reads and writes and starts CPU access
-again. The runtime retains Vulkan host/device memory barriers, completion
+again. CPU write/fault and unmap callbacks dispatch shared-backing operations
+through a blocking GPU-thread command, releasing the cache mutex before waiting.
+GPU-thread callers execute directly. Staged-to-direct cache joins copy only
+GPU-modified intervals; sub-word dirty intervals retain the staged path so a
+Vulkan copy never expands over newer CPU bytes. The runtime retains Vulkan
+host/device memory barriers, completion
 waits and `DMA_BUF_IOCTL_SYNC` START/END semantics for the original mmap aliases.
 Interrupted sync ioctls are retried. An unsupported sync operation rejects a
 candidate import. A sync failure after submitting shared work is surfaced as
@@ -107,7 +112,9 @@ importer with a fake driver, and extraction regressions without building Android
 ```sh
 python tools/gather_buffer_tests/run_tests.py --cxx c++
 python tools/gather_buffer_tests/run_vulkan_import_tests.py --cxx c++
+python tools/gather_buffer_tests/run_gpu_write_tests.py --cxx c++
 python tools/gather_buffer_tests/test_extraction.py
+python tools/openssl_tool_tests/run_tests.py
 ```
 
 Coverage includes split mappings, binding changes, shared GPU write preservation,

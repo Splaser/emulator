@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include "common/bit_field.h"
@@ -170,6 +171,8 @@ public:
 
     /// Wait until previously queued work has been processed by the GPU emulation thread.
     void SynchronizeGPUThread();
+    bool IsGpuThread() const;
+    void RunOnGpuThread(std::function<void()> callback);
 
     /// Gets a mutable reference to the Host1x interface
     [[nodiscard]] Host1x::Host1x& Host1x();

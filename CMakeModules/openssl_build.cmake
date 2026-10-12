@@ -134,6 +134,11 @@ elseif (ANDROID)
     endif()
 
     get_filename_component(_OPENSSL_ANDROID_TOOL_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
+    # A reused build directory can switch ABI, API level or NDK.
+    unset(_OPENSSL_ANDROID_CLANG CACHE)
+    unset(_OPENSSL_ANDROID_AR CACHE)
+    unset(_OPENSSL_ANDROID_CLANG)
+    unset(_OPENSSL_ANDROID_AR)
     find_program(_OPENSSL_ANDROID_CLANG
         NAMES "${_OPENSSL_ANDROID_TRIPLE}${_OPENSSL_ANDROID_API}-clang"
         HINTS "${_OPENSSL_ANDROID_TOOL_DIR}" NO_DEFAULT_PATH)

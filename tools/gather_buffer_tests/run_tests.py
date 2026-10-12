@@ -145,6 +145,9 @@ struct FakeBuffer {
     u32 Offset(DAddr d) {
         return u32(d - base);
     }
+    u64 CpuAddr() const { return base; }
+    void IncreaseStreamScore(int) {}
+    int StreamScore() const { return 0; }
     void MarkUsage(u64, u64) {}
 };
 struct Runtime {
@@ -240,8 +243,15 @@ struct Tracker {
     }
 };
 struct RangeSet {
-    void Add(u64, u64) {}
+    std::vector<std::pair<u64, u64>> ranges;
+    void Add(u64 addr, u64 size) { ranges.emplace_back(addr, addr + size); }
     void Subtract(u64, u64) {}
+    template <class F> void ForEachInRange(u64 addr, u64 size, F f) {
+        for (const auto& [lo, hi] : ranges) {
+            const u64 start = std::max(lo, addr), end = std::min(hi, addr + size);
+            if (start < end) f(start, end);
+        }
+    }
 };
 struct Binding {
     DAddr device_addr = 0;
@@ -341,7 +351,7 @@ struct BufferCache {
             if (address < d + n && d < address + slot_buffers[id].SizeBytes()) f(id, slot_buffers[id]);
         }
     }
-    void DeleteBuffer(BufferId id) {
+    void DeleteBuffer(BufferId id, bool = false) {
         for (auto it = ids.begin(); it != ids.end();) {
             if (it->second == id) it = ids.erase(it); else ++it;
         }
@@ -393,7 +403,7 @@ struct BufferCache {
         return memory_tracker.IsRegionGpuModified(d, size);
     }
     int dma_copies = 0, dma_clears = 0;
-    bool DMACopy(u64, u64, u64) {
+    bool DMACopyImpl(u64, u64, u64) {
         ++dma_copies;
         return true;
     }
@@ -414,6 +424,8 @@ struct BufferCache {
     void ResetGatherBindings(bool);
     void PrepareGatherBindings(bool);
     boost::container::small_vector<Binding*, 32> GatherBindings(bool);
+    bool CanJoinDirectGuest(BufferId);
+    void JoinOverlap(BufferId, BufferId, bool);
     bool DMACopySplit(u64, u64, u64);
     bool DMAClearSplit(u64, u64, u32);
     std::optional<VideoCore::RasterizerDownloadArea> GetFlushArea(u64, u64);
@@ -423,7 +435,7 @@ names = [
     'GatherBindings', 'ResetGatherBindings', 'PrepareGatherBindings', 'ResolveGatherChunks',
     'NotifyGatherWrite', 'GatherBuffer', 'FlushGatherWrites', 'ScatterGatherEntry',
     'ResolveScatter', 'IsGpuRangeContiguous', 'TrimGatherBuffers', 'InvalidateGatherMemory',
-    'ResolveCachedBinding', 'WaitGuestBacking', 'WriteMemory', 'MarkGpuUse', 'TryDirectDMACopy', 'DMACopySplit', 'DMAClearSplit', 'GetFlushArea',
+    'ResolveCachedBinding', 'WaitGuestBacking', 'WriteMemory', 'MarkGpuUse', 'CanJoinDirectGuest', 'JoinOverlap', 'TryDirectDMACopy', 'DMACopySplit', 'DMAClearSplit', 'GetFlushArea',
 ]
 uma = (root / 'src/video_core/buffer_cache/uma.h').read_text(encoding='utf-8')
 uma = uma[uma.index('namespace VideoCommon::Uma'): ] + '\nnamespace Uma = VideoCommon::Uma;\n'
@@ -660,9 +672,23 @@ int main() {
           "DMA detects physical aliases across different guest VAs");
     direct_cache.device_memory.physical.erase(3008);
     const int before_missing = direct_cache.runtime.copies;
-    check(direct_cache.TryDirectDMACopy(64, 128, 8) != std::optional<bool>{true} &&
+    check(direct_cache.TryDirectDMACopy(64, 128, 8) == std::nullopt &&
           direct_cache.runtime.copies == before_missing,
           "one unsupported DMA segment prevents partial direct copy");
+    const int before_fallback = direct_cache.runtime.copies;
+    check(!direct_cache.DMACopySplit(64, 128, 8) && direct_cache.dma_copies == 0 &&
+          direct_cache.runtime.copies == before_fallback,
+          "unsupported whole DMA plan does not retry fast paths or partially copy fallback pieces");
+    direct_memory.generation |= 1;
+    check(direct_cache.TryDirectDMACopy(64, 128, 8) == std::nullopt,
+          "odd GPU mapping generation declines direct DMA");
+    direct_memory.generation += 1;
+    direct_cache.device_memory.generation |= 1;
+    check(direct_cache.TryDirectDMACopy(64, 128, 8) == std::nullopt,
+          "odd device mapping generation declines direct DMA");
+    direct_cache.device_memory.generation += 1;
+    check(direct_cache.TryDirectDMACopy(999, 128, 8) == std::nullopt,
+          "unmapped DMA piece declines direct DMA without forcing a guest snapshot");
     Settings::values.use_uma_zero_copy.enabled = false;
     BufferCache<int> fallback;
     fallback.gpu_memory = &direct_memory;
@@ -684,6 +710,34 @@ int main() {
           "direct writes refresh a later staged mirror without losing shared guest writes");
     check(!mirror.GatherBuffer(64, 8).IsDirectGuest(),
           "direct view downgrades safely when a cached segment becomes a staged mirror");
+    BufferCache<int> joined;
+    joined.gpu_memory = &direct_memory;
+    const auto old_id = joined.FindBuffer(1000, 8);
+    auto& old_staged = joined.slot_buffers[old_id];
+    std::fill(old_staged.bytes.begin(), old_staged.bytes.end(), 12);
+    std::fill(old_staged.bytes.begin() + 4, old_staged.bytes.end(), 91);
+    joined.runtime.direct_enabled = true;
+    joined.device_memory.physical[1000] = 100;
+    joined.runtime.backing[100] = 77; // CPU data is newer than the clean staged bytes.
+    joined.slot_buffers.emplace_back(joined.runtime, 1000, 16);
+    const auto new_id = joined.slot_buffers.size() - 1;
+    joined.runtime.TryDirectGuestBuffer(joined.slot_buffers[new_id], {1, 100, 16384});
+    joined.has_direct_guest_buffers = true;
+    joined.gpu_modified_ranges.Add(1004, 4);
+    check(joined.CanJoinDirectGuest(old_id), "aligned staged dirty ranges allow direct joins");
+    joined.JoinOverlap(new_id, old_id, false);
+    check(joined.runtime.backing[100] == 77 && joined.runtime.backing[104] == 91 &&
+          joined.runtime.writes.size() == 1 && joined.runtime.writes.back().size == 4,
+          "staged to direct overlap copies only GPU-written bytes and preserves newer CPU data");
+    joined.ids[1000] = new_id;
+    joined.WaitGuestBacking(1000, 8);
+    check(joined.runtime.finishes == 1 && joined.runtime.barriers_to_cpu == 1 && joined.cpu_begins == 1,
+          "merged GPU writes require barrier and completion before CPU access resumes");
+    BufferCache<int> unaligned;
+    const auto unaligned_id = unaligned.FindBuffer(1000, 8);
+    unaligned.gpu_modified_ranges.Add(1001, 2);
+    check(!unaligned.CanJoinDirectGuest(unaligned_id),
+          "sub-word GPU dirty ranges retain staged fallback instead of overwriting CPU bytes");
     auto cached_memory = split();
     BufferCache<int> cached;
     cached.gpu_memory = &cached_memory;

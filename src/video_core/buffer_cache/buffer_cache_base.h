@@ -220,6 +220,7 @@ public:
 
     void TickFrame(u64 cache_usage, u64 cache_target, std::span<const HeapMemoryBudget> heaps);
 
+    bool HasDirectGuestBuffers() const { return has_direct_guest_buffers; }
     void WriteMemory(DAddr device_addr, u64 size);
 
     void CachedWriteMemory(DAddr device_addr, u64 size);
@@ -487,6 +488,8 @@ public:
 
     [[nodiscard]] OverlapResult ResolveOverlaps(DAddr device_addr, u32 wanted_size);
 
+    bool CanJoinDirectGuest(BufferId overlap_id);
+    bool DMACopyImpl(GPUVAddr src_address, GPUVAddr dest_address, u64 amount);
     void JoinOverlap(BufferId new_buffer_id, BufferId overlap_id, bool accumulate_stream_score);
 
     [[nodiscard]] BufferId CreateBuffer(DAddr device_addr, u32 wanted_size);

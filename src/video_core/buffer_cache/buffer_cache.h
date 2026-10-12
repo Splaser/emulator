@@ -352,6 +352,11 @@ bool BufferCache<P>::DMACopy(GPUVAddr src_address, GPUVAddr dest_address, u64 am
     if (const auto direct = TryDirectDMACopy(src_address, dest_address, amount)) {
         return *direct;
     }
+    return DMACopyImpl(src_address, dest_address, amount);
+}
+
+template <class P>
+bool BufferCache<P>::DMACopyImpl(GPUVAddr src_address, GPUVAddr dest_address, u64 amount) {
     // The copy below treats [src, +amount) and [dest, +amount) as single device ranges. When either
     // side is split across non-contiguous device memory, copy it piece by piece instead.
     if (gpu_memory->MaxContinuousRange(src_address, amount) < amount ||
@@ -369,8 +374,6 @@ bool BufferCache<P>::DMACopy(GPUVAddr src_address, GPUVAddr dest_address, u64 am
         return false;
     }
 
-    ClearDownload(*cpu_dest_address, amount);
-
     BufferId buffer_a;
     BufferId buffer_b;
     do {
@@ -387,6 +390,7 @@ bool BufferCache<P>::DMACopy(GPUVAddr src_address, GPUVAddr dest_address, u64 am
         runtime.Finish();
         return false;
     }
+    ClearDownload(*cpu_dest_address, amount);
     SynchronizeBuffer(src_buffer, *cpu_src_address, static_cast<u32>(amount));
     SynchronizeBuffer(dest_buffer, *cpu_dest_address, static_cast<u32>(amount));
     std::array copies{BufferCopy{
@@ -437,7 +441,7 @@ std::optional<bool> BufferCache<P>::TryDirectDMACopy(GPUVAddr src_address, GPUVA
         }
         const GuestMappingIdentity before{gpu_memory, gpu_memory->GetID(), gpu_memory->MapGeneration()};
         const auto device_generation = device_memory.MapGeneration();
-        if (!before.Stable() || (device_generation & 1)) { return false; }
+        if (!before.Stable() || (device_generation & 1)) { return std::nullopt; }
         struct Piece {
             DAddr src, dst;
             u32 size;
@@ -454,12 +458,12 @@ std::optional<bool> BufferCache<P>::TryDirectDMACopy(GPUVAddr src_address, GPUVA
                 gpu_memory->MaxContinuousRange(dest_address + offset, amount - offset)});
             if (!src || !dst || !size || ((*src | *dst | size) & 3) ||
                 !IsRegionPageTableAddressable(*src, size) || !IsRegionPageTableAddressable(*dst, size)) {
-                return false;
+                return std::nullopt;
             }
             const auto a = device_memory.GetDriverBackingRange(*src, size);
             const auto b = device_memory.GetDriverBackingRange(*dst, size);
             if (!a || !b) {
-                return false; // whole guest-memory fallback; never retry individual fast pieces
+                return std::nullopt;
             }
             pieces.push_back({*src, *dst, static_cast<u32>(size), *a, *b});
             offset += size;
@@ -503,7 +507,7 @@ std::optional<bool> BufferCache<P>::TryDirectDMACopy(GPUVAddr src_address, GPUVA
             return false;
         }
         const GuestMappingIdentity after{gpu_memory, gpu_memory->GetID(), gpu_memory->MapGeneration()};
-        if (before != after || device_generation != device_memory.MapGeneration()) { return false; }
+        if (before != after || device_generation != device_memory.MapGeneration()) { return std::nullopt; }
         for (const auto& piece : pieces) {
             const auto a = piece.src_id;
             const auto b = piece.dst_id;
@@ -563,8 +567,26 @@ bool BufferCache<P>::DMACopySplit(GPUVAddr src_address, GPUVAddr dest_address, u
             }
         }
     }
+    // A direct-path rejection must not turn into a partial copy when a later
+    // piece uses shared backing. Check all ownership before executing fallback.
+    bool shared = false;
     for (const Piece& piece : pieces) {
-        if (!DMACopy(piece.src, piece.dst, piece.size)) {
+        const DAddr src = *gpu_memory->GpuToCpuAddress(piece.src);
+        const DAddr dst = *gpu_memory->GpuToCpuAddress(piece.dst);
+        shared |= IsDirectGuest(slot_buffers[FindBuffer(src, static_cast<u32>(piece.size))]);
+        shared |= IsDirectGuest(slot_buffers[FindBuffer(dst, static_cast<u32>(piece.size))]);
+    }
+    if (shared) {
+        for (const Piece& piece : pieces) {
+            DownloadMemory(*gpu_memory->GpuToCpuAddress(piece.src), piece.size);
+            DownloadMemory(*gpu_memory->GpuToCpuAddress(piece.dst), piece.size);
+        }
+        GuestMemoryBarrier(true);
+        runtime.Finish();
+        return false;
+    }
+    for (const Piece& piece : pieces) {
+        if (!DMACopyImpl(piece.src, piece.dst, piece.size)) {
             return false;
         }
     }
@@ -1973,6 +1995,18 @@ typename BufferCache<P>::OverlapResult BufferCache<P>::ResolveOverlaps(DAddr dev
 }
 
 template <class P>
+bool BufferCache<P>::CanJoinDirectGuest(BufferId overlap_id) {
+    Buffer& overlap = slot_buffers[overlap_id];
+    if (IsDirectGuest(overlap)) { return true; }
+    bool aligned = true;
+    gpu_modified_ranges.ForEachInRange(overlap.CpuAddr(), overlap.SizeBytes(),
+        [&](DAddr start, DAddr end) { aligned &= ((start | end) & 3) == 0; });
+    // vkCmdCopyBuffer cannot preserve sub-word clean CPU bytes by expanding a
+    // dirty range. Keep the staged cache/upload path in this case instead.
+    return aligned;
+}
+
+template <class P>
 void BufferCache<P>::JoinOverlap(BufferId new_buffer_id, BufferId overlap_id,
                                  bool accumulate_stream_score) {
     Buffer& new_buffer = slot_buffers[new_buffer_id];
@@ -1982,16 +2016,29 @@ void BufferCache<P>::JoinOverlap(BufferId new_buffer_id, BufferId overlap_id,
     }
     boost::container::small_vector<BufferCopy, 10> copies;
     const size_t dst_base_offset = overlap.CpuAddr() - new_buffer.CpuAddr();
-    copies.push_back(BufferCopy{
-        .src_offset = 0,
-        .dst_offset = dst_base_offset,
-        .size = overlap.SizeBytes(),
-    });
-    MarkGpuUse(new_buffer, copies[0].dst_offset, copies[0].size);
-    MarkGpuUse(overlap, copies[0].src_offset, copies[0].size);
+    if (IsDirectGuest(new_buffer) && !IsDirectGuest(overlap)) {
+        gpu_modified_ranges.ForEachInRange(overlap.CpuAddr(), overlap.SizeBytes(),
+            [&](DAddr start, DAddr end) {
+                copies.push_back(BufferCopy{
+                    .src_offset = start - overlap.CpuAddr(),
+                    .dst_offset = dst_base_offset + start - overlap.CpuAddr(),
+                    .size = end - start,
+                });
+            });
+    } else {
+        copies.push_back(BufferCopy{
+            .src_offset = 0,
+            .dst_offset = dst_base_offset,
+            .size = overlap.SizeBytes(),
+        });
+    }
+    for (const auto& copy : copies) {
+        MarkGpuUse(new_buffer, copy.dst_offset, copy.size);
+        MarkGpuUse(overlap, copy.src_offset, copy.size);
+    }
     // Two imports of the same payload alias even when their VkBuffer handles differ.
     // Copying an overlapping range would violate vkCmdCopyBuffer's aliasing rule.
-    if (!(IsDirectGuest(new_buffer) && IsDirectGuest(overlap))) {
+    if (!copies.empty() && !(IsDirectGuest(new_buffer) && IsDirectGuest(overlap))) {
         runtime.CopyBuffer(new_buffer, overlap, copies, true);
     }
     DeleteBuffer(overlap_id, true);
@@ -2010,7 +2057,10 @@ BufferId BufferCache<P>::CreateBuffer(DAddr device_addr, u32 wanted_size) {
     const BufferId new_buffer_id = slot_buffers.insert(runtime, overlap.begin, size);
     auto& new_buffer = slot_buffers[new_buffer_id];
     const size_t size_bytes = new_buffer.SizeBytes();
-    if (!TryDirectGuest(new_buffer, overlap.begin, size_bytes)) {
+    const bool direct_join = std::ranges::all_of(overlap.ids, [&](BufferId id) {
+        return CanJoinDirectGuest(id);
+    });
+    if (!direct_join || !TryDirectGuest(new_buffer, overlap.begin, size_bytes)) {
         runtime.ClearBuffer(new_buffer, 0, size_bytes, 0);
     }
     MarkGpuUse(new_buffer, 0, size_bytes);

@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -75,9 +76,15 @@ struct GPUTickCommand final {};
 /// Queue barrier used to wait for commands submitted before it.
 struct SynchronizeCommand final {};
 
+/// A blocking operation whose scheduler work must execute on the GPU thread.
+struct ExecuteCallbackCommand final {
+    std::function<void()> callback;
+};
+
 using CommandData =
     std::variant<std::monostate, SubmitListCommand, FlushRegionCommand, InvalidateRegionCommand,
-                 FlushAndInvalidateRegionCommand, GPUTickCommand, SynchronizeCommand>;
+                 FlushAndInvalidateRegionCommand, GPUTickCommand, SynchronizeCommand,
+                 ExecuteCallbackCommand>;
 
 struct CommandDataContainer {
     CommandDataContainer() = default;
@@ -126,6 +133,9 @@ public:
 
     /// Wait until all commands queued before this call have been processed by the GPU thread.
     void Synchronize();
+
+    bool IsGpuThread() const { return thread.get_id() == std::this_thread::get_id(); }
+    void RunOnGpuThread(std::function<void()> callback);
 
 private:
     /// Pushes a command to be executed by the GPU thread

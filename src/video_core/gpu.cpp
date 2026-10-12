@@ -150,6 +150,11 @@ struct GPU::Impl {
         gpu_thread.Synchronize();
     }
 
+    bool IsGpuThread() const { return gpu_thread.IsGpuThread(); }
+    void RunOnGpuThread(std::function<void()> callback) {
+        gpu_thread.RunOnGpuThread(std::move(callback));
+    }
+
     /// Returns a reference to the Maxwell3D GPU engine.
     [[nodiscard]] Engines::Maxwell3D& Maxwell3D() {
         assert(current_channel);
@@ -473,6 +478,12 @@ void GPU::WaitForSyncOperation(u64 fence) {
 
 void GPU::TickWork() {
     impl->TickWork();
+}
+
+bool GPU::IsGpuThread() const { return impl->IsGpuThread(); }
+
+void GPU::RunOnGpuThread(std::function<void()> callback) {
+    impl->RunOnGpuThread(std::move(callback));
 }
 
 void GPU::SynchronizeGPUThread() {

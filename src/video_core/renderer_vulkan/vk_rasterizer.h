@@ -152,6 +152,8 @@ public:
                                                             u32 pixel_stride);
 
 private:
+    bool RunBufferCacheCpuWrite(DAddr addr, u64 size, bool check_gpu_writes = false,
+                                bool unmap = false);
     static constexpr size_t MAX_TEXTURES = 192;
     static constexpr size_t MAX_IMAGES = 48;
     static constexpr size_t MAX_IMAGE_VIEWS = MAX_TEXTURES + MAX_IMAGES;

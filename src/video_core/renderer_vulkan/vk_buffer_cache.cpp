@@ -198,11 +198,12 @@ bool BufferCacheRuntime::TryDirectGuestBuffer(Buffer& target, Common::GuestBacki
     }
     // VkMemory HOST_COHERENT describes Vulkan mappings. The original guest mmap
     // aliases additionally obey the dma-buf CPU-access protocol.
-    GuestMemoryBarrier(true);
-    scheduler.Finish();
-    if (!guest_cpu_access.contains(backing.fd) &&
-        !SyncGuestDmaBuf(backing.fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_RW)) {
-        return false;
+    if (!guest_cpu_access.contains(backing.fd)) {
+        GuestMemoryBarrier(true);
+        scheduler.Finish();
+        if (!SyncGuestDmaBuf(backing.fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_RW)) {
+            return false;
+        }
     }
     guest_cpu_access.insert(backing.fd);
     mapping->backing = backing;

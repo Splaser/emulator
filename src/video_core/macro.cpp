@@ -884,7 +884,8 @@ void MacroInterpreterImpl::Send(Engines::Maxwell3D& maxwell3d, u32 value) {
     constexpr u32 dimension_word =
         offsetof(Maxwell3D::Regs::RenderTargetConfig, array_pitch) / sizeof(u32) - 1;
     const u32 target_method = method_address.address.Value();
-    if (!large_render_target_dumped && target_method >= rt_start &&
+    if (Settings::values.dump_macros.GetValue() && !large_render_target_dumped &&
+        target_method >= rt_start &&
         target_method < rt_start + Maxwell3D::Regs::NumRenderTargets * rt_words &&
         (target_method - rt_start) % rt_words == dimension_word && (value & 0xffffU) > 16) {
         large_render_target_dumped = true;

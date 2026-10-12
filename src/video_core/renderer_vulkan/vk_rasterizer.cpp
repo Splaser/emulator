@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cstring>
 #include <ctime>
@@ -849,6 +850,33 @@ VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64
     return new_area;
 }
 
+bool RasterizerVulkan::RunBufferCacheCpuWrite(DAddr addr, u64 size, bool check_gpu_writes,
+                                             bool unmap) {
+    std::unique_lock lock{buffer_cache.mutex};
+    // Check while holding the cache lock: an import cannot race a CPU-side write
+    // between the decision and execution. Never wait for the GPU with this lock held.
+    if (!gpu.IsGpuThread() && buffer_cache.HasDirectGuestBuffers()) {
+        lock.unlock();
+        const auto result = std::make_shared<std::atomic<bool>>(false);
+        gpu.RunOnGpuThread([this, addr, size, check_gpu_writes, unmap, result] {
+            std::scoped_lock gpu_lock{buffer_cache.mutex};
+            if (unmap) { buffer_cache.InvalidateGatherMemory(addr, size); }
+            if (check_gpu_writes) {
+                result->store(buffer_cache.OnCPUWrite(addr, size));
+            } else {
+                buffer_cache.WriteMemory(addr, size);
+            }
+        });
+        return result->load();
+    }
+    if (unmap) { buffer_cache.InvalidateGatherMemory(addr, size); }
+    if (check_gpu_writes) {
+        return buffer_cache.OnCPUWrite(addr, size);
+    }
+    buffer_cache.WriteMemory(addr, size);
+    return false;
+}
+
 void RasterizerVulkan::InvalidateRegion(DAddr addr, u64 size, VideoCommon::CacheType which) {
     std::shared_lock shared_guard{shutdown_mutex};
     if (is_shutting_down)
@@ -862,8 +890,7 @@ void RasterizerVulkan::InvalidateRegion(DAddr addr, u64 size, VideoCommon::Cache
         texture_cache.WriteMemory(addr, size);
     }
     if ((True(which & VideoCommon::CacheType::BufferCache))) {
-        std::scoped_lock lock{buffer_cache.mutex};
-        buffer_cache.WriteMemory(addr, size);
+        RunBufferCacheCpuWrite(addr, size);
     }
     if ((True(which & VideoCommon::CacheType::QueryCache))) {
         query_cache.InvalidateRegion(addr, size);
@@ -881,9 +908,8 @@ void RasterizerVulkan::InnerInvalidation(std::span<const std::pair<DAddr, std::s
         }
     }
     {
-        std::scoped_lock lock{buffer_cache.mutex};
         for (const auto& [addr, size] : sequences) {
-            buffer_cache.WriteMemory(addr, size);
+            RunBufferCacheCpuWrite(addr, size);
         }
     }
     {
@@ -900,8 +926,7 @@ bool RasterizerVulkan::OnCPUWrite(DAddr addr, u64 size) {
     }
 
     {
-        std::scoped_lock lock{buffer_cache.mutex};
-        if (buffer_cache.OnCPUWrite(addr, size)) {
+        if (RunBufferCacheCpuWrite(addr, size, true)) {
             return true;
         }
     }
@@ -925,8 +950,7 @@ void RasterizerVulkan::OnCacheInvalidation(DAddr addr, u64 size) {
         texture_cache.WriteMemory(addr, size);
     }
     {
-        std::scoped_lock lock{buffer_cache.mutex};
-        buffer_cache.WriteMemory(addr, size);
+        RunBufferCacheCpuWrite(addr, size);
     }
     pipeline_cache.InvalidateRegion(addr, size);
 }
@@ -941,9 +965,7 @@ void RasterizerVulkan::UnmapMemory(DAddr addr, u64 size) {
         texture_cache.UnmapMemory(addr, size);
     }
     {
-        std::scoped_lock lock{buffer_cache.mutex};
-        buffer_cache.InvalidateGatherMemory(addr, size);
-        buffer_cache.WriteMemory(addr, size);
+        RunBufferCacheCpuWrite(addr, size, false, true);
     }
     pipeline_cache.OnCacheInvalidation(addr, size);
 }

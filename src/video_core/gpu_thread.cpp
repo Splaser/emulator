@@ -66,6 +66,8 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
                     scheduler.Push(submit_list->channel, std::move(submit_list->entries));
                 } else if (std::holds_alternative<GPUTickCommand>(next.data)) {
                     system.GPU().TickWork();
+                } else if (const auto* execute = std::get_if<ExecuteCallbackCommand>(&next.data)) {
+                    execute->callback();
                 } else if (const auto* flush = std::get_if<FlushRegionCommand>(&next.data)) {
                     rasterizer->FlushRegion(flush->addr, flush->size);
                 } else if (const auto* invalidate =
@@ -152,6 +154,17 @@ void ThreadManager::Synchronize() {
         return;
     }
     PushCommand(SynchronizeCommand(), true);
+}
+
+void ThreadManager::RunOnGpuThread(std::function<void()> callback) {
+    if (IsGpuThread()) {
+        callback();
+        return;
+    }
+    if (!thread.joinable() || thread.get_stop_token().stop_requested()) {
+        return; // Match Synchronize: never enqueue a blocking request after shutdown.
+    }
+    PushCommand(ExecuteCallbackCommand{std::move(callback)}, true);
 }
 
 void ThreadManager::InvalidateRegion(DAddr addr, u64 size) {

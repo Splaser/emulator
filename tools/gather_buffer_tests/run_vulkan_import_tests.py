@@ -137,6 +137,11 @@ int main() {
     };
     assert(run() && allocations == 1 && closes == 0 && memory_deaths == 1);
     assert(runtime.scheduler.waits == 1 && runtime.barriers == 1 && runtime.guest_cpu_access.contains(7));
+    assert(run());
+    assert(runtime.scheduler.waits == 1 && runtime.barriers == 1); // fd already CPU-owned
+    runtime.guest_cpu_access.clear();
+    assert(run());
+    assert(runtime.scheduler.waits == 2 && runtime.barriers == 2); // starts a new CPU interval
     assert(!run(129)); // vkBindBufferMemory alignment, not just guest page alignment
     assert(!run(4080)); // VkMemoryRequirements::size must fit in the imported allocation
     runtime.device.physical.flags &= ~VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
