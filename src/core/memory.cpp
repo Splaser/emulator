@@ -73,6 +73,11 @@ struct Memory::Impl {
                (void(GetInteger(base)), true));
         assert(target >= DramMemoryMap::Base && "Out of bounds target: {:016X}" &&
                (void(GetInteger(target)), true));
+        if (system.DeviceMemory().buffer.IsLazyBacking()) {
+            // Create the entire CPU range before publishing any page-table pointers.
+            system.DeviceMemory().buffer.EnsureBackingRange(
+                GetInteger(target) - DramMemoryMap::Base, size);
+        }
         MapPages(page_table, base / CITRON_PAGESIZE, size / CITRON_PAGESIZE, target,
                  Common::PageType::Memory);
 

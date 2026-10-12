@@ -25,6 +25,18 @@ DECLARE_ENUM_FLAG_OPERATORS(MemoryPermission)
 /// Most file descriptors a backing can be made of.
 constexpr size_t MaxBackingChunks = 16;
 
+struct LazyBackingParams {
+    size_t chunk_size{32ULL << 20};
+};
+
+struct BackingStats {
+    u64 chunks_created{};
+    u64 chunk_cache_hits{};
+    u64 active_chunks{};
+    u64 peak_fd_count{}; // backing fds owned by this arena
+    u64 peak_vma_count{}; // sampled process VMAs
+};
+
 /// A piece of the backing memory when the backing is a row of equally sized file descriptors.
 struct BackingChunkRange {
     size_t chunk;  ///< Index of the file descriptor
@@ -55,9 +67,11 @@ public:
     /// With `backing_fds` empty the backing is created here (a memfd on Linux). Otherwise the
     /// backing is the given file descriptors in order, `chunk_size` bytes each and `backing_size_`
     /// bytes together; HostMemory owns them from here on and closes them. Linux only.
+    /// With lazy_backing=true, reserve the arena and create CPU-only memfd chunks on
+    /// first range access. backing_fds must be empty and chunk_size must divide the arena.
     explicit HostMemory(size_t backing_size_, size_t virtual_size_,
                         std::span<const int> backing_fds = {}, size_t chunk_size = 0,
-                        bool direct_importable = false);
+                        bool direct_importable = false, bool lazy_backing = false);
     ~HostMemory();
 
     /**
@@ -83,6 +97,12 @@ public:
     void EnableDirectMappedAddress();
 
     void ClearBackingRegion(size_t physical_offset, size_t length, u32 fill_value);
+
+    // Materialize the complete physical range before exposing a pointer or CPU alias.
+    // Does not change an already materialized chunk, its contents, or its mappings.
+    void EnsureBackingRange(size_t physical_offset, size_t length) const;
+    [[nodiscard]] BackingStats GetBackingStats() const;
+    [[nodiscard]] bool IsLazyBacking() const noexcept { return lazy_backing_enabled; }
 
     [[nodiscard]] u8* BackingBasePointer() noexcept {
         return backing_base;
@@ -126,6 +146,7 @@ private:
     std::vector<int> driver_fds;
     size_t driver_chunk_size{};
     bool driver_direct_importable{};
+    bool lazy_backing_enabled{};
     size_t virtual_size{};
 
     // Low level handler for the platform dependent memory routines

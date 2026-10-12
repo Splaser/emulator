@@ -33,6 +33,7 @@
 #include <cassert>
 #include <condition_variable>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 #include <mutex>
 #include <random>
@@ -459,12 +460,19 @@ static void* ChooseVirtualBase(size_t virtual_size) {
 class HostMemory::Impl {
 public:
     explicit Impl(size_t backing_size_, size_t virtual_size_, std::span<const int> backing_fds,
-                  size_t chunk_size_)
-        : backing_size{backing_size_}, virtual_size{virtual_size_},
-          chunk_size{backing_fds.empty() ? backing_size_ : chunk_size_} {
+                  size_t chunk_size_, bool lazy_backing_ = false)
+        : lazy_backing{lazy_backing_}, backing_size{backing_size_}, virtual_size{virtual_size_},
+          chunk_size{lazy_backing_ ? chunk_size_ : (backing_fds.empty() ? backing_size_ : chunk_size_)} {
         assert(backing_fds.size() <= MaxBackingChunks &&
                (backing_fds.empty() || chunk_size * backing_fds.size() == backing_size));
-        fds.fill(-1);
+        if (lazy_backing && (!backing_fds.empty() || chunk_size == 0 ||
+                             chunk_size % PageAlignment != 0 || backing_size % chunk_size != 0)) {
+            throw std::invalid_argument("Invalid lazy physical backing geometry");
+        }
+        fds.assign(lazy_backing ? backing_size / chunk_size : MaxBackingChunks, -1);
+        if (lazy_backing) {
+            ready = std::make_unique<std::atomic<bool>[]>(fds.size());
+        }
         std::ranges::copy(backing_fds, fds.begin());
         bool good = false;
         SCOPE_EXIT {
@@ -480,7 +488,7 @@ public:
         }
 
         // Backing memory initialization
-        if (backing_fds.empty()) {
+        if (backing_fds.empty() && !lazy_backing) {
 #if defined(__FreeBSD__) && __FreeBSD__ < 13
             // XXX Drop after FreeBSD 12.* reaches EOL on 2024-06-30
             fds[0] = shm_open(SHM_ANON, O_RDWR, 0600);
@@ -501,11 +509,12 @@ public:
             }
         }
 
-        // The backing view is one address range: a reservation with every chunk mapped over it.
+        // The backing view keeps a stable address. Eager backing maps every chunk;
+        // lazy backing leaves cold chunks inaccessible until EnsureBackingRange.
         backing_base = static_cast<u8*>(mmap(nullptr, backing_size, PROT_NONE,
                                              MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0));
         bool mapped = backing_base != MAP_FAILED;
-        for (size_t offset = 0; mapped && offset < backing_size; offset += chunk_size) {
+        for (size_t offset = 0; !lazy_backing && mapped && offset < backing_size; offset += chunk_size) {
             mapped = mmap(backing_base + offset, chunk_size, PROT_READ | PROT_WRITE,
                           MAP_SHARED | MAP_FIXED, fds[offset / chunk_size], 0) != MAP_FAILED;
         }
@@ -537,6 +546,64 @@ public:
         good = true;
     }
 
+    void EnsureBackingRange(size_t offset, size_t length) {
+        if (offset > backing_size || length > backing_size - offset) {
+            throw std::out_of_range("Physical backing access exceeds arena");
+        }
+        if (!lazy_backing || length == 0) {
+            return;
+        }
+        const size_t first = offset / chunk_size;
+        const size_t last = (offset + length - 1) / chunk_size;
+        for (size_t index = first; index <= last; ++index) {
+            if (ready[index].load(std::memory_order_acquire)) {
+                chunk_cache_hits.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+            // mmap must complete before another thread can obtain a pointer or alias.
+            std::scoped_lock lock{backing_mutex};
+            if (ready[index].load(std::memory_order_relaxed)) {
+                chunk_cache_hits.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+#if defined(__FreeBSD__) && __FreeBSD__ < 13
+            const int fd = shm_open(SHM_ANON, O_RDWR, 0600);
+#else
+            const int fd = memfd_create("citron-guest-chunk", MFD_CLOEXEC);
+#endif
+            if (fd < 0) {
+                throw std::bad_alloc{};
+            }
+            bool published = false;
+            SCOPE_EXIT {
+                if (!published) {
+                    close(fd);
+                }
+            };
+            if (ftruncate(fd, chunk_size) != 0 ||
+                mmap(backing_base + index * chunk_size, chunk_size, PROT_READ | PROT_WRITE,
+                     MAP_SHARED | MAP_FIXED, fd, 0) == MAP_FAILED) {
+                throw std::bad_alloc{};
+            }
+            fds[index] = fd;
+            published = true;
+            chunks_created.fetch_add(1, std::memory_order_relaxed);
+            ready[index].store(true, std::memory_order_release);
+            // Physical-only kernel access may never reach the virtual-map sampler.
+            const u64 current = CountProcessVmas();
+            u64 peak = peak_vma_count.load(std::memory_order_relaxed);
+            while (current > peak && !peak_vma_count.compare_exchange_weak(
+                                        peak, current, std::memory_order_relaxed)) {
+            }
+        }
+    }
+
+    BackingStats GetBackingStats() const {
+        const u64 created = chunks_created.load(std::memory_order_relaxed);
+        return {created, chunk_cache_hits.load(std::memory_order_relaxed), created, created,
+                peak_vma_count.load(std::memory_order_relaxed)};
+    }
+
     ~Impl() {
         vma_sampler_thread.request_stop();
         if (vma_sampler_thread.joinable()) {
@@ -552,6 +619,14 @@ public:
                      current, peak, vma_budget, max_map_count,
                      map_count.load(std::memory_order_relaxed),
                      unmap_count.load(std::memory_order_relaxed));
+        }
+        if (lazy_backing) {
+            const auto stats = GetBackingStats();
+            LOG_INFO(HW_Memory,
+                     "Lazy backing summary: chunks_created={} chunk_cache_hits={} active_chunks={} "
+                     "peak_backing_fd_count={} peak_vma_count={}",
+                     stats.chunks_created, stats.chunk_cache_hits, stats.active_chunks,
+                     stats.peak_fd_count, stats.peak_vma_count);
         }
         Release();
     }
@@ -825,8 +900,13 @@ private:
         }
     }
 
-    /// Backing file descriptors in order: one memfd, or the chunks the caller passed. -1 unused.
-    std::array<int, MaxBackingChunks> fds;
+    /// Backing fds in physical order: eager memfd/provided fds, or lazy slots. -1 means unused.
+    std::vector<int> fds;
+    bool lazy_backing{};
+    std::unique_ptr<std::atomic<bool>[]> ready;
+    std::mutex backing_mutex;
+    std::atomic<u64> chunks_created{};
+    std::atomic<u64> chunk_cache_hits{};
     FreeRegionManager free_manager{};
     std::atomic<u64> map_count{0};
     std::atomic<u64> unmap_count{0};
@@ -866,18 +946,30 @@ private:
 #endif // ^^^ Generic ^^^
 
 HostMemory::HostMemory(size_t backing_size_, size_t virtual_size_,
-                       std::span<const int> backing_fds, size_t chunk_size, bool direct_importable)
+                       std::span<const int> backing_fds, size_t chunk_size, bool direct_importable,
+                       bool lazy_backing)
     : backing_size(backing_size_)
     , driver_fds(backing_fds.begin(), backing_fds.end())
     , driver_chunk_size(chunk_size)
     , driver_direct_importable(direct_importable)
+    , lazy_backing_enabled(lazy_backing)
     , virtual_size(virtual_size_)
 {
     // Try to allocate a fastmem arena.
     // The implementation will fail with std::bad_alloc on errors.
-    impl = std::make_unique<HostMemory::Impl>(AlignUp(backing_size, PageAlignment),
-                                              AlignUp(virtual_size, PageAlignment) + HugePageSize,
-                                              backing_fds, chunk_size);
+    if (lazy_backing) {
+#if defined(__linux__) || defined(__FreeBSD__)
+        impl = std::make_unique<HostMemory::Impl>(AlignUp(backing_size, PageAlignment),
+                                                AlignUp(virtual_size, PageAlignment) + HugePageSize,
+                                                backing_fds, chunk_size, true);
+#else
+        throw std::invalid_argument("Lazy physical backing is unavailable on this host");
+#endif
+    } else {
+        impl = std::make_unique<HostMemory::Impl>(AlignUp(backing_size, PageAlignment),
+                                                AlignUp(virtual_size, PageAlignment) + HugePageSize,
+                                                backing_fds, chunk_size);
+    }
     backing_base = impl->backing_base;
     virtual_base = impl->virtual_base;
     if (virtual_base) {
@@ -929,6 +1021,7 @@ void HostMemory::Map(size_t virtual_offset, size_t host_offset, size_t length,
     if (length == 0 || !virtual_base || !impl) {
         return;
     }
+    EnsureBackingRange(host_offset, length);
     impl->Map(virtual_offset + virtual_base_offset, host_offset, length, perms);
 }
 
@@ -981,7 +1074,25 @@ void HostMemory::Protect(size_t virtual_offset, size_t length, MemoryPermission 
 }
 
 void HostMemory::ClearBackingRegion(size_t physical_offset, size_t length, u32 fill_value) {
+    EnsureBackingRange(physical_offset, length);
     std::memset(backing_base + physical_offset, fill_value, length);
+}
+
+void HostMemory::EnsureBackingRange(size_t offset, size_t length) const {
+    if (offset > backing_size || length > backing_size - offset) {
+        throw std::out_of_range("Physical backing access exceeds arena");
+    }
+#if defined(__linux__) || defined(__FreeBSD__)
+    impl->EnsureBackingRange(offset, length);
+#endif
+}
+
+BackingStats HostMemory::GetBackingStats() const {
+#if defined(__linux__) || defined(__FreeBSD__)
+    return impl->GetBackingStats();
+#else
+    return {};
+#endif
 }
 
 void HostMemory::EnableDirectMappedAddress() {

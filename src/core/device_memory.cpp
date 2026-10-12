@@ -18,4 +18,8 @@ DeviceMemory::DeviceMemory(std::span<const int> backing_fds, bool direct_importa
 
 DeviceMemory::~DeviceMemory() = default;
 
+DeviceMemory::DeviceMemory(Common::LazyBackingParams params)
+    : buffer{Kernel::Board::Nintendo::Nx::KSystemControl::Init::GetIntendedMemorySize(),
+             VirtualReserveSize, {}, params.chunk_size, false, true} {}
+
 } // namespace Core

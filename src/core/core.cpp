@@ -211,6 +211,7 @@ struct System::Impl {
         if (layout_changed) {
             device_memory.reset();
             guest_memory_from_gpu = false;
+            guest_memory_lazy_backing = false;
             guest_memory_from_gpu_unavailable = false;
         }
 
@@ -330,7 +331,19 @@ struct System::Impl {
     /// never will: the Android frontend loads the driver after System::Initialize has created
     /// guest memory.
     void UseGuestMemoryFromGpu(Frontend::EmuWindow& emu_window) {
-        if (guest_memory_from_gpu || guest_memory_from_gpu_unavailable) {
+        if (guest_memory_from_gpu || guest_memory_lazy_backing) {
+            return;
+        }
+#if defined(__linux__)
+        if (Settings::values.use_lazy_guest_backing.GetValue()) {
+            device_memory.reset();
+            device_memory.emplace(Common::LazyBackingParams{});
+            guest_memory_lazy_backing = true;
+            LOG_INFO(Core, "Lazy physical backing: on (32 MiB CPU-only chunks)");
+            return;
+        }
+#endif
+        if (guest_memory_from_gpu_unavailable) {
             return;
         }
         // The size DeviceMemory gives itself (device_memory.cpp).
@@ -658,6 +671,7 @@ struct System::Impl {
     bool is_async_gpu{};
     bool extended_memory_layout{};
     bool guest_memory_from_gpu{}; ///< device_memory is backed by memory the GPU driver exported
+    bool guest_memory_lazy_backing{};
     bool guest_memory_from_gpu_unavailable{}; ///< The driver cannot provide it in this process
 
     ExecuteProgramCallback execute_program_callback;
