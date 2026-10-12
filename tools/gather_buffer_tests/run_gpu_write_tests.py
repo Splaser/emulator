@@ -58,10 +58,12 @@ struct ThreadManager {
 struct Cache {
     std::mutex mutex;
     ThreadManager& gpu;
-    bool shared = true, gpu_dirty = false;
+    bool shared = true, gpu_dirty = false, pending_scatter = false;
     int waits = 0, writes = 0;
     bool HasDirectGuestBuffers() const { return shared; }
+    bool CpuWriteNeedsGpuThread(DAddr, u64) const { return shared || pending_scatter; }
     void WaitGuestBacking() {
+        if (pending_scatter) { assert(gpu.IsGpuThread()); }
         if (shared) {
             assert(gpu.IsGpuThread()); // models scheduler barrier + Finish
             ++waits;
@@ -106,9 +108,15 @@ int main() {
     assert(rasterizer.gpu.queued == 4 && rasterizer.buffer_cache.writes == 4);
     rasterizer.RunBufferCacheCpuWrite(1000, 4, false, true);
     assert(rasterizer.gpu.queued == 5 && rasterizer.buffer_cache.writes == 5);
+    rasterizer.buffer_cache.shared = false;
+    rasterizer.buffer_cache.pending_scatter = true;
+    rasterizer.RunBufferCacheCpuWrite(1000, 4, false, true);
+    assert(rasterizer.gpu.queued == 6 && rasterizer.buffer_cache.writes == 6);
+    rasterizer.buffer_cache.shared = true;
+    rasterizer.buffer_cache.pending_scatter = false;
     rasterizer.gpu.thread.stopped = true;
     rasterizer.RunBufferCacheCpuWrite(1000, 4);
-    assert(rasterizer.gpu.queued == 5 && rasterizer.buffer_cache.writes == 5);
+    assert(rasterizer.gpu.queued == 6 && rasterizer.buffer_cache.writes == 6);
     std::cout << "PASS CPU writes: GPU-thread waits, unlocked cache dispatch, synchronous results, "
                  "GPU reentrancy and ordinary-memory fallback\n";
 }

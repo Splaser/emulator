@@ -12,6 +12,7 @@
 #include "common/thread.h"
 #include "core/core.h"
 #include "core/frontend/graphics_context.h"
+#include "video_core/buffer_cache/gather_alias.h"
 #include "video_core/control/scheduler.h"
 #include "video_core/dma_pusher.h"
 #include "video_core/gpu.h"
@@ -84,6 +85,8 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
                     // No flush here: that would add a host fence after every command.
                     scheduler.RetrySuspended(false);
                 }
+            } catch (const VideoCommon::UnsupportedGatherMapping& exception) {
+                request_failure_shutdown(exception.what());
             } catch (const VideoCommon::InvalidImageSize& exception) {
                 request_failure_shutdown(exception.what());
             } catch (const Vulkan::vk::Exception& exception) {

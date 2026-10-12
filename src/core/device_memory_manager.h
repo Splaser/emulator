@@ -110,6 +110,18 @@ public:
         return (static_cast<PAddr>(paddr - 1) << page_bits) + subbits;
     }
 
+    /// Resolve one page for alias validation without racing device page-table updates.
+    std::optional<PAddr> GetPhysicalAddressForAlias(DAddr address) {
+        if (address >= device_as_size) {
+            return std::nullopt;
+        }
+        std::scoped_lock lock{mapping_guard};
+        if (!GetPointer<u8>(address)) {
+            return std::nullopt;
+        }
+        return GetPhysicalRawAddressFromDAddr(address);
+    }
+
     template <typename T>
     void Write(DAddr address, T value);
 

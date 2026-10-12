@@ -13,6 +13,7 @@ add_library(video_core STATIC
     arm64_register_guard.h
     buffer_cache/buffer_base.h
     buffer_cache/buffer_cache_base.h
+    buffer_cache/gather_alias.h
     buffer_cache/buffer_cache.cpp
     buffer_cache/buffer_cache.h
     buffer_cache/memory_tracker_base.h

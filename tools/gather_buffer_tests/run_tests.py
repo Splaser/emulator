@@ -33,6 +33,7 @@ def func(marker):
 head = r'''
 
 #include "video_core/buffer_cache/direct_guest_mapping.h"
+#include "video_core/buffer_cache/gather_alias.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -283,6 +284,10 @@ struct BufferCache {
         u64 generation = 2;
         std::map<u64, u64> physical;
         u64 MapGeneration() const { return generation; }
+        std::optional<u64> GetPhysicalAddressForAlias(u64 d) {
+            auto it = physical.find(d);
+            return it == physical.end() ? d : it->second;
+        }
         std::optional<Common::GuestBackingRange> GetDriverBackingRange(u64 d, [[maybe_unused]] u64 size) {
             auto it = physical.find(d);
             if (it == physical.end()) return {};
@@ -317,10 +322,16 @@ struct BufferCache {
         GuestMappingIdentity identity;
         u64 device_generation = 0;
         bool scatter_pending = false;
+        bool aliases_checked = false;
     };
+    void ValidateGatherAliases(std::span<const GatherAliasRange>);
+    std::vector<GatherAliasRange> checked_alias_ranges;
+    GuestMappingIdentity checked_alias_identity;
+    u64 checked_alias_device_generation = ~u64{0};
     std::unordered_map<u64, GatherEntry> gather_buffers;
     u64 gather_used_memory = 0, frame_tick = 0;
     bool has_direct_guest_buffers = false;
+    bool CpuWriteNeedsGpuThread(u64, u64) const;
     std::vector<u64> scatter_pending, pending_gather_writes;
     bool scatter_busy = false;
     u64 scatter_skip = 0;
@@ -440,10 +451,10 @@ struct BufferCache {
 };
 '''
 names = [
-    'GatherBindings', 'ResetGatherBindings', 'PrepareGatherBindings', 'ResolveGatherChunks',
+    'GatherBindings', 'ResetGatherBindings', 'ValidateGatherAliases', 'PrepareGatherBindings', 'ResolveGatherChunks',
     'NotifyGatherWrite', 'GatherBuffer', 'FlushGatherWrites', 'ScatterGatherEntry',
     'ResolveScatter', 'IsGpuRangeContiguous', 'TrimGatherBuffers', 'InvalidateGatherMemory',
-    'ResolveCachedBinding', 'WaitGuestBacking', 'WriteMemory', 'MarkGpuUse', 'CanJoinDirectGuest', 'JoinOverlap', 'TryDirectDMACopy', 'DMACopySplit', 'DMAClearSplit', 'GetFlushArea',
+    'ResolveCachedBinding', 'CpuWriteNeedsGpuThread', 'WaitGuestBacking', 'WriteMemory', 'MarkGpuUse', 'CanJoinDirectGuest', 'JoinOverlap', 'TryDirectDMACopy', 'DMACopySplit', 'DMAClearSplit', 'GetFlushArea',
 ]
 uma = (root / 'src/video_core/buffer_cache/uma.h').read_text(encoding='utf-8')
 uma = uma[uma.index('namespace VideoCommon::Uma'): ] + '\nnamespace Uma = VideoCommon::Uma;\n'
@@ -499,6 +510,77 @@ void seed(BufferCache<int>& c) {
         c.ram[d] = u8(d - 990);
 }
 int main() {
+    {
+        Memory aliases;
+        aliases.pages = {{64, 1000}, {68, 1000}};
+        BufferCache<int> cache;
+        cache.gpu_memory = &aliases;
+        seed(cache);
+        bool rejected = false;
+        try { cache.GatherBuffer(64, 8); }
+        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        check(rejected && cache.runtime.copies == 0 && !cache.gather_buffers.at(64).buffer,
+              "split physical aliases rejected before gather copies or shader dispatch");
+
+        // Original 99-versus-10 regression: a pre-existing pending entry must
+        // fail before either whole-chunk scatter, retaining the GPU-written 99.
+        const auto id = cache.FindBuffer(1000, 4);
+        auto& entry = cache.gather_buffers.at(64);
+        entry.buffer = std::make_unique<FakeBuffer>(cache.runtime, 0, 8);
+        std::fill(entry.buffer->bytes.begin(), entry.buffer->bytes.end(), 10);
+        entry.buffer->bytes[0] = 99;
+        entry.chunks = {{1000, 4, 0, 1}, {1000, 4, 4, 1}};
+        entry.scatter_pending = true;
+        cache.scatter_pending = {64};
+        rejected = false;
+        try { cache.ResolveScatter(0, 0); }
+        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        check(rejected && cache.runtime.copies == 0 && entry.buffer->bytes[0] == 99 &&
+              entry.scatter_pending && cache.scatter_pending == std::vector<u64>{64} &&
+              !cache.scatter_busy && cache.slot_buffers[id].bytes[0] == 10,
+              "original 99-versus-10 scatter rejected without copying or discarding pending writes");
+        check(cache.CpuWriteNeedsGpuThread(1000, 4) && !cache.CpuWriteNeedsGpuThread(2000, 4),
+              "pending fallback scatter routes only overlapping CPU writes to GPU thread");
+        entry.device_generation = cache.device_memory.MapGeneration();
+        rejected = false;
+        try { cache.GatherBuffer(64, 4); }
+        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        check(rejected && cache.runtime.copies == 0 && entry.buffer->bytes[0] == 99 &&
+              entry.scatter_pending && !entry.aliases_checked,
+              "valid smaller binding cannot bypass rejection of old pending aliased writes");
+    }
+    {
+        Memory mapping;
+        mapping.pages = {{64, 1000}, {68, 1004}, {128, 2000}, {132, 2008}};
+        BufferCache<int> cache;
+        cache.gpu_memory = &mapping;
+        const std::array ranges{GatherAliasRange{64, 8, false}, GatherAliasRange{128, 8, true}};
+        cache.ValidateGatherAliases(ranges);
+        cache.device_memory.physical[2000] = 1000;
+        cache.device_memory.generation += 2;
+        bool rejected = false;
+        try { cache.ValidateGatherAliases(ranges); }
+        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        check(rejected && cache.runtime.copies == 0,
+              "different device/GPU addresses aliasing physical memory invalidate cached validation");
+        cache.channel.enabled_compute_uniform_buffer_mask = 1;
+        cache.channel.enabled_compute_storage_buffers = 1;
+        cache.channel.compute_uniform_buffers[0] = Binding{.size=8, .gpu_addr=64};
+        cache.channel.compute_storage_buffers[0] = Binding{
+            .size=8, .gather_gpu_addr=128, .gpu_addr=128};
+        rejected = false;
+        try { cache.PrepareGatherBindings(true); }
+        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        check(rejected && cache.runtime.copies == 0 && cache.gather_buffers.empty(),
+              "scratch aliasing a contiguous binding rejected before preparing either GPU view");
+        GatherAliasValidator validator{4};
+        validator.Add(0, 64, 4, true);
+        validator.Add(1, 65, 2, true); // same GPU byte, overlapping shared binding
+        rejected = false;
+        try { validator.Add(2, 128, 2, false); }
+        catch (const UnsupportedGatherMapping&) { rejected = true; }
+        check(rejected, "partial scratch-to-contiguous physical alias rejected");
+    }
     auto m = split();
     BufferCache<int> c;
     c.gpu_memory = &m;

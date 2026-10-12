@@ -27,6 +27,7 @@
 #include "video_core/buffer_cache/buffer_base.h"
 #include "video_core/buffer_cache/uma.h"
 #include "video_core/buffer_cache/direct_guest_mapping.h"
+#include "video_core/buffer_cache/gather_alias.h"
 #include "video_core/cache_memory_pressure.h"
 #include "video_core/control/channel_state_cache.h"
 #include "video_core/delayed_destruction_ring.h"
@@ -221,6 +222,7 @@ public:
     void TickFrame(u64 cache_usage, u64 cache_target, std::span<const HeapMemoryBudget> heaps);
 
     bool HasDirectGuestBuffers() const { return has_direct_guest_buffers; }
+    bool CpuWriteNeedsGpuThread(DAddr address, u64 size) const;
     void WriteMemory(DAddr device_addr, u64 size);
 
     void CachedWriteMemory(DAddr device_addr, u64 size);
@@ -626,7 +628,12 @@ public:
         GuestMappingIdentity identity;
         u64 device_generation{};
         bool scatter_pending{}; ///< scratch holds GPU writes not yet copied back to the chunks
+        bool aliases_checked{};
     };
+    void ValidateGatherAliases(std::span<const GatherAliasRange> ranges);
+    std::vector<GatherAliasRange> checked_alias_ranges;
+    GuestMappingIdentity checked_alias_identity;
+    u64 checked_alias_device_generation{~u64{0}};
     std::unordered_map<GPUVAddr, GatherEntry> gather_buffers;
     u64 gather_used_memory{};
     bool has_direct_guest_buffers{};

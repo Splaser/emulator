@@ -323,11 +323,16 @@ size_t Maxwell3D::EstimateIndexBufferSize() {
     static constexpr std::array<size_t, 3> max_sizes = {std::numeric_limits<u8>::max(), std::numeric_limits<u16>::max(), std::numeric_limits<u32>::max()};
     const size_t byte_size = regs.index_buffer.FormatSizeInBytes();
     const size_t log2_byte_size = Common::Log2Ceil64(byte_size);
+    if (end_address < start_address) {
+        return 0;
+    }
     // Draws that fetch their vertices from storage buffers (vertex pulling) have no vertex
     // streams enabled; capping by the vertex count would then estimate zero indices and bind no
     // index buffer at all. Only cap when there are vertex streams to cap against.
     const u32 max_vertices = GetMaxCurrentVertices();
-    const size_t index_range = size_t(end_address - start_address) / byte_size;
+    const u64 difference = end_address - start_address;
+    const u64 extent = difference == std::numeric_limits<u64>::max() ? difference : difference + 1;
+    const size_t index_range = static_cast<size_t>(extent / byte_size);
     const size_t cap{max_vertices != 0 ? size_t{max_vertices} * 4 : index_range};
     const size_t lower_cap = std::min<size_t>(index_range, cap);
     return std::min<size_t>(memory_manager.GetMemoryLayoutSize(start_address, byte_size * max_sizes[log2_byte_size]) / byte_size, lower_cap);

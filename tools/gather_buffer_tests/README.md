@@ -4,6 +4,9 @@ Run with Python 3 and a GCC-compatible C++23 compiler:
 
 ```sh
 python tools/gather_buffer_tests/run_tests.py --cxx g++
+python tools/gather_buffer_tests/run_cpu_scatter_tests.py --cxx g++
+python tools/gather_buffer_tests/run_gpu_stop_tests.py --cxx g++
+python tools/gather_buffer_tests/run_index_range_tests.py --cxx g++
 ```
 
 The runner extracts current buffer-cache helpers and the Vulkan flush-area merge
@@ -15,6 +18,20 @@ Checks cover split mappings, overlapping views, layout changes, CPU/GPU writes,
 address-space cache isolation, scratch retirement, allocation/copy failures,
 DMA fallback and reactive readback filtering. Four-byte fixture pages keep the
 mapping cases small and deterministic.
+
+Overlapping physical aliases at different GPU addresses cannot be represented by
+dense scratch buffers. They are rejected before gather copies or shader dispatch,
+including aliases across different bindings or device addresses. The GPU command
+loop requests frontend shutdown and retires subsequent commands without executing
+them. This is an explicit unsupported-mapping stop, not a rendering fallback.
+The original 99-versus-10 regression also checks that rejecting an existing pending
+scatter performs no copies and retains its GPU writes and pending state.
+
+The CPU scatter check runs the actual CPU dispatch and scatter helpers on a worker
+thread, verifying GPU-thread execution and write preservation during CPU unmap.
+The stop check extracts the production GPU command loop and verifies shutdown,
+skipping later commands, and signaling queued fences. The index check covers the
+inclusive index limit and the last index crossing a tracking-page boundary.
 
 `run_vulkan_import_tests.py` also checks that a small buffer over a 1 GiB dma-buf
 falls back before importing, synchronizing or waiting. Whole-allocation CPU cache
@@ -33,5 +50,5 @@ only `use_uma_zero_copy` allowed the same game to start normally; the cache swee
 functions no longer appeared above the 3% report threshold. This validates the
 cause and the existing fallback, not the patched APK or an FPS improvement.
 
-These checks do not exercise Vulkan drivers, command scheduling, Android builds
+These checks do not exercise Vulkan drivers, real GPU command scheduling, Android builds
 or game rendering. Device testing is still needed for correctness and performance.

@@ -855,7 +855,7 @@ bool RasterizerVulkan::RunBufferCacheCpuWrite(DAddr addr, u64 size, bool check_g
     std::unique_lock lock{buffer_cache.mutex};
     // Check while holding the cache lock: an import cannot race a CPU-side write
     // between the decision and execution. Never wait for the GPU with this lock held.
-    if (!gpu.IsGpuThread() && buffer_cache.HasDirectGuestBuffers()) {
+    if (!gpu.IsGpuThread() && buffer_cache.CpuWriteNeedsGpuThread(addr, size)) {
         lock.unlock();
         const auto result = std::make_shared<std::atomic<bool>>(false);
         gpu.RunOnGpuThread([this, addr, size, check_gpu_writes, unmap, result] {
