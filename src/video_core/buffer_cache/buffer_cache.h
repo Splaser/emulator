@@ -2751,6 +2751,32 @@ void BufferCache<P>::PrepareGatherBindings(bool compute) {
                 }
             }
         }
+        const auto add_texture = [&](const TextureBufferBinding& binding, bool written) {
+            if (binding.gpu_addr == 0 || binding.size == 0) {
+                return;
+            }
+            // Texel/image views bind the cached DAddr range, never the shared
+            // scratch used by storage/uniform views (even at the same GPU VA).
+            // A split texel range cannot be represented by that cached buffer.
+            if (!IsGpuRangeContiguous(binding.gpu_addr, binding.size)) {
+                throw UnsupportedGatherMapping(
+                    "Split texel/image buffer cannot share gathered bindings");
+            }
+            aliases.push_back({binding.gpu_addr, binding.size, false, written});
+        };
+        if (compute) {
+            ForEachEnabledBit(channel_state->enabled_compute_texture_buffers, [&](u32 index) {
+                add_texture(channel_state->compute_texture_buffers[index],
+                            ((channel_state->written_compute_texture_buffers >> index) & 1) != 0);
+            });
+        } else {
+            for (size_t stage = 0; stage < NUM_STAGES; ++stage) {
+                ForEachEnabledBit(channel_state->enabled_texture_buffers[stage], [&](u32 index) {
+                    add_texture(channel_state->texture_buffers[stage][index],
+                                ((channel_state->written_texture_buffers[stage] >> index) & 1) != 0);
+                });
+            }
+        }
         ValidateGatherAliases(aliases); // before allocation, binding mutation, or dispatch
     }
     for (const Range& range : ranges) {
@@ -3234,6 +3260,7 @@ TextureBufferBinding BufferCache<P>::GetTextureBufferBinding(GPUVAddr gpu_addr, 
         binding.size = size;
         binding.buffer_id = BufferId{};
         binding.format = format;
+        binding.gpu_addr = gpu_addr;
     }
     return binding;
 }

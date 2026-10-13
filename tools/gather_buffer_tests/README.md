@@ -8,6 +8,7 @@ python tools/gather_buffer_tests/run_cpu_scatter_tests.py --cxx g++
 python tools/gather_buffer_tests/run_gpu_stop_tests.py --cxx g++
 python tools/gather_buffer_tests/run_mapping_snapshot_tests.py --cxx g++
 python tools/gather_buffer_tests/run_unmap_alias_tests.py --cxx g++
+python tools/gather_buffer_tests/run_binding_alias_tests.py --cxx g++
 python tools/gather_buffer_tests/run_index_range_tests.py --cxx g++
 ```
 
@@ -37,6 +38,30 @@ Changing a cached read-only view into a writable one revalidates it. Writable
 validation remains keyed by address-space identity, mapping generation, ranges
 and access modes. Errors include the conflicting physical/GPU bytes and write
 flags so device failures can be investigated without disabling the guard.
+
+The binding-alias runner extracts production texture binding construction,
+graphics/compute image/texel host binds, split preparation, physical validation
+and scatter. It reproduces SSBO=99 overwriting image-buffer=77 when preparation
+validation is bypassed, then verifies that the mixed dispatch is rejected before
+binding or GPU writes. It covers same GPU VA, different GPU VA with the same
+DAddr, different DAddr with identical physical bytes, partial overlaps, disjoint
+and read-only combinations, changed write masks and retained pending writes.
+Image/texel buffers remain independent cached resources: a writable overlap with
+scratch must be rejected even when both views have the same GPU address. A split
+image/texel range accompanying gathered shader bindings is rejected because its
+current host-bind path cannot represent it as a shared gathered view.
+
+Coverage is dispatch-local uniform/storage/image-buffer/texel-buffer bindings,
+across all enabled graphics stages or the compute channel. Physical comparison
+uses MemoryManager GPU-to-DAddr translation and DeviceMemoryManager's stable
+physical-page snapshot; descriptor category and DAddr equality are not identities.
+The existing mapping-generation/address-space cache also includes texture ranges
+and their write flags. Dispatches without gathered uniform/storage ranges retain
+the old path. Ordinary texture images/render targets, geometry/transform-feedback
+bindings, cross-dispatch independent cached aliases and cross-channel coherence
+are not covered by this shader-buffer guard; it is not a Physical Coherency
+Identity implementation. Validation adds no GPU wait or Vulkan import and does
+not alter unmap/readback, CPU-write synchronization or retirement.
 
 Alias validation locks a stable GPU page-table snapshot and queries all physical
 pages under one device mapping lock. A temporary odd generation is not a reason

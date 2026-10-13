@@ -265,6 +265,7 @@ struct Binding {
     GPUVAddr gather_gpu_addr = 0, gpu_addr = 0;
     u32 gather_size = 0, gather_offset = 0;
 };
+using TextureBufferBinding = Binding;
 constexpr size_t NUM_STAGES = 2;
 constexpr BufferId NULL_BUFFER_ID = 0;
 template <class F>
@@ -281,6 +282,10 @@ struct Channel {
     std::array<u32, NUM_STAGES> enabled_uniform_buffer_masks{}, enabled_storage_buffers{};
     std::array<u32, NUM_STAGES> written_storage_buffers{};
     std::array<std::array<Binding, 4>, NUM_STAGES> uniform_buffers{}, storage_buffers{};
+    u32 enabled_compute_texture_buffers = 0, written_compute_texture_buffers = 0;
+    std::array<Binding, 4> compute_texture_buffers{};
+    std::array<u32, NUM_STAGES> enabled_texture_buffers{}, written_texture_buffers{};
+    std::array<std::array<Binding, 4>, NUM_STAGES> texture_buffers{};
 };
 template <class P>
 struct BufferCache {
