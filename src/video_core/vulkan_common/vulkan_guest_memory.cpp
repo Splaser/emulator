@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 #ifdef __linux__
@@ -87,7 +88,8 @@ struct Functions {
 /// destroy.
 Failure ExportChunk(const Functions& vk, VkDevice device,
                     const VkPhysicalDeviceMemoryProperties& memory_properties, u64 chunk_size,
-                    bool dedicated, bool& direct_importable, VkBuffer& buffer, VkDeviceMemory& memory, int& fd) {
+                    bool dedicated, bool& direct_importable, VkBuffer& buffer, VkDeviceMemory& memory,
+                    int& fd, Common::GuestChunkExportInfo* export_info = nullptr) {
     const VkExternalMemoryBufferCreateInfo external_ci{
         .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
         .pNext = nullptr,
@@ -175,6 +177,14 @@ Failure ExportChunk(const Functions& vk, VkDevice device,
         fd = -1;
         return Transient("the memory could not be exported");
     }
+    if (export_info) {
+        export_info->allocation_size = requirements.size;
+        export_info->handle_type = HandleType;
+        export_info->buffer_usage = BufferUsage;
+        export_info->buffer_flags = buffer_ci.flags;
+        export_info->memory_properties = memory_properties.memoryTypes[type].propertyFlags;
+        export_info->dedicated = dedicated;
+    }
     return {};
 }
 
@@ -182,7 +192,7 @@ Failure ExportChunk(const Functions& vk, VkDevice device,
 Failure InitializeExportDevice(const vk::InstanceDispatch& dld, VkInstance instance,
                                VkDevice& device, Functions& vk,
                                VkPhysicalDeviceMemoryProperties& memory_properties,
-                               bool& dedicated) {
+                               bool& dedicated, VkPhysicalDevice* selected_physical = nullptr) {
     u32 device_count = 1;
     VkPhysicalDevice physical_device{};
     const VkResult enumeration =
@@ -191,6 +201,7 @@ Failure InitializeExportDevice(const vk::InstanceDispatch& dld, VkInstance insta
         device_count == 0 || physical_device == VK_NULL_HANDLE) {
         return Transient("no physical device");
     }
+    if (selected_physical) *selected_physical = physical_device;
     VkPhysicalDeviceProperties properties{};
     dld.vkGetPhysicalDeviceProperties(physical_device, &properties);
     if (properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
@@ -382,9 +393,21 @@ public:
         if (!dld.vkDestroyInstance || !vk::Load(instance, dld)) {
             return Permanent("an instance function is missing");
         }
+        VkPhysicalDevice physical{};
         Failure failure = InitializeExportDevice(dld, instance, device, functions,
-                                                 memory_properties, dedicated);
+                                                 memory_properties, dedicated, &physical);
         if (!failure) {
+            // Exporter and renderer may select different devices/libraries. Record
+            // identities; do not infer compatibility from a memory type index.
+            if (dld.vkGetPhysicalDeviceProperties2) {
+                VkPhysicalDeviceIDProperties ids{
+                    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+                VkPhysicalDeviceProperties2 props{
+                    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &ids};
+                dld.vkGetPhysicalDeviceProperties2(physical, &props);
+                std::copy_n(ids.deviceUUID, device_uuid.size(), device_uuid.begin());
+                std::copy_n(ids.driverUUID, driver_uuid.size(), driver_uuid.begin());
+            }
             functions.GetBufferMemoryRequirements2 =
                 reinterpret_cast<PFN_vkGetBufferMemoryRequirements2>(
                     dld.vkGetDeviceProcAddr(device, "vkGetBufferMemoryRequirements2"));
@@ -421,8 +444,9 @@ public:
             }
         };
         bool unused_direct_importable = false;
+        Common::GuestChunkExportInfo info;
         Failure failure = ExportChunk(functions, device, memory_properties, size, dedicated,
-                                      unused_direct_importable, buffer, memory, fd);
+                                      unused_direct_importable, buffer, memory, fd, &info);
         if (!failure && fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
             failure = Transient("could not set close-on-exec on exported fd");
         }
@@ -446,11 +470,27 @@ public:
             }
             return -1;
         }
+        info.device_uuid = device_uuid;
+        info.driver_uuid = driver_uuid;
+        try {
+            descriptions.emplace(fd, info);
+        } catch (const std::bad_alloc&) {
+            // Metadata is optional: preserve successful CPU-ready backing, while
+            // Phase 3 rejects chunks lacking a known export contract.
+        }
         published = true;
         return fd;
     }
 
+    std::optional<Common::GuestChunkExportInfo> DescribeChunk(int fd) override {
+        std::scoped_lock lock{mutex};
+        const auto it = descriptions.find(fd);
+        return it == descriptions.end() ? std::nullopt : std::optional{it->second};
+    }
+
     void ReleaseChunk(int fd) noexcept override {
+        std::scoped_lock lock{mutex};
+        descriptions.erase(fd);
         // Caller has stopped guest CPU use and unmapped every CPU alias first.
         if (!SyncCpuAccess(fd, DMA_BUF_SYNC_END)) {
             LOG_WARNING(Render_Vulkan, "Lazy backing DMA_BUF_SYNC_END failed: {}", errno);
@@ -496,6 +536,8 @@ private:
     bool disabled{};
     bool logged_failure{};
     std::mutex mutex;
+    std::array<u8, 16> device_uuid{}, driver_uuid{};
+    std::unordered_map<int, Common::GuestChunkExportInfo> descriptions;
 };
 
 } // Anonymous namespace

@@ -65,6 +65,7 @@ add_library(common STATIC
     hex_util.h
     host_memory.cpp
     host_memory.h
+    published_guest_chunk.h
     input.h
     intrusive_red_black_tree.h
     literals.h

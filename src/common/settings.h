@@ -505,6 +505,8 @@ struct Values {
     // Startup-only CPU backing experiment. No Vulkan direct mapping is enabled by this.
     SwitchableSetting<bool> use_lazy_guest_backing{linkage, false, "use_lazy_guest_backing",
                                                   Category::RendererAdvanced};
+    SwitchableSetting<bool> guest_chunk_import_diagnostics{
+        linkage, false, "guest_chunk_import_diagnostics", Category::RendererAdvanced};
     SwitchableSetting<bool> use_reactive_flushing{linkage,
 #ifdef ANDROID
                                                   false,

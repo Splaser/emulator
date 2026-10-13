@@ -58,6 +58,18 @@ public:
     // assuming DAddr continuity implies continuity in physical guest backing.
     std::optional<Common::GuestBackingRange> GetDriverBackingRange(DAddr address, u64 size);
     u64 MapGeneration() const { return mapping_generation.load(std::memory_order_acquire); }
+    // Allocation identity only; not an alias/dirty-tracking or direct-binding API.
+    Common::GuestChunkLease GetPublishedGuestChunk(DAddr address) {
+        std::scoped_lock lock{mapping_guard};
+        if (!guest_backing || address >= device_as_size || !GetPointer<u8>(address)) return {};
+        return guest_backing->GetPublishedChunk(GetPhysicalRawAddressFromDAddr(address));
+    }
+    Common::GuestChunkLease FirstPublishedGuestChunk() const {
+        return guest_backing ? guest_backing->FirstPublishedExportedChunk() : nullptr;
+    }
+    u64 GuestBackingGeneration() const {
+        return guest_backing ? guest_backing->BackingGeneration() : 0;
+    }
 
     DAddr Allocate(size_t size);
     void AllocateFixed(DAddr start, size_t size);

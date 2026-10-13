@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <variant>
@@ -11,6 +12,7 @@
 #include "video_core/host1x/gpu_device_memory_manager.h"
 #include "video_core/renderer_base.h"
 #include "video_core/renderer_vulkan/vk_blit_screen.h"
+#include "video_core/renderer_vulkan/vk_guest_chunk_import.h"
 #include "video_core/renderer_vulkan/vk_present_manager.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -54,8 +56,14 @@ public:
         return device.GetDriverName();
     }
 
+    std::optional<ChunkImportStats> GetChunkImportStats() {
+        return chunk_import_diagnostics ? std::optional{chunk_import_diagnostics->GetStats()}
+                                        : std::nullopt;
+    }
+
 private:
     void Report() const;
+    void ExerciseChunkImports();
 
     vk::Buffer RenderToBuffer(std::span<const Tegra::FramebufferConfig> framebuffers,
                               const Layout::FramebufferLayout& layout, VkFormat format,
@@ -87,6 +95,9 @@ private:
     VideoCore::FrameSkipping frame_skipping;
 
     Frame applet_frame;
+    std::unique_ptr<GuestChunkImportDiagnostics> chunk_import_diagnostics;
+    Common::GuestChunkLease diagnostic_chunk; // one candidate per backing generation, GPU thread only
+    std::chrono::steady_clock::time_point next_chunk_diagnostic{};
 };
 
 } // namespace Vulkan

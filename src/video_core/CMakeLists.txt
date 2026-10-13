@@ -154,6 +154,9 @@ add_library(video_core STATIC
     renderer_vulkan/vk_buffer_cache_base.cpp
     renderer_vulkan/vk_buffer_cache.cpp
     renderer_vulkan/vk_buffer_cache.h
+    renderer_vulkan/guest_chunk_import_cache.h
+    renderer_vulkan/vk_guest_chunk_import.cpp
+    renderer_vulkan/vk_guest_chunk_import.h
     renderer_vulkan/vk_command_pool.cpp
     renderer_vulkan/vk_command_pool.h
     renderer_vulkan/vk_compute_pass.cpp

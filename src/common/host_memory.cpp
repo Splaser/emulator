@@ -475,6 +475,7 @@ public:
         fds.assign(lazy_backing ? backing_size / chunk_size : MaxBackingChunks, -1);
         if (lazy_backing) {
             exported_slots.resize(fds.size());
+            export_info.resize(fds.size());
             ready = std::make_unique<std::atomic<bool>[]>(fds.size());
         }
         std::ranges::copy(backing_fds, fds.begin());
@@ -624,8 +625,17 @@ public:
                     throw std::bad_alloc{};
                 }
             }
+            std::optional<GuestChunkExportInfo> published_info;
+            if (exported) {
+                try {
+                    published_info = exporter->DescribeChunk(fd);
+                } catch (...) {
+                    // Optional import metadata must not fail a CPU-ready Phase 2 chunk.
+                }
+            }
             fds[index] = fd;
             exported_slots[index] = exported;
+            export_info[index] = published_info;
             published = true;
             (exported ? chunks_exported : cpu_only_fallback_chunks)
                 .fetch_add(1, std::memory_order_relaxed);
@@ -649,6 +659,25 @@ public:
                 cpu_only_fallback_chunks.load(std::memory_order_relaxed),
                 export_duration_ns.load(std::memory_order_relaxed),
                 peak_export_duration_ns.load(std::memory_order_relaxed)};
+    }
+
+    GuestChunkLease FindPublishedChunk(std::optional<u64> offset,
+                                      std::shared_ptr<const void> owner,
+                                      std::shared_ptr<const GuestBackingEpoch> epoch) const {
+        if (!lazy_backing || (offset && *offset >= backing_size) || !epoch->alive.load()) {
+            return {};
+        }
+        std::scoped_lock lock{backing_mutex};
+        const size_t begin = offset ? *offset / chunk_size : 0;
+        const size_t end = offset ? begin + 1 : fds.size();
+        for (size_t i = begin; i < end; ++i) {
+            if (ready[i].load(std::memory_order_acquire) && (offset || export_info[i])) {
+                return std::make_shared<const PublishedGuestChunk>(PublishedGuestChunk{
+                    std::move(owner), std::move(epoch), i, i * chunk_size, chunk_size,
+                    fds[i], exported_slots[i], export_info[i]});
+            }
+        }
+        return {};
     }
 
     ~Impl() {
@@ -972,8 +1001,9 @@ private:
     bool lazy_backing{};
     std::shared_ptr<GuestBackingExporter> exporter;
     std::vector<bool> exported_slots; // only accessed under backing_mutex or after worker shutdown
+    std::vector<std::optional<GuestChunkExportInfo>> export_info;
     std::unique_ptr<std::atomic<bool>[]> ready;
-    std::mutex backing_mutex;
+    mutable std::mutex backing_mutex;
     std::atomic<u64> chunks_created{};
     std::atomic<u64> chunk_cache_hits{};
     std::atomic<u64> chunks_exported{};
@@ -1056,8 +1086,25 @@ HostMemory::HostMemory(size_t backing_size_, size_t virtual_size_,
 
 HostMemory::~HostMemory() {
     // We leave this empty.
-    // The "impl" unique_ptr handles the cleanup automatically and correctly.
+    // Impl ownership handles cleanup; diagnostic leases may pin the arena until
+    // their cache is released, but backing_lifetime invalidates queries immediately.
     // Manually calling munmap here causes a "double-free" crash.
+}
+
+GuestChunkLease HostMemory::GetPublishedChunk([[maybe_unused]] u64 physical_offset) const {
+#if defined(__linux__) || defined(__FreeBSD__)
+    return impl ? impl->FindPublishedChunk(physical_offset, impl, backing_lifetime.Get()) : nullptr;
+#else
+    return {};
+#endif
+}
+
+GuestChunkLease HostMemory::FirstPublishedExportedChunk() const {
+#if defined(__linux__) || defined(__FreeBSD__)
+    return impl ? impl->FindPublishedChunk(std::nullopt, impl, backing_lifetime.Get()) : nullptr;
+#else
+    return {};
+#endif
 }
 
 HostMemory::HostMemory(HostMemory&&) noexcept = default;

@@ -10,6 +10,7 @@
 #include <span>
 #include "common/common_funcs.h"
 #include "common/common_types.h"
+#include "common/published_guest_chunk.h"
 #include "common/virtual_buffer.h"
 
 namespace Common {
@@ -33,6 +34,7 @@ public:
     virtual ~GuestBackingExporter() = default;
     virtual int CreateChunk(size_t size) = 0;
     virtual void ReleaseChunk(int fd) noexcept = 0;
+    virtual std::optional<GuestChunkExportInfo> DescribeChunk(int /*fd*/) { return std::nullopt; }
 };
 
 struct LazyBackingParams {
@@ -121,6 +123,13 @@ public:
     void EnsureBackingRange(size_t physical_offset, size_t length) const;
     [[nodiscard]] BackingStats GetBackingStats() const;
     [[nodiscard]] bool IsLazyBacking() const noexcept { return lazy_backing_enabled; }
+    // Query only: never materializes cold chunks. Leases are not direct GPU mappings.
+    [[nodiscard]] GuestChunkLease GetPublishedChunk(u64 physical_offset) const;
+    [[nodiscard]] GuestChunkLease FirstPublishedExportedChunk() const;
+    [[nodiscard]] u64 BackingGeneration() const {
+        const auto epoch = backing_lifetime.Get();
+        return epoch ? epoch->generation : 0;
+    }
 
     [[nodiscard]] u8* BackingBasePointer() noexcept {
         return backing_base;
@@ -169,7 +178,8 @@ private:
 
     // Low level handler for the platform dependent memory routines
     class Impl;
-    std::unique_ptr<Impl> impl;
+    std::shared_ptr<Impl> impl;
+    GuestBackingLifetime backing_lifetime;
     u8* backing_base{};
     u8* virtual_base{};
     size_t virtual_base_offset{};
