@@ -56,7 +56,22 @@ MemoryManager::MemoryManager(Core::System& system_, u64 address_space_bits_,
     : MemoryManager(system_, system_.Host1x().MemoryManager(), address_space_bits_, split_address_,
                     big_page_bits_, page_bits_) {}
 
-MemoryManager::~MemoryManager() = default;
+MemoryManager::~MemoryManager() {
+    mapping_lifetime.Invalidate(); // invalidate retained stamps before freeing tables
+}
+
+PhysicalResolveResult MemoryManager::ResolvePhysicalRanges(GPUVAddr address, u64 size) const {
+    const auto gpu_lock = AcquireMappingRead();
+    return memory.ReadPhysicalMappingSnapshot(
+        [&](auto device_epoch, u64 device_generation, auto backing, u64 backing_size,
+            const auto& physical_address) {
+            MappingStamp stamp{mapping_lifetime.Get(), std::move(device_epoch), GetID(),
+                               MapGeneration(), device_generation, std::move(backing), backing_size};
+            return Detail::ResolvePhysicalRangesLocked(
+                std::move(stamp), address, size, address_space_size, page_size, Core::DEVICE_PAGESIZE,
+                [this](GPUVAddr gpu) { return GpuToCpuAddress(gpu); }, physical_address);
+        });
+}
 
 template <bool is_big_page>
 MemoryManager::EntryType MemoryManager::GetEntry(size_t position) const {

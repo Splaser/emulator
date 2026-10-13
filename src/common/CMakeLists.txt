@@ -66,6 +66,7 @@ add_library(common STATIC
     host_memory.cpp
     host_memory.h
     published_guest_chunk.h
+    mapping_lifetime.h
     input.h
     intrusive_red_black_tree.h
     literals.h

@@ -18,6 +18,7 @@
 #include "video_core/cache_types.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
 #include "video_core/pte_kind.h"
+#include "video_core/physical_memory.h"
 
 namespace VideoCore {
 class RasterizerInterface;
@@ -51,6 +52,10 @@ public:
     void BindRasterizer(VideoCore::RasterizerInterface* rasterizer);
 
     [[nodiscard]] std::optional<DAddr> GpuToCpuAddress(GPUVAddr addr) const;
+
+    // Caller retains this MemoryManager and its device manager during resolution.
+    // Returned stamps can be validated safely after either manager is destroyed.
+    [[nodiscard]] PhysicalResolveResult ResolvePhysicalRanges(GPUVAddr address, u64 size) const;
 
     [[nodiscard]] std::optional<DAddr> GpuToCpuAddress(GPUVAddr addr, std::size_t size) const;
 
@@ -257,7 +262,8 @@ private:
 
     mutable std::mutex guard;
     std::mutex mapping_update_guard;
-    mutable std::mutex page_table_guard;
+    Common::MappingLifetime mapping_lifetime;
+    std::mutex& page_table_guard{mapping_lifetime.Get()->mutex};
 
     static constexpr size_t continuous_bits = 64;
 
@@ -267,7 +273,7 @@ private:
     static std::atomic<size_t> unique_identifier_generator;
 
     Common::ScratchBuffer<u8> tmp_buffer;
-    std::atomic<u64> map_generation{0};
+    std::atomic<u64>& map_generation{mapping_lifetime.Get()->generation};
 };
 
 } // namespace Tegra

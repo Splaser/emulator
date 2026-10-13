@@ -130,6 +130,10 @@ public:
         const auto epoch = backing_lifetime.Get();
         return epoch ? epoch->generation : 0;
     }
+    // Identity only: this token does not materialize or pin arena allocations.
+    [[nodiscard]] std::shared_ptr<const GuestBackingEpoch> BackingEpoch() const {
+        return backing_lifetime.Get();
+    }
 
     [[nodiscard]] u8* BackingBasePointer() noexcept {
         return backing_base;

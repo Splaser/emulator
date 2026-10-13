@@ -167,6 +167,8 @@ DeviceMemoryManager<Traits>::DeviceMemoryManager(const DeviceMemory& device_memo
     , compressed_device_addr(1ULL << ((Settings::values.memory_layout_mode.GetValue() == Settings::MemoryLayout::Memory_4Gb ? physical_min_bits : physical_max_bits) - Memory::CITRON_PAGEBITS))
 {
     guest_backing = &device_memory_.buffer;
+    backing_epoch = device_memory_.buffer.BackingEpoch();
+    physical_backing_size = device_memory_.buffer.backing_size;
     impl = std::make_unique<DeviceMemoryManagerAllocator<Traits>>();
     cached_pages.resize(num_counter_entries);
 
@@ -177,7 +179,9 @@ DeviceMemoryManager<Traits>::DeviceMemoryManager(const DeviceMemory& device_memo
 }
 
 template <typename Traits>
-DeviceMemoryManager<Traits>::~DeviceMemoryManager() = default;
+DeviceMemoryManager<Traits>::~DeviceMemoryManager() {
+    mapping_lifetime.Invalidate(); // before page tables are destroyed
+}
 
 template <typename Traits>
 void DeviceMemoryManager<Traits>::BindInterface(DeviceInterface* device_inter_) {

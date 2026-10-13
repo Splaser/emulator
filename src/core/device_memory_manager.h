@@ -14,6 +14,7 @@
 
 #include "common/common_types.h"
 #include "common/host_memory.h"
+#include "common/mapping_lifetime.h"
 #include "common/range_mutex.h"
 #include "common/scratch_buffer.h"
 #include "common/virtual_buffer.h"
@@ -133,6 +134,24 @@ public:
             }
             return GetPhysicalRawAddressFromDAddr(address);
         });
+    }
+
+    // Pure device page-table snapshot. Caller holds its GPU page-table lock first.
+    // Unlike pointer/backing queries, this does not materialize lazy physical pages.
+    // Do not retain the translation callback, allocate backing, submit work or wait
+    // for the GPU inside query. Retained results must contain values/tokens only.
+    template <typename Func>
+    auto ReadPhysicalMappingSnapshot(Func&& query) const {
+        std::scoped_lock lock{mapping_guard};
+        return query(std::shared_ptr<const Common::MappingEpoch>{mapping_lifetime.Get()},
+                     MapGeneration(), backing_epoch, physical_backing_size,
+                     [this](DAddr address) -> std::optional<PAddr> {
+                         if (address >= device_as_size ||
+                             entries[address >> page_bits].compressed_physical_ptr == 0) {
+                             return std::nullopt;
+                         }
+                         return GetPhysicalRawAddressFromDAddr(address);
+                     });
     }
 
     template <typename T>
@@ -268,8 +287,11 @@ private:
     CachedPages cached_pages;
     Common::RangeMutex counter_guard;
     const Common::HostMemory* guest_backing{};
-    std::atomic<u64> mapping_generation{};
-    std::mutex mapping_guard;
+    std::shared_ptr<const Common::GuestBackingEpoch> backing_epoch;
+    u64 physical_backing_size{};
+    Common::MappingLifetime mapping_lifetime;
+    std::atomic<u64>& mapping_generation{mapping_lifetime.Get()->generation};
+    std::mutex& mapping_guard{mapping_lifetime.Get()->mutex};
 };
 
 } // namespace Core
