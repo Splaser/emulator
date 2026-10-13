@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <numeric>
@@ -328,7 +329,35 @@ bool BufferCache<P>::OnCPUWrite(DAddr device_addr, u64 size) {
         return false;
     }
     if (memory_tracker.IsRegionGpuModified(device_addr, size)) {
-        return true;
+        bool staged = false;
+        ForEachBufferInRange(device_addr, size, [&](BufferId, Buffer& buffer) {
+            staged |= !IsDirectGuest(buffer);
+        });
+        if (staged) {
+            const auto started = std::chrono::steady_clock::now();
+            // This notification precedes the CPU store. Preserve the other GPU
+            // bytes before coarse deferred CPU dirty tracking can discard them.
+            ResolveScatter(device_addr, size);
+            WaitGuestBacking(device_addr, size);
+            ForEachBufferInRange(device_addr, size, [&](BufferId, Buffer& buffer) {
+                if (!IsDirectGuest(buffer)) {
+                    const DAddr begin = std::max(device_addr, buffer.CpuAddr());
+                    const DAddr end = std::min(device_addr + size, buffer.CpuAddr() + buffer.SizeBytes());
+                    DownloadBufferMemory(buffer, begin, end - begin);
+                }
+            });
+            const u64 elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - started).count();
+            ++cpu_write_preserve_count;
+            cpu_write_preserve_time_ns += elapsed;
+            if (cpu_write_preserve_count <= 8 || (cpu_write_preserve_count % 64) == 0) {
+                LOG_INFO(HW_Memory, "Staged CPU write preservation: count={} time_ns={} last_time_ns={}",
+                         cpu_write_preserve_count, cpu_write_preserve_time_ns, elapsed);
+            }
+        }
+        if (memory_tracker.IsRegionGpuModified(device_addr, size)) {
+            return true;
+        }
     }
     WriteMemory(device_addr, size);
     return false;
@@ -2389,11 +2418,37 @@ void BufferCache<P>::DownloadBufferMemory(Buffer& buffer) {
 }
 
 template <class P>
-void BufferCache<P>::DownloadBufferMemory(Buffer& buffer, DAddr device_addr, u64 size) {
+void BufferCache<P>::DownloadBufferMemory(Buffer& buffer, DAddr device_addr, u64 size,
+                                         bool preserve_on_unmap) {
+    const auto started = preserve_on_unmap ? std::chrono::steady_clock::now()
+                                         : std::chrono::steady_clock::time_point{};
+    const DAddr unmap_begin = std::max(buffer.CpuAddr(), Common::AlignDown(device_addr, DEVICE_PAGESIZE));
+    const DAddr unmap_end = std::min(buffer.CpuAddr() + buffer.SizeBytes(),
+                                    Common::AlignUp(device_addr + size, DEVICE_PAGESIZE));
+    const auto complete_unmap = [&] {
+        if (preserve_on_unmap) {
+            ClearDownload(unmap_begin, unmap_end - unmap_begin);
+            gpu_modified_ranges.Subtract(unmap_begin, unmap_end - unmap_begin);
+            memory_tracker.UnmarkRegionAsGpuModified(unmap_begin, unmap_end - unmap_begin);
+        }
+    };
     boost::container::small_vector<BufferCopy, 1> copies;
     u64 total_size_bytes = 0;
     u64 largest_copy = 0;
-    memory_tracker.ForEachDownloadRangeAndClear(
+    const auto collect_range = [&](DAddr start, DAddr end) {
+        copies.push_back(BufferCopy{.src_offset = start - buffer.CpuAddr(),
+                                    .dst_offset = total_size_bytes, .size = end - start});
+        total_size_bytes += Common::AlignUp<u64>(end - start, 64);
+        largest_copy = std::max(largest_copy, end - start);
+    };
+    if (preserve_on_unmap) {
+        // CPU dirty flags cover whole pages, but completed CPU writes have already
+        // subtracted only their actual bytes from gpu_modified_ranges. Copy the
+        // remaining GPU bytes even on mixed CPU/GPU pages. Complete each page
+        // before clearing its page-granular tracker bit; clip to this allocation.
+        gpu_modified_ranges.ForEachInRange(unmap_begin, unmap_end - unmap_begin, collect_range);
+    } else {
+        memory_tracker.ForEachDownloadRangeAndClear(
         device_addr, size, [&](u64 device_addr_out, u64 range_size) {
             const DAddr buffer_addr = buffer.CpuAddr();
             const auto add_download = [&](DAddr start, DAddr end) {
@@ -2415,6 +2470,7 @@ void BufferCache<P>::DownloadBufferMemory(Buffer& buffer, DAddr device_addr, u64
             ClearDownload(device_addr_out, range_size);
             gpu_modified_ranges.Subtract(device_addr_out, range_size);
         });
+    }
     if (IsDirectGuest(buffer)) {
         GuestMemoryBarrier(true);
         runtime.Finish();
@@ -2422,6 +2478,7 @@ void BufferCache<P>::DownloadBufferMemory(Buffer& buffer, DAddr device_addr, u64
         return; // GPU writes already inhabit guest backing; no CPU copy-back.
     }
     if (total_size_bytes == 0) {
+        complete_unmap();
         return;
     }
     if constexpr (USE_MEMORY_MAPS) {
@@ -2448,6 +2505,20 @@ void BufferCache<P>::DownloadBufferMemory(Buffer& buffer, DAddr device_addr, u64
             buffer.ImmediateDownload(copy.src_offset, immediate_buffer.subspan(0, copy.size));
             const DAddr copy_device_addr = buffer.CpuAddr() + copy.src_offset;
             device_memory.WriteBlockUnsafe(copy_device_addr, immediate_buffer.data(), copy.size);
+        }
+    }
+    complete_unmap(); // only after GPU completion and all CPU copies succeed
+    if (preserve_on_unmap) {
+        const u64 elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - started).count();
+        ++unmap_readback_count;
+        for (const auto& copy : copies) {
+            unmap_readback_bytes += copy.size;
+        }
+        unmap_readback_time_ns += elapsed;
+        if (unmap_readback_count <= 8 || (unmap_readback_count % 64) == 0) {
+            LOG_INFO(HW_Memory, "Unmap staged readback: count={} bytes={} time_ns={} last_time_ns={}",
+                     unmap_readback_count, unmap_readback_bytes, unmap_readback_time_ns, elapsed);
         }
     }
 }
@@ -2703,6 +2774,16 @@ void BufferCache<P>::PrepareGatherBindings(bool compute) {
 template <class P>
 void BufferCache<P>::InvalidateGatherMemory(DAddr device_addr, u64 size) {
     ResolveScatter(device_addr, size);
+    // Removing a GPU mapping does not overwrite its guest bytes. Preserve staged
+    // writes before the caller marks this range CPU-modified: another GPU VA may
+    // still refer to it, or the device mapping may be about to change.
+    ForEachBufferInRange(device_addr, size, [&](BufferId, Buffer& buffer) {
+        if (!IsDirectGuest(buffer)) {
+            const DAddr begin = std::max(device_addr, buffer.CpuAddr());
+            const DAddr end = std::min(device_addr + size, buffer.CpuAddr() + buffer.SizeBytes());
+            DownloadBufferMemory(buffer, begin, end - begin, true);
+        }
+    });
     WaitGuestBacking(device_addr, size);
     std::vector<BufferId> direct_buffers;
     ForEachBufferInRange(device_addr, size, [&](BufferId id, Buffer& buffer) {

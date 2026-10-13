@@ -62,6 +62,7 @@ struct Cache {
     int waits = 0, writes = 0;
     bool HasDirectGuestBuffers() const { return shared; }
     bool CpuWriteNeedsGpuThread(DAddr, u64) const { return shared || pending_scatter; }
+    bool IsRegionGpuModified(DAddr, u64) const { return gpu_dirty; }
     void WaitGuestBacking() {
         if (pending_scatter) { assert(gpu.IsGpuThread()); }
         if (shared) {

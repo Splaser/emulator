@@ -524,7 +524,8 @@ public:
 
     void DownloadBufferMemory(Buffer& buffer_id);
 
-    void DownloadBufferMemory(Buffer& buffer_id, DAddr device_addr, u64 size);
+    void DownloadBufferMemory(Buffer& buffer_id, DAddr device_addr, u64 size,
+                              bool preserve_on_unmap = false);
 
     void DeleteBuffer(BufferId buffer_id, bool do_not_mark = false);
 
@@ -650,6 +651,8 @@ public:
     /// Gathered storage buffers whose write-back to the device chunks is deferred.
     std::vector<GPUVAddr> scatter_pending;
     bool scatter_busy = false; ///< inside a write-back (its FindBuffer calls must not recurse)
+    u64 unmap_readback_count{}, unmap_readback_bytes{}, unmap_readback_time_ns{};
+    u64 cpu_write_preserve_count{}, cpu_write_preserve_time_ns{};
     GPUVAddr scatter_skip = 0; ///< entry being gathered right now; its own chunks don't flush it
 
     /// Copies a deferred gather entry back to its device chunks.

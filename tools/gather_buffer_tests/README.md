@@ -7,6 +7,7 @@ python tools/gather_buffer_tests/run_tests.py --cxx g++
 python tools/gather_buffer_tests/run_cpu_scatter_tests.py --cxx g++
 python tools/gather_buffer_tests/run_gpu_stop_tests.py --cxx g++
 python tools/gather_buffer_tests/run_mapping_snapshot_tests.py --cxx g++
+python tools/gather_buffer_tests/run_unmap_alias_tests.py --cxx g++
 python tools/gather_buffer_tests/run_index_range_tests.py --cxx g++
 ```
 
@@ -49,6 +50,31 @@ renderer lock, generation invalidation, and actual unsafe write-alias rejection.
 
 The CPU scatter check runs the actual CPU dispatch and scatter helpers on a worker
 thread, verifying GPU-thread execution and write preservation during CPU unmap.
+The unmap-alias check additionally extracts the public Vulkan UnmapMemory callback,
+FindBuffer, SynchronizeBuffer, UploadMemory and DownloadBufferMemory. It reproduces
+the original 99-to-10 overwrite through a surviving alias: unmap now scatters and
+reads staged GPU writes into guest backing before the existing CPU-modified flag
+can trigger another upload. Scheduler copies and completion execute on the GPU
+worker, including ordinary dirty buffers with no pending scatter. It also checks
+that post-write CPU invalidation still wins without readback, unaffected dirty
+ranges remain tracked, and direct UMA unmap keeps its original no-copy barrier/wait
+path. Actual CPU pre-store notifications save staged GPU data first; this prevents
+the production deferred dirty queue's 64-byte granularity from discarding adjacent
+GPU bytes when the CPU overwrites only part of that region.
+
+Unmap callbacks execute on the GPU worker and drain deferred CPU notifications
+before acquiring cache locks. Readback is clipped per buffer, extended only to
+complete tracked device pages, and copies the remaining exact GPU dirty intervals.
+Unmap clears those intervals and page bits only after GPU completion and CPU
+writeback succeed. Tests cover partial pages, mixed CPU/GPU writes, multiple
+buffers, failed copies, GPU reentrancy and preservation of other dirty pages.
+
+`HW.Memory:Info` samples `Unmap staged readback` (first eight and every 64th
+completion), reporting cumulative count, actual bytes, time_ns and last_time_ns.
+Time includes staging, GPU completion and CPU copy, excluding GPU callback queue
+latency. `Staged CPU write preservation` separately reports count and duration of
+pre-store preservation, including scatter/readback/wait. These are correctness
+costs of staged memory, not chunk imports or Phase 3 ownership-transition metrics.
 The stop check extracts the production GPU command loop and verifies shutdown,
 skipping later commands, and signaling queued fences. The index check covers the
 inclusive index limit and the last index crossing a tracking-page boundary.

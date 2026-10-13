@@ -855,7 +855,10 @@ bool RasterizerVulkan::RunBufferCacheCpuWrite(DAddr addr, u64 size, bool check_g
     std::unique_lock lock{buffer_cache.mutex};
     // Check while holding the cache lock: an import cannot race a CPU-side write
     // between the decision and execution. Never wait for the GPU with this lock held.
-    if (!gpu.IsGpuThread() && buffer_cache.CpuWriteNeedsGpuThread(addr, size)) {
+    // Unmap also downloads ordinary staged GPU writes before CPU dirtying.
+    if (!gpu.IsGpuThread() &&
+        (buffer_cache.CpuWriteNeedsGpuThread(addr, size) ||
+         ((unmap || check_gpu_writes) && buffer_cache.IsRegionGpuModified(addr, size)))) {
         lock.unlock();
         const auto result = std::make_shared<std::atomic<bool>>(false);
         gpu.RunOnGpuThread([this, addr, size, check_gpu_writes, unmap, result] {
@@ -960,14 +963,19 @@ void RasterizerVulkan::InvalidateGPUCache() {
 }
 
 void RasterizerVulkan::UnmapMemory(DAddr addr, u64 size) {
-    {
-        std::scoped_lock lock{texture_cache.mutex};
-        texture_cache.UnmapMemory(addr, size);
-    }
-    {
-        RunBufferCacheCpuWrite(addr, size, false, true);
-    }
-    pipeline_cache.OnCacheInvalidation(addr, size);
+    gpu.RunOnGpuThread([this, addr, size] {
+        // Publish completed CPU writes before any unmap readback. Their exact ranges
+        // must be removed from GPU dirty intervals even when notifications were deferred.
+        gpu.InvalidateGPUCache();
+        {
+            std::scoped_lock lock{texture_cache.mutex};
+            texture_cache.UnmapMemory(addr, size);
+        }
+        {
+            RunBufferCacheCpuWrite(addr, size, false, true);
+        }
+        pipeline_cache.OnCacheInvalidation(addr, size);
+    });
 }
 
 void RasterizerVulkan::ModifyGPUMemory(size_t as_id, GPUVAddr addr, u64 size) {

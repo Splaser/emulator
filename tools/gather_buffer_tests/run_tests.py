@@ -37,6 +37,8 @@ head = r'''
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#define LOG_INFO(...) ((void)0)
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -343,6 +345,8 @@ struct BufferCache {
     bool CpuWriteNeedsGpuThread(u64, u64) const;
     std::vector<u64> scatter_pending, pending_gather_writes;
     bool scatter_busy = false;
+    u64 unmap_readback_count{}, unmap_readback_bytes{}, unmap_readback_time_ns{};
+    u64 cpu_write_preserve_count{}, cpu_write_preserve_time_ns{};
     u64 scatter_skip = 0;
     struct ContiguityKey {
         u64 gpu_addr;
@@ -385,6 +389,14 @@ struct BufferCache {
         }
     }
     void DownloadMemory(u64, u64) { runtime.Finish(); }
+    void DownloadBufferMemory(Buffer& buffer, u64 d, u64 n, bool = false) {
+        for (u64 i = 0; i < n; ++i) {
+            if (memory_tracker.gpu.contains(d + i) && !memory_tracker.cpu.contains(d + i)) {
+                ram[d + i] = buffer.bytes[buffer.Offset(d + i)];
+                memory_tracker.gpu.erase(d + i);
+            }
+        }
+    }
     void MarkWrittenBuffer(BufferId, u64 d, u64 n) {
         NotifyGatherWrite(d, n);
         memory_tracker.MarkRegionAsGpuModified(d, n);
