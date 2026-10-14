@@ -21,6 +21,7 @@
 #include "common/logging.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
+#include "video_core/acknowledged_callback.h"
 #include "video_core/arm64_register_guard.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/control/channel_state.h"
@@ -999,6 +1000,14 @@ VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64
 
 bool RasterizerVulkan::RunBufferCacheCpuWrite(DAddr addr, u64 size, bool check_gpu_writes,
                                              bool unmap) {
+    if ((check_gpu_writes || unmap) && !Settings::IsNceEnabled()) {
+        // Legacy callers still use only the deferred-dirty bit. Transactions
+        // must consume the optional result directly and reject nullopt.
+        return TryRunBufferCacheCpuWrite(addr, size, check_gpu_writes, unmap).value_or(false);
+    }
+    // NCE alignment emulation also calls Memory::WriteBlock in signal context.
+    // Keep all NCE and default invalidation on their historical dispatch path;
+    // the acknowledged path is not a signal-safe native access mechanism.
     std::unique_lock lock{buffer_cache.mutex};
     // Check while holding the cache lock: an import cannot race a CPU-side write
     // between the decision and execution. Never wait for the GPU with this lock held.
@@ -1017,6 +1026,41 @@ bool RasterizerVulkan::RunBufferCacheCpuWrite(DAddr addr, u64 size, bool check_g
                 buffer_cache.WriteMemory(addr, size);
             }
         });
+        return result->load();
+    }
+    if (unmap) { buffer_cache.InvalidateGatherMemory(addr, size); }
+    if (check_gpu_writes) {
+        return buffer_cache.OnCPUWrite(addr, size);
+    }
+    buffer_cache.WriteMemory(addr, size);
+    return false;
+}
+
+std::optional<bool> RasterizerVulkan::TryRunBufferCacheCpuWrite(DAddr addr, u64 size,
+                                                             bool check_gpu_writes, bool unmap) {
+    std::unique_lock lock{buffer_cache.mutex};
+    // Check while holding the cache lock: an import cannot race a CPU-side write
+    // between the decision and execution. Never wait for the GPU with this lock held.
+    // Unmap also downloads ordinary staged GPU writes before CPU dirtying.
+    if (!gpu.IsGpuThread() &&
+        (buffer_cache.CpuWriteNeedsGpuThread(addr, size) ||
+         ((unmap || check_gpu_writes) && buffer_cache.IsRegionGpuModified(addr, size)))) {
+        lock.unlock();
+        const auto result = std::make_shared<std::atomic<bool>>(false);
+        const auto outcome = VideoCommon::RunAcknowledgedCallback(
+            [this](std::function<void()> callback) { gpu.RunOnGpuThread(std::move(callback)); },
+            [this, addr, size, check_gpu_writes, unmap, result] {
+                std::scoped_lock gpu_lock{buffer_cache.mutex};
+                if (unmap) { buffer_cache.InvalidateGatherMemory(addr, size); }
+                if (check_gpu_writes) {
+                    result->store(buffer_cache.OnCPUWrite(addr, size));
+                } else {
+                    buffer_cache.WriteMemory(addr, size);
+                }
+            });
+        if (outcome != VideoCommon::CallbackOutcome::Completed) {
+            return std::nullopt;
+        }
         return result->load();
     }
     if (unmap) { buffer_cache.InvalidateGatherMemory(addr, size); }

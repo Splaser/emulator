@@ -155,6 +155,11 @@ public:
 private:
     bool RunBufferCacheCpuWrite(DAddr addr, u64 size, bool check_gpu_writes = false,
                                 bool unmap = false);
+    // nullopt means preservation was not confirmed. The contained bool retains
+    // the legacy deferred-dirty decision; false is a successful clean result.
+    // Normal host context only; do not call from an NCE signal handler.
+    std::optional<bool> TryRunBufferCacheCpuWrite(DAddr addr, u64 size, bool check_gpu_writes,
+                                                bool unmap);
     static constexpr size_t MAX_TEXTURES = 192;
     static constexpr size_t MAX_IMAGES = 48;
     static constexpr size_t MAX_IMAGE_VIEWS = MAX_TEXTURES + MAX_IMAGES;

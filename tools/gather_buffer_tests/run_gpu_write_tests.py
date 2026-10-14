@@ -22,6 +22,8 @@ def extract(path, marker):
 dispatch = extract('src/video_core/gpu_thread.cpp', 'void ThreadManager::RunOnGpuThread(')
 write = extract('src/video_core/renderer_vulkan/vk_rasterizer.cpp',
                 'bool RasterizerVulkan::RunBufferCacheCpuWrite(')
+write += extract('src/video_core/renderer_vulkan/vk_rasterizer.cpp',
+                 'std::optional<bool> RasterizerVulkan::TryRunBufferCacheCpuWrite(')
 head = r'''
 #include <atomic>
 #include <cassert>
@@ -29,7 +31,13 @@ head = r'''
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
+#include "video_core/acknowledged_callback.h"
+namespace Settings {
+inline bool nce_enabled=false;
+inline bool IsNceEnabled() { return nce_enabled; }
+}
 using DAddr = unsigned long long;
 using u64 = unsigned long long;
 struct ExecuteCallbackCommand { std::function<void()> callback; };
@@ -85,6 +93,7 @@ struct RasterizerVulkan {
     ThreadManager gpu;
     Cache buffer_cache{std::mutex{}, gpu};
     bool RunBufferCacheCpuWrite(DAddr, u64, bool = false, bool = false);
+    std::optional<bool> TryRunBufferCacheCpuWrite(DAddr, u64, bool, bool);
 };
 '''
 tail = r'''
@@ -115,9 +124,14 @@ int main() {
     rasterizer.buffer_cache.pending_scatter = true;
     rasterizer.RunBufferCacheCpuWrite(1000, 4, false, true);
     assert(rasterizer.gpu.queued == 6 && rasterizer.buffer_cache.writes == 6);
+    RasterizerVulkan clean;
+    clean.buffer_cache.shared=false;
+    const auto preserved=clean.TryRunBufferCacheCpuWrite(1000,4,true,false);
+    assert(preserved.has_value() && !*preserved); // successful false != cancellation
     rasterizer.buffer_cache.shared = true;
     rasterizer.buffer_cache.pending_scatter = false;
     rasterizer.gpu.thread.stopped = true;
+    assert(!rasterizer.TryRunBufferCacheCpuWrite(1000,4,true,false).has_value());
     rasterizer.RunBufferCacheCpuWrite(1000, 4);
     assert(rasterizer.gpu.queued == 6 && rasterizer.buffer_cache.writes == 6);
     std::cout << "PASS CPU writes: GPU-thread waits, unlocked cache dispatch, synchronous results, "
@@ -127,6 +141,6 @@ int main() {
 cpp = out / 'gpu_write_tests.cpp'
 cpp.write_text(head + dispatch + write + tail, encoding='utf-8')
 exe = out / ('gpu_write_tests.exe' if os.name == 'nt' else 'gpu_write_tests')
-subprocess.run([args.cxx, '-std=c++23', '-O0', '-Wall', '-Wextra', '-pthread',
+subprocess.run([args.cxx, '-std=c++23', '-O0', '-Wall', '-Wextra', '-pthread', '-I', str(root / 'src'),
                 str(cpp), '-o', str(exe)], check=True)
 subprocess.run([str(exe)], check=True, timeout=20)

@@ -26,7 +26,7 @@ def extract(path, marker, template=False):
 
 fixture = Path(__file__).with_name('run_tests.py')
 head = literal(fixture, 'head')
-head = '#include <thread>\n#include <cassert>\n' + head
+head = '#include <thread>\n#include <cassert>\n#include "video_core/acknowledged_callback.h"\n' + head
 head = head.replace('void WriteMemory(u64, u64);',
                     'void WriteMemory(u64, u64);\n    bool OnCPUWrite(u64, u64);')
 head = head.replace('int copies = 0;',
@@ -44,10 +44,13 @@ body += thread + extract(root / 'src/video_core/gpu_thread.cpp', 'void ThreadMan
 body += '''struct RasterizerVulkan {
  ThreadManager gpu; BufferCache<int>& buffer_cache;
  bool RunBufferCacheCpuWrite(DAddr,u64,bool=false,bool=false);
+ std::optional<bool> TryRunBufferCacheCpuWrite(DAddr,u64,bool,bool);
 };
 '''
 body += extract(root / 'src/video_core/renderer_vulkan/vk_rasterizer.cpp',
                 'bool RasterizerVulkan::RunBufferCacheCpuWrite(')
+body += extract(root / 'src/video_core/renderer_vulkan/vk_rasterizer.cpp',
+                'std::optional<bool> RasterizerVulkan::TryRunBufferCacheCpuWrite(')
 tail = r'''
 int main() {
  Memory m; m.pages={{64,1008},{68,1004},{72,1000}};

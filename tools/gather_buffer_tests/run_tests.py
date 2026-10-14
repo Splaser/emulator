@@ -114,6 +114,8 @@ namespace Common {
 struct GuestBackingRange { int fd; u64 offset, allocation_size; };
 }
 namespace Settings {
+inline bool nce_enabled = false;
+inline bool IsNceEnabled() { return nce_enabled; }
 struct Flag { bool enabled = false; bool GetValue() const { return enabled; } };
 struct Values { Flag use_uma_zero_copy; };
 inline Values values;
