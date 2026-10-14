@@ -10,7 +10,9 @@
 #include <bit>
 #include <cstring>
 #include <mutex>
+#include <new>
 #include <span>
+#include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -345,26 +347,39 @@ struct Memory::Impl {
 
     bool CopyBlock(Common::ProcessAddress dest_addr, Common::ProcessAddress src_addr,
                    const std::size_t size) {
-        return WalkBlock(
-            dest_addr, size,
-            [&](const std::size_t copy_amount, const Common::ProcessAddress current_vaddr) {
-                LOG_ERROR(HW_Memory,
-                          "Unmapped CopyBlock @ 0x{:016X} (start address = 0x{:016X}, size = {})",
-                          GetInteger(current_vaddr), GetInteger(src_addr), size);
-                ZeroBlock(dest_addr, copy_amount);
-            },
-            [&](const std::size_t copy_amount, const u8* const src_ptr) {
-                WriteBlockImpl<false>(dest_addr, src_ptr, copy_amount);
-            },
-            [&](const Common::ProcessAddress current_vaddr, const std::size_t copy_amount,
-                u8* const host_ptr) {
-                HandleRasterizerDownload(GetInteger(current_vaddr), copy_amount);
-                WriteBlockImpl<false>(dest_addr, host_ptr, copy_amount);
-            },
-            [&](const std::size_t copy_amount) {
-                dest_addr += copy_amount;
-                src_addr += copy_amount;
-            });
+        if (size == 0) {
+            return true;
+        }
+        if (!AddressSpaceContains(*current_page_table, src_addr, size) ||
+            !AddressSpaceContains(*current_page_table, dest_addr, size)) {
+            return false;
+        }
+        // Reject known destination holes before copying anything. This is a
+        // preflight, not a mapping pin: callers must still keep mappings stable.
+        bool destination_mapped = WalkBlock(
+            dest_addr, size, [](std::size_t, Common::ProcessAddress) {},
+            [](std::size_t, u8*) {}, [](Common::ProcessAddress, std::size_t, u8*) {},
+            [](std::size_t) {});
+        if (!destination_mapped) {
+            return false;
+        }
+        // Snapshot the entire logical source before the first destination write.
+        // Virtual disjointness does not imply physical disjointness, including
+        // aliases between different chunks. Per-chunk memmove is insufficient.
+        std::vector<u8> source;
+        try {
+            source.resize(size);
+        } catch (const std::bad_alloc&) {
+            return false;
+        } catch (const std::length_error&) {
+            return false;
+        }
+        if (!ReadBlockImpl<false>(src_addr, source.data(), size)) {
+            return false;
+        }
+        // Preserve WriteBlock's failure indication. An exception from a later
+        // preservation callback propagates; it must not become copy success.
+        return WriteBlockImpl<false>(dest_addr, source.data(), size);
     }
 
     template <typename Callback>

@@ -417,8 +417,14 @@ public:
      * @param src_addr  The source virtual address to begin copying the data from.
      * @param size      The size of the data to copy, in bytes.
      *
-     * @post The range [dest_addr, size) within the process' address space contains the
-     *       same data within the range [src_addr, size).
+     * The source is fully snapshotted before writing the destination, including
+     * physical overlap through different virtual aliases. Callers must keep
+     * mappings stable; this is not an atomic CPU/GPU access transaction.
+     *
+     * @return True only if all reads and writes succeeded. Known mapping holes
+     *         and snapshot allocation failure are rejected before destination
+     *         writes. A later failure/remap or exception may leave a completed
+     *         destination prefix; false does not promise rollback.
      */
     bool CopyBlock(Common::ProcessAddress dest_addr, Common::ProcessAddress src_addr,
                    std::size_t size);
