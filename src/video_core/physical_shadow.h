@@ -25,6 +25,8 @@ struct ShadowCoverage {
     u64 observations{}, write_intents{}, registered_writes{}, unresolved{};
     u64 bytes{}, max_range{}, registered_segments{}, split_observations{};
     std::array<u64, 8> size_buckets{};
+    u64 sampled_out{}, sampled_out_writes{}, deduplicated{}, deduplicated_writes{};
+    u64 inspections{}, registrations{}, unresolved_writes{};
 };
 // Fixed log2 histogram. Percentiles are bucket upper bounds, not exact samples.
 struct ShadowLatency {
@@ -66,6 +68,10 @@ struct ShadowCounters {
     u64 gpu_lock_wait_ns{}, device_lock_wait_ns{}, walk_ns{};
     u64 validation_lock_wait_ns{}, provenance_walk_ns{};
     ShadowLatency resolve_latency, lock_latency, walk_latency, dispatch_latency;
+    u64 sampling_period{}, sampled_dispatches{}, skipped_dispatches{};
+    u64 outside_observations{}, outside_sampled{}, outside_sampled_out{};
+    u64 lookup_hint_hits{}, lookup_fallbacks{}, geometry_comparisons{}, device_span_steps{};
+    u64 timed_observations{};
 };
 
 // GPU-thread confined. Bounded metadata; contains no backing allocation, driver
@@ -76,13 +82,19 @@ public:
     static constexpr size_t Capacity = 128;
     static constexpr u64 MaxRange = 64ULL << 20;
     static constexpr size_t MaxSegments = 256;
+    static constexpr u64 SamplingPeriod = 64;
 
-    PhysicalShadow() {
+    // Period=1 is useful for isolated exact-coverage tests; renderer uses 64.
+    explicit PhysicalShadow(u64 period = SamplingPeriod)
+        : sampling_period{std::max<u64>(1, period)} {
+        counters.sampling_period = sampling_period;
         TrackMetadata();
     }
 
     void BeginDispatch() noexcept {
         in_dispatch = true;
+        dispatch_operation = ++operation;
+        dispatch_sampled = Select(++dispatch_sequence, 0x9e3779b97f4a7c15ULL);
         dispatch_query_ns = dispatch_queries = 0;
         dispatch_observer_ns = 0;
     }
@@ -91,12 +103,16 @@ public:
             return;
         }
         ++counters.dispatches;
+        counters.sampled_dispatches += dispatch_sampled;
+        counters.skipped_dispatches += !dispatch_sampled;
         counters.max_dispatch_query_ns =
             std::max(counters.max_dispatch_query_ns, dispatch_query_ns);
         counters.max_dispatch_queries = std::max(counters.max_dispatch_queries, dispatch_queries);
         counters.max_dispatch_observer_ns =
             std::max(counters.max_dispatch_observer_ns, dispatch_observer_ns);
-        counters.dispatch_latency.Add(dispatch_observer_ns);
+        // Don't dilute selected-operation quantiles with skipped zero samples.
+        if (dispatch_sampled)
+            counters.dispatch_latency.Add(dispatch_observer_ns);
         in_dispatch = false;
     }
     const ShadowCounters& Counters() const noexcept {
@@ -106,6 +122,28 @@ public:
     template <class Memory>
     void Observe(Memory& memory, GPUVAddr address, u64 size, ShadowKind kind, bool writable,
                  std::optional<DAddr> expected_device = {}) noexcept {
+        auto& coverage = counters.coverage[static_cast<size_t>(kind)];
+        ++coverage.observations;
+        coverage.write_intents += writable;
+        coverage.bytes += size;
+        coverage.max_range = std::max(coverage.max_range, size);
+        constexpr std::array<u64, 7> limits{64, 1024, 16384, 65536, 262144, 1048576, 16777216};
+        ++coverage.size_buckets[std::ranges::upper_bound(limits, size) - limits.begin()];
+        const u64 current_operation = in_dispatch ? dispatch_operation : ++operation;
+        const bool selected =
+            in_dispatch ? dispatch_sampled : Select(++outside_sequence, 0xd1b54a32d192ed03ULL);
+        if (!in_dispatch) {
+            ++counters.outside_observations;
+            counters.outside_sampled += selected;
+            counters.outside_sampled_out += !selected;
+        }
+        if (!selected) {
+            ++coverage.sampled_out;
+            coverage.sampled_out_writes += writable;
+            return; // No clock, cache lookup, mapping lock or resolver on skipped inputs.
+        }
+        ++coverage.inspections;
+        ++counters.timed_observations;
         struct Measure {
             PhysicalShadow& shadow;
             Clock::time_point start{Clock::now()};
@@ -117,29 +155,25 @@ public:
                 }
             }
         } measure{*this};
-        auto& coverage = counters.coverage[static_cast<size_t>(kind)];
-        ++coverage.observations;
-        coverage.write_intents += writable;
-        coverage.bytes += size;
-        coverage.max_range = std::max(coverage.max_range, size);
-        constexpr std::array<u64, 7> limits{64, 1024, 16384, 65536, 262144, 1048576, 16777216};
-        ++coverage.size_buckets[std::ranges::upper_bound(limits, size) - limits.begin()];
         try {
+            const size_t hint = Hint(memory.GetID(), address, size, kind);
+            auto* cache_slot = Find(memory.GetID(), address, size, kind, hint);
+            Entry* entry = cache_slot ? &**cache_slot : nullptr;
+            if (entry && entry->registered && entry->last_operation == current_operation &&
+                entry->last_writable == writable &&
+                entry->last_expected_device == expected_device &&
+                UnchangedForSkip(entry->physical.stamp)) {
+                // Skip only: no paired-lock validation or new physical registration.
+                --coverage.inspections;
+                ++coverage.deduplicated;
+                coverage.deduplicated_writes += writable;
+                return;
+            }
             if (!address || !size || size > MaxRange) {
                 ++counters.budget_drops;
                 ++coverage.unresolved;
+                coverage.unresolved_writes += writable;
                 return;
-            }
-            Entry* entry = nullptr;
-            std::optional<Entry>* cache_slot = nullptr;
-            for (auto& candidate : entries) {
-                if (candidate && candidate->manager == memory.GetID() &&
-                    candidate->address == address && candidate->size == size &&
-                    candidate->kind == kind) {
-                    entry = &*candidate;
-                    cache_slot = &candidate;
-                    break;
-                }
             }
             if (entry) {
                 const auto start = Clock::now();
@@ -172,11 +206,13 @@ public:
                                         [](const auto& s) { return !s.physical; })) {
                     ++counters.holes;
                     ++coverage.unresolved;
+                    coverage.unresolved_writes += writable;
                     return;
                 }
                 if (physical.segments.size() > MaxSegments) {
                     ++counters.budget_drops;
                     ++coverage.unresolved;
+                    coverage.unresolved_writes += writable;
                     return;
                 }
                 Entry next{memory.GetID(), address, size, std::move(physical), {}, kind};
@@ -191,11 +227,13 @@ public:
                 if (!captured) {
                     ++counters.snapshot_invalidations;
                     ++coverage.unresolved;
+                    coverage.unresolved_writes += writable;
                     return;
                 }
                 if (next.device.size() > MaxSegments) {
                     ++counters.budget_drops;
                     ++coverage.unresolved;
+                    coverage.unresolved_writes += writable;
                     return;
                 }
                 // Replace stale geometry in place. Retaining an older same-key
@@ -204,7 +242,11 @@ public:
                 counters.evictions += !cache_slot && slot.has_value();
                 counters.active_entries += !slot.has_value();
                 counters.peak_entries = std::max(counters.peak_entries, counters.active_entries);
+                if (slot)
+                    retained_bytes -= Payload(*slot);
                 slot = std::move(next);
+                retained_bytes += Payload(*slot);
+                hints[hint] = static_cast<u16>(&slot - entries.data() + 1);
                 entry = &*slot;
                 TrackMetadata();
             }
@@ -215,14 +257,19 @@ public:
                 (entry->device.size() != 1 || entry->device.front().address != *expected_device)) {
                 ++counters.provenance_mismatches;
                 ++coverage.unresolved;
+                coverage.unresolved_writes += writable;
                 entry->registered = false;
                 return;
             }
             coverage.registered_writes += writable;
+            ++coverage.registrations;
             coverage.registered_segments += entry->physical.segments.size();
             coverage.split_observations += entry->physical.segments.size() > 1;
             entry->registered = true;
             entry->writable_seen |= writable;
+            entry->last_operation = current_operation;
+            entry->last_writable = writable;
+            entry->last_expected_device = expected_device;
             ++counters.registered_observations;
             Compare(*entry);
             SampleCardinality(*entry);
@@ -230,6 +277,7 @@ public:
             // Diagnostics must not reject work or alter emulation on OOM/error.
             ++counters.errors;
             ++coverage.unresolved;
+            coverage.unresolved_writes += writable;
         }
     }
 
@@ -246,7 +294,61 @@ private:
         ShadowKind kind{};
         bool registered{};
         bool writable_seen{};
+        u64 last_operation{};
+        bool last_writable{};
+        std::optional<DAddr> last_expected_device;
     };
+    static u64 Mix(u64 x) noexcept {
+        x ^= x >> 30;
+        x *= 0xbf58476d1ce4e5b9ULL;
+        x ^= x >> 27;
+        x *= 0x94d049bb133111ebULL;
+        return x ^ (x >> 31);
+    }
+    static bool UnchangedForSkip(const Tegra::MappingStamp& stamp) noexcept {
+        // Cheap historical hint, NOT a coherent mapping snapshot. A remap after
+        // these loads may make the skipped event unknown; it never authorizes work.
+        return stamp.gpu_address_space->alive.load(std::memory_order_acquire) &&
+               stamp.device_address_space->alive.load(std::memory_order_acquire) &&
+               stamp.backing->alive.load(std::memory_order_acquire) &&
+               stamp.gpu_address_space->generation.load(std::memory_order_acquire) ==
+                   stamp.gpu_mapping_generation &&
+               stamp.device_address_space->generation.load(std::memory_order_acquire) ==
+                   stamp.device_mapping_generation;
+    }
+    bool Select(u64 sequence, u64 salt) const noexcept {
+        // First event is always inspected; hashed sequences avoid a fixed every-N
+        // phase locking to a particular render pass. Deterministic, not unbiased inference.
+        return sequence == 1 || Mix(sequence ^ salt) % sampling_period == 0;
+    }
+    static size_t Hint(size_t manager, u64 address, u64 size, ShadowKind kind) noexcept {
+        return Mix(manager ^ std::rotl(address, 13) ^ std::rotl(size, 31) ^
+                   static_cast<u64>(kind)) &
+               255;
+    }
+    std::optional<Entry>* Find(size_t manager, u64 address, u64 size, ShadowKind kind,
+                               size_t hint) noexcept {
+        const auto matches = [&](const auto& candidate) {
+            return candidate && candidate->manager == manager && candidate->address == address &&
+                   candidate->size == size && candidate->kind == kind;
+        };
+        if (hints[hint] && matches(entries[hints[hint] - 1])) {
+            ++counters.lookup_hint_hits;
+            return &entries[hints[hint] - 1];
+        }
+        ++counters.lookup_fallbacks;
+        for (size_t i = 0; i < entries.size(); ++i) {
+            if (matches(entries[i])) {
+                hints[hint] = static_cast<u16>(i + 1);
+                return &entries[i];
+            }
+        }
+        return nullptr;
+    }
+    static u64 Payload(const Entry& entry) noexcept {
+        return entry.physical.segments.capacity() * sizeof(Tegra::PhysicalSegment) +
+               entry.device.capacity() * sizeof(DeviceRange);
+    }
     static u64 NsSince(Clock::time_point start) {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
     }
@@ -330,6 +432,14 @@ private:
         }
         return 0;
     }
+    static DeviceRange DeviceSpanAt(const Entry& entry, u64 logical) {
+        for (const auto& range : entry.device) {
+            if (logical >= range.logical && logical - range.logical < range.length)
+                return {logical, range.address + logical - range.logical,
+                        range.length - (logical - range.logical)};
+        }
+        return {}; // Budget loss instead of inferring absent provenance equals address zero.
+    }
     void Compare(const Entry& current) {
         size_t comparisons = 0;
         bool any_alias = false;
@@ -344,6 +454,7 @@ private:
                         ++counters.comparison_drops;
                         return;
                     }
+                    ++counters.geometry_comparisons;
                     if (Tegra::PhysicalRangesOverlap(*a.physical, *b.physical)) {
                         alias = true;
                         any_alias = true;
@@ -360,12 +471,18 @@ private:
                                 a.logical_offset + physical - a.physical->physical_offset;
                             const u64 logical_b =
                                 b.logical_offset + physical - b.physical->physical_offset;
-                            different_device |=
-                                DeviceAt(current, logical_a) != DeviceAt(*old, logical_b);
-                            // Device ranges change only at 4 KiB guest page boundaries.
-                            physical += std::min({end - physical,
-                                                  4096 - (current.address + logical_a) % 4096,
-                                                  4096 - (old->address + logical_b) % 4096});
+                            const auto device_a = DeviceSpanAt(current, logical_a);
+                            const auto device_b = DeviceSpanAt(*old, logical_b);
+                            ++counters.device_span_steps;
+                            if (!device_a.length || !device_b.length) {
+                                ++counters.comparison_drops;
+                                return;
+                            }
+                            different_device |= device_a.address != device_b.address;
+                            // Equal linear DAddr translations remain equal throughout
+                            // both captured spans. Check every span boundary, not every page.
+                            physical +=
+                                std::min({end - physical, device_a.length, device_b.length});
                         }
                     }
                 }
@@ -381,12 +498,7 @@ private:
         counters.alias_observations += any_alias;
     }
     void TrackMetadata(u64 transient = 0) noexcept {
-        u64 bytes = sizeof(*this);
-        for (const auto& entry : entries) {
-            if (entry)
-                bytes += entry->physical.segments.capacity() * sizeof(Tegra::PhysicalSegment) +
-                         entry->device.capacity() * sizeof(DeviceRange);
-        }
+        const u64 bytes = sizeof(*this) + retained_bytes;
         counters.metadata_bytes = bytes;
         counters.peak_metadata_bytes = std::max(counters.peak_metadata_bytes, bytes + transient);
     }
@@ -510,8 +622,12 @@ private:
         }
     }
     std::array<std::optional<Entry>, Capacity> entries;
+    std::array<u16, 256> hints{}; // Collision/eviction hints always verify the complete key.
     size_t cursor{};
     bool in_dispatch{};
+    bool dispatch_sampled{};
+    u64 sampling_period{}, operation{}, dispatch_operation{}, dispatch_sequence{},
+        outside_sequence{}, retained_bytes{};
     u64 dispatch_query_ns{}, dispatch_queries{}, dispatch_observer_ns{};
     ShadowCounters counters;
 };

@@ -261,12 +261,17 @@ void RasterizerVulkan::ReportPhysicalShadow() noexcept {
     }
     try {
         const auto& s = physical_shadow->Counters();
+        u64 skipped_observations = 0;
+        for (const auto& coverage : s.coverage) {
+            skipped_observations += coverage.sampled_out + coverage.deduplicated;
+        }
         LOG_INFO(Render_Vulkan,
-                 "Physical shadow coverage=unknown uninstrumented=cpu_nce_raw,query,dma_inline,"
+                 "Physical shadow coverage=unknown measurement=sampled "
+                 "uninstrumented=cpu_nce_raw,query,dma_inline,"
                  "upload,internal_texture_copy_scale,vertex_index_indirect_reads "
                  "alias_window=historical sampling_loss={} ",
                  s.errors + s.holes + s.budget_drops + s.provenance_mismatches +
-                     s.comparison_drops + s.cardinality_drops + s.evictions);
+                     s.comparison_drops + s.cardinality_drops + s.evictions + skipped_observations);
         LOG_INFO(Render_Vulkan,
                  "Physical shadow: dispatches={} queries={} query_ns={} max_dispatch_query_ns={} "
                  "observer_ns={} max_dispatch_observer_ns={} validation_ns={} hits={} cache_invalidations={} "
@@ -315,13 +320,26 @@ void RasterizerVulkan::ReportPhysicalShadow() noexcept {
                      "Physical shadow coverage: kind={} observations={} write_intents={} "
                      "registered_writes={} unregistered_write_intents={} unresolved={} "
                      "bytes={} max_range={} segments={} split_observations={} "
-                     "size_buckets=[{},{},{},{},{},{},{},{}]",
+                     "size_buckets=[{},{},{},{},{},{},{},{}] sampled_out={} sampled_out_writes={} "
+                     "deduplicated={} deduplicated_writes={} inspections={} registrations={} "
+                     "unresolved_writes={}",
                      names[i], c.observations, c.write_intents, c.registered_writes,
                      c.write_intents - c.registered_writes, c.unresolved, c.bytes, c.max_range,
                      c.registered_segments, c.split_observations, c.size_buckets[0], c.size_buckets[1],
                      c.size_buckets[2], c.size_buckets[3], c.size_buckets[4], c.size_buckets[5],
-                     c.size_buckets[6], c.size_buckets[7]);
+                     c.size_buckets[6], c.size_buckets[7], c.sampled_out, c.sampled_out_writes,
+                     c.deduplicated, c.deduplicated_writes, c.inspections, c.registrations,
+                     c.unresolved_writes);
         }
+        LOG_INFO(Render_Vulkan,
+                 "Physical shadow sampling: period={} sampled_dispatches={} skipped_dispatches={} "
+                 "outside_observations={} outside_sampled={} outside_sampled_out={} "
+                 "timed_observations={} observer_scope=selected_body_excludes_input_counters_and_gating "
+                 "dispatch_quantiles=sampled_preparations alias_denominator=registered_observations "
+                 "lookup_hint_hits={} lookup_fallbacks={} geometry_comparisons={} device_span_steps={}",
+                 s.sampling_period, s.sampled_dispatches, s.skipped_dispatches, s.outside_observations,
+                 s.outside_sampled, s.outside_sampled_out, s.timed_observations, s.lookup_hint_hits,
+                 s.lookup_fallbacks, s.geometry_comparisons, s.device_span_steps);
     } catch (...) {
         // Logging/allocation failures in diagnostics must never stop the guest.
     }

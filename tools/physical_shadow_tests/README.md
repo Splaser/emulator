@@ -1,5 +1,10 @@
 # M1: observation-only physical shadow registration
 
+**Current policy:** M1.1 defaults to sampled observations (approximately 1/64
+operations), exact within-operation dedup and span comparison. See [M11.md](M11.md)
+for skip/writer accounting, timing scopes, denominators and validation. Producer
+definitions/hooks below remain unchanged; this is never full producer coverage.
+
 Baseline: M0 `3c1aae0f0f`. This is a bounded **historical range observation**
 window, not a live producer registry or Physical Coherency Coordinator. Enabling
 it does not fix alias bugs, authorize dispatch, select a fallback, add data
@@ -26,7 +31,7 @@ Metrics:
 | --- | --- |
 | `queries`, `query_ns` | Resolver attempts and elapsed time including lock contention/errors |
 | `max_dispatch_queries`, `max_dispatch_query_ns` | Largest query count and aggregate resolver time in one preparation |
-| `observer_ns`, `max_dispatch_observer_ns` | All Observe calls including lookup, provenance walk, validation and geometry comparison; excludes visitor iteration/logging |
+| `observer_ns`, `max_dispatch_observer_ns` | Selected Observe bodies including lookup/dedup, provenance/validation/geometry; excludes input counters, sampling gate, skipped inputs and visitor/logging |
 | `validation_ns` | Cache validation plus fresh DAddr provenance capture time |
 | `hits`, `cache_invalidations` | Valid cached stamp reuse versus stale stamp; invalidation rate = invalidations / (hits + invalidations) |
 | `snapshot_invalidations` | Fresh resolve became invalid before paired-lock provenance capture; denominator is queries |
@@ -44,6 +49,8 @@ Metrics:
 | `entries/peak_entries`, `metadata_bytes/peak_metadata_bytes` | Current/peak entry count; object+retained vector capacity plus observed overlapping query/provenance temporary payload, not RSS/allocator or in-flight reallocation peak |
 | `holes`, `provenance_mismatches` | Failed/hole-containing physical resolution; cached resource DAddr inconsistent with current GPU translation |
 | `budget_drops`, `comparison_drops`, `evictions`, `errors` | Sampling/coverage loss; these must accompany any interpretation of alias counts |
+| `sampled_out/deduplicated`, writer variants, `inspections/registrations` | Same input coverage definitions; skipped events are explicit unregistered/unknown subsets, not successful physical registrations |
+| `sampled_dispatches/skipped_dispatches`, outside selected/skipped | Preparation/event sampling denominators; histogram quantiles only include selected preparations |
 
 An entire range must resolve before registration. Hole-containing ranges are
 unresolved even if some segments resolve. No partial producer registration.
