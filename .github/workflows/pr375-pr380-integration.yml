@@ -1,0 +1,117 @@
+name: PR 375 and 380 integration validation
+
+on:
+  push:
+    branches: [codex/pr375-pr380-integration]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr375-pr380-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      NDK_VERSION: 29.0.14206865
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install cross-build host tools and NDK
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ninja-build autoconf automake libtool pkg-config nasm glslang-tools
+          sdkmanager "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Configure arm64 production libraries through CPM
+        run: |
+          cmake -S . -B build-android-integration -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-30 -DANDROID_STL=c++_shared \
+            -DCMAKE_BUILD_TYPE=Release -DCITRON_USE_CPM=ON -DCITRON_USE_BUNDLED_VCPKG=OFF \
+            -DENABLE_QT=OFF -DENABLE_SDL2=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_LIBUSB=OFF \
+            -DCITRON_ROOM=OFF -DCITRON_TESTS=OFF -DCITRON_USE_BUNDLED_FFMPEG=ON \
+            -DCITRON_ENABLE_LTO=OFF -DCITRON_USE_PRECOMPILED_HEADERS=OFF
+      - name: Compile real NCE, HostMemory, Vulkan and shader libraries
+        run: cmake --build build-android-integration --target core video_core shader_recompiler --parallel 3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr375-pr380-android-configure-${{ github.sha }}
+          path: build-android-integration/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn
+
+  linux-production:
+    runs-on: ubuntu-24.04
+    container: ghcr.io/pkgforge-dev/archlinux:latest
+    timeout-minutes: 120
+    steps:
+      - name: Install native build dependencies
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --needed --noconfirm git cmake ninja gcc python pkgconf \
+            boost boost-libs fmt nlohmann-json lz4 zstd zlib openssl opus ffmpeg \
+            enet sdl2 alsa-lib catch2 autoconf automake libtool
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Record exact build inputs
+        run: |
+          mkdir -p .diagnostics/pr375-pr380
+          git rev-parse HEAD | tee .diagnostics/pr375-pr380/source.txt
+          git submodule status > .diagnostics/pr375-pr380/submodules.txt
+          pacman -Q > .diagnostics/pr375-pr380/packages.txt
+      - name: Configure native production targets
+        run: |
+          cmake -S . -B build-integration -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCITRON_USE_CPM=OFF -DCITRON_USE_BUNDLED_VCPKG=OFF \
+            -DENABLE_QT=OFF -DENABLE_SDL2=ON -DCITRON_USE_EXTERNAL_SDL2=OFF \
+            -DENABLE_CUBEB=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_LIBUSB=OFF \
+            -DCITRON_ROOM=OFF -DCITRON_TESTS=ON -DCITRON_CRASH_DUMPS=OFF
+      - name: Build CLI, shader tool and unit tests
+        run: cmake --build build-integration --target citron-cmd shader_tool tests --parallel 3
+      - name: Run production unit tests
+        run: ctest --test-dir build-integration --output-on-failure --timeout 180
+      - name: Exercise real Linux HostMemory and backing import lifetime
+        run: |
+          python tools/lazy_backing_tests/run_tests.py
+          python tools/lazy_backing_tests/run_export_tests.py
+          python tools/chunk_import_tests/run_backing_tests.py
+          python tools/physical_resolver_tests/run_cold_tests.py
+      - name: Run coherency and lifecycle integration regressions
+        run: |
+          python tools/pr375_pr380_tests/run_tests.py
+          python tools/dma_snapshot_tests/run_tests.py
+          python tools/gather_buffer_tests/run_tests.py
+          python tools/gather_buffer_tests/run_binding_alias_tests.py
+          python tools/gather_buffer_tests/run_cpu_scatter_tests.py
+          python tools/gather_buffer_tests/run_gpu_stop_tests.py
+          python tools/gather_buffer_tests/run_gpu_write_tests.py
+          python tools/gather_buffer_tests/run_index_range_tests.py
+          python tools/gather_buffer_tests/run_mapping_snapshot_tests.py
+          python tools/gather_buffer_tests/run_unmap_alias_tests.py
+          python tools/gather_buffer_tests/run_vulkan_import_tests.py
+          python tools/physical_resolver_tests/run_tests.py
+          python tools/physical_shadow_tests/run_tests.py --fmt-include /usr/include
+          python tools/chunk_import_tests/run_tests.py
+          python tools/gpu_lifecycle_tests/run_tests.py
+          python tools/gpu_lifecycle_tests/run_thread_tests.py
+          python tools/gpu_lifecycle_tests/run_renderer_tests.py
+          python tools/gpu_lifecycle_tests/run_fence_tests.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr375-pr380-validation-${{ github.sha }}
+          path: |
+            .diagnostics/pr375-pr380/*.txt
+            build-integration/Testing/Temporary/LastTest.log
+            build-integration/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn

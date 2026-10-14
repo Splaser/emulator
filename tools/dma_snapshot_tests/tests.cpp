@@ -161,6 +161,7 @@ void fallback(MemoryManager& memory_manager, u64 source, u64 destination, u32 si
         u64 offset_in, offset_out;
         u32 line_length_in;
     } regs{source, destination, size};
+    const u32 length = size;
     struct Accelerate {
         bool completed;
         bool BufferCopy(u64, u64, u32) const {

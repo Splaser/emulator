@@ -40,9 +40,9 @@ Required invariants and checks:
 
 ## Other semantic gates
 
-- Upstream replaces the old NCE null-wrapper recovery with Core::Memory instruction emulation.
-  This differs from the separate host ARM64 register guards; document the adopted behavior and
-  retain the host guards. NCE signal behavior requires target validation.
+- Retain the exact old NCE null-wrapper recovery before upstream's new generic Core::Memory
+  instruction emulation. It is a separate compatibility path from the host ARM64 register
+  guards, which also remain. NCE signal behavior requires target validation.
 - `WriteBlockUnsafe` hole reporting is not a preservation transaction: do not interpret it as
   callback completion, immutable destination identity or complete physical publication.
 - Preserve GPU emulation, recording, fencing, pipeline and presentation shutdown boundaries.
@@ -54,4 +54,22 @@ Record compilation, focused regression results, source revisions and environment
 here after integration. A clean merge is only the first check; distinguish a real production
 build from extracted-source tests and from Linux/Android/device execution.
 
-Status: roadmap recorded before conflict resolution; integration and validation in progress.
+## Implemented integration boundaries
+
+- All seven textual conflicts reconciled in the order above.
+- HostMemory records file identity at lazy exported-fd publication, uses dynamically sized
+  optional slots, and scans past cold holes. Lookup uses `backing_mutex`, with lock order
+  `layout_mutex` then `backing_mutex`; chunk publication never acquires `layout_mutex`.
+- Lazy VMA merging is explicitly disabled (also checked inside `MergeMappings`); the upstream
+  eager supplied-fd path remains. This retains the lazy baseline's behavior and VMA pressure
+  limitation rather than claiming the new concurrent remapping contract is proved.
+- Final renderer WaitIdle takes `submit_mutex` only after all submission workers join. The
+  regression fixture verifies worker drains can acquire it and WaitIdle holds it.
+- Submission-tick, sparse registry/parser and the exact NCE recovery block have extracted-source
+  regression checks. These do not emulate hardware or prove the excluded fault/remap paths.
+- The integration workflow compiles real Linux CLI/shader/tests, runs Linux HostMemory and
+  existing coherency/lifecycle regressions, and cross-compiles real arm64 production libraries
+  with NDK r29 through CPM. It does not publish a release.
+
+Status: conflict resolution and Windows focused regressions completed; native CI compilation
+and Linux regression validation pending. F2 remains isolated on its original branch.

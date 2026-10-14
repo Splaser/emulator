@@ -151,7 +151,7 @@ struct FakeBuffer {
     u64 CpuAddr() const { return base; }
     void IncreaseStreamScore(int) {}
     int StreamScore() const { return 0; }
-    void MarkUsage(u64, u64) {}
+    void MarkUsage(u64, u64, u64) {}
 };
 struct Runtime {
     bool direct_enabled = false;

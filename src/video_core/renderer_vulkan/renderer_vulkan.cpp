@@ -166,7 +166,12 @@ void RendererVulkan::Shutdown() {
     scheduler.Shutdown(); // no recording/submission callbacks can run after this
     scheduler.RegisterOnSubmit({}); // safe only after the recording worker joined
     turbo_mode.reset(); // stop its separate device/worker before renderer resources
-    void(device.GetLogical().WaitIdle()); // all host submission sources are now stopped
+    {
+        // All producers are joined before taking the submission lock. Never hold it
+        // across worker drains, which may submit their final command buffers.
+        std::scoped_lock lock{scheduler.submit_mutex};
+        void(device.GetLogical().WaitIdle());
+    }
     scheduler.GetMasterSemaphore().Shutdown(); // no remaining completion-helper access
     is_shut_down = true;
 }

@@ -26,7 +26,7 @@ test=test.replace('/* PRODUCTION_FUNCTIONS */',body)
 test=test.replace('/* DEVICE_DECODE */',function(device,'PAddr GetPhysicalRawAddressFromDAddr(',inline=True))
 test=test.replace('/* DEVICE_SNAPSHOT */',function(device,'auto ReadPhysicalMappingSnapshot(',True,True))
 dma=(root/'src/video_core/engines/maxwell_dma.cpp').read_text()
-start=dma.index('if (!accelerate.BufferCopy(regs.offset_in, regs.offset_out, regs.line_length_in))')
+start=dma.index('if (!accelerate.BufferCopy(regs.offset_in, regs.offset_out, length))')
 brace=dma.index('{',start)
 depth=1
 end=brace+1

@@ -179,18 +179,33 @@ struct RendererVulkan {
     bool is_shut_down=false;
     RasterizerVulkan rasterizer;
     struct SchedulerSpy {
+        std::mutex submit_mutex;
         struct Master { void Shutdown() {order.push_back("completion_join");} } master;
         Master& GetMasterSemaphore() {return master;}
-        void WaitWorker() {order.push_back("recording");}
-        void Shutdown() {order.push_back("scheduler_join");}
+        void AssertCanSubmit() {
+            auto submit=std::async(std::launch::async,[&]{std::lock_guard lock{submit_mutex};});
+            Require(submit.wait_for(2s)==std::future_status::ready,"submit lock held over worker drain");
+            submit.get();
+        }
+        void WaitWorker() {AssertCanSubmit(); order.push_back("recording");}
+        void Shutdown() {AssertCanSubmit(); order.push_back("scheduler_join");}
         void RegisterOnSubmit(std::function<void()>) {order.push_back("detach_on_submit");}
     } scheduler;
     struct PresentSpy { void Shutdown() {order.push_back("presentation_join");} } present_manager;
     struct TurboSpy { void reset() {order.push_back("turbo_join");} } turbo_mode;
     struct DeviceSpy {
+        std::mutex* submit_mutex;
         DeviceSpy& GetLogical() {return *this;}
-        int WaitIdle() {order.push_back("device_idle"); return 0;}
-    } device;
+        int WaitIdle() {
+            auto probe=std::async(std::launch::async,[&]{
+                bool available=submit_mutex->try_lock();
+                if(available) submit_mutex->unlock();
+                return available;
+            });
+            Require(!probe.get(),"WaitIdle not protected by submit lock");
+            order.push_back("device_idle"); return 0;
+        }
+    } device{&scheduler.submit_mutex};
     struct Stats {int device_epoch{},backing_generation{},active_imports{},imported_logical_bytes{},cache_entries_released{};};
     struct Imports { void Close() {order.push_back("imports");} Stats GetStats() {return{};} };
     std::unique_ptr<Imports> chunk_import_diagnostics=std::make_unique<Imports>();

@@ -13,7 +13,7 @@
 #include "video_core/renderer_vulkan/vk_guest_chunk_import.h"
 
 constexpr int F_DUPFD_CLOEXEC = 1;
-struct stat {
+struct FakeStat {
     long long st_size;
 };
 bool fail_dup{}, fail_allocate{}, fail_bind{}, fail_create{}, dedicated{};
@@ -23,7 +23,7 @@ VkMemoryRequirements requirements{32ULL << 20, 4096, 3};
 std::set<int> fds{10}, driver_fds;
 int duplications{}, app_closes{}, allocations{}, next_fd = 100;
 std::vector<char> destruction;
-int fake_fstat(int fd, stat* s) {
+int fake_fstat(int fd, FakeStat* s) {
     assert(fds.contains(fd));
     s->st_size = payload_size;
     return 0;
@@ -42,6 +42,7 @@ int fake_close(int fd) {
     return 0;
 }
 #define fstat fake_fstat
+#define stat FakeStat
 #define fcntl fake_fcntl
 #define close fake_close
 

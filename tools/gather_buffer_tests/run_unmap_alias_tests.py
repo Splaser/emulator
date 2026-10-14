@@ -25,7 +25,7 @@ def extract(path, marker, template=False):
     return source[start:source.index('\n}\n', pos) + 3]
 
 fixture = Path(__file__).with_name('run_tests.py')
-head = '#include <thread>\n#include <cassert>\n' + literal(fixture, 'head')
+head = '#include <thread>\n#include <cassert>\n#define LOG_WARNING(...) ((void)0)\n' + literal(fixture, 'head')
 head = head.replace('gpu.erase(d + i);', '/* CPU and GPU flags are separate in WordManager. */')
 head = head.replace('if (gpu.contains(d + i))', 'if (gpu.contains(d + i) && !cpu.contains(d + i))')
 head = head.replace('struct Tracker {', '''struct Tracker {
@@ -61,7 +61,8 @@ head = head.replace('if (fail_copy) {', 'if (!on_gpu()) ++off_thread_copies;\n  
 head = head.replace('void Finish() { ++finishes; }', 'void Finish() { assert(on_gpu()); ++finishes; }')
 head = head.replace('u64 generation = 2;', '''u64 generation = 2;
         std::function<void(u64,const void*,u64)> writeback;
-        void WriteBlockUnsafe(u64 d,const void* p,u64 n) { writeback(d,p,n); }
+        struct WriteResult { bool fully_mapped=true; u64 first_unmapped_address=0,unmapped_bytes=0; };
+        WriteResult WriteBlockUnsafe(u64 d,const void* p,u64 n,bool=true) { writeback(d,p,n); return {}; }
 ''')
 start = head.index('    BufferId FindBuffer(u64 d, u32 size) {')
 end = head.index('    void TouchBuffer(', start)
@@ -89,7 +90,7 @@ head = head[:start] + '''    static constexpr bool USE_MEMORY_MAPS=true,USE_MEMO
 ''' + head[end:]
 start = head.index('    void DownloadBufferMemory(Buffer& buffer, u64 d, u64 n, bool = false) {')
 end = head.index('\n    }\n', start) + 7
-head = head[:start] + '    void DownloadBufferMemory(Buffer&,u64,u64,bool=false);\n' + head[end:]
+head = head[:start] + '    void DownloadBufferMemory(Buffer&,u64,u64,bool=false);\n    void WriteBackDownload(u64,const u8*,u64);\n    u64 unbacked_write_back_count=0;\n' + head[end:]
 start = head.index('    void MarkWrittenBuffer(BufferId, u64 d, u64 n) {')
 end = head.index('\n    }\n', start) + 7
 head = head[:start] + '    void MarkWrittenBuffer(BufferId,u64,u32);\n' + head[end:]
@@ -103,6 +104,7 @@ body += ''.join(extract(source, 'BufferCache<P>::' + name + '(', True)
                 for name in ['FindBuffer', 'SynchronizeBuffer', 'UploadMemory', 'OnCPUWrite',
                              'MarkWrittenBuffer'])
 body += extract(source, 'void BufferCache<P>::DownloadBufferMemory(Buffer& buffer, DAddr', True)
+body += extract(source, 'void BufferCache<P>::WriteBackDownload(', True)
 thread = literal(Path(__file__).with_name('run_gpu_write_tests.py'), 'head')
 thread = thread[thread.index('struct ExecuteCallbackCommand'):thread.index('struct Cache {')]
 thread = thread.replace('void RunOnGpuThread(std::function<void()>);',
