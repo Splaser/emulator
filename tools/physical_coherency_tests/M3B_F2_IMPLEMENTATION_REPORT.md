@@ -1,5 +1,11 @@
 # M3B-F2 implementation assessment
 
+Follow-up: the subsequent **candidate-only** protocol in
+[`m3b_candidate/README.md`](m3b_candidate/README.md) closes the known admission
+counterexamples under explicit immutable-plan/continuation contracts, with
+production ThreadManager and extracted Memory tests. Production remains
+unchanged; the blocked insertion designs below are retained as negative controls.
+
 Date: 2026-10-14. Starting HEAD: `bc3d0d1984` on
 `codex/fix-cpu-gpu-write-coherency`, with a clean worktree. Baseline merged
 production revision: `3de1870c78`. All existing local commits are retained.
