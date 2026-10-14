@@ -7,6 +7,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <type_traits>
 
 namespace Coherency {
 namespace {
@@ -74,6 +75,8 @@ Model::Model(Bytes initial, Id epoch, std::size_t chunk_size, Limits budget) : l
 }
 template <class F>
 Result Model::Change(F function) {
+    // Planning may allocate; the single publication step must not partly throw.
+    static_assert(std::is_nothrow_move_assignable_v<State>);
     const auto start = std::chrono::steady_clock::now();
     Result result;
     try {

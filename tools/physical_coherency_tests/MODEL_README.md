@@ -83,6 +83,19 @@ checks both producer and version against current cells; superseded cells belong
 to proven newer operations, not to an arbitrarily skipped pending write. Partial
 readback refreshes only the requested slices; other pending bytes remain stale.
 
+Final publication/lifetime review:
+
+| Successor outcome | Authority and preserved contents |
+| --- | --- |
+| Cancel before submission | Restore captured prior version/producer; prior GPU99 remains intact, never substitute CPU10 |
+| Submission/completion uncertainty | Pending successor remains Unknown/unreadable; retain its resource and unexecuted predecessor operands/bytes |
+| Visibility failure after known completion | Retain the completed successor's authoritative bytes/resource; completed predecessor operands may already have retired |
+
+Focused tests start with stale CPU10, a completed GPU99 predecessor and a pending
+GPU77 successor. They verify predecessor bytes/tags and both resource leases after
+failed submission, and restoration of GPU99 after cancellation. A separate test
+covers retired predecessor operands followed by successor visibility failure.
+
 CPU pre-store leases block competing access without publishing a CPU version.
 Commit clips to the actual byte range and releases the lease; abandoning a lease
 without a store does not invent a modification. Overlapping unfinished GPU
@@ -226,6 +239,18 @@ Authority storage is O(cells), replica tags/bytes O(total representation bytes),
 history O(retained operations and operands). Transfers iterate bytes and relevant
 spans; dependency checks traverse the bounded DAG. This is a correctness reference,
 not the final production interval index or an emulator performance benchmark.
+
+**Do not transplant candidate cloning into production Buffer Cache.** It is a
+reference-only strong exception guarantee for private CPU data: budget rejection
+can occur after candidate bytes/versions changed, with the original fingerprint
+unchanged. Publication has a compile-time nonthrowing State move-assignment check.
+Real GPU submission/store/ownership side effects cannot be rolled back by copying
+metadata and require the staged transaction/acknowledgement protocol in DESIGN.md.
+Neither 36–55 us / 24–40 us nor the approximately 118 KiB estimate predicts M4
+latency, memory footprint or performance; they include reference state cloning and
+its bounded fixtures/history. M2 prioritizes logical correctness over hot paths.
+Immutable physical values and simulated leases also do not prove actual Vulkan
+object lifetime, mapping-use admission or CPU/NCE exclusion.
 
 ## Reproduce and validation
 

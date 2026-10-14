@@ -366,6 +366,42 @@ void Chunks() {
     Require(start.m.ChunkStatus(0) == Access::Unknown, "failed START opened CPU");
 }
 void Failures() {
+    for (const bool cancel : {false, true}) {
+        World w;
+        auto a = w.ViewOf({{0, 16}}), b = w.ViewOf({{0, 16}}, 2, 0x9000, 0xa000);
+        const auto ra = w.Rep(a), rb = w.Rep(b);
+        auto old = w.GPU(a, ra, 99);
+        w.Submit(old);
+        w.Complete(old);
+        const auto old_bytes = w.m.ReplicaBytes(ra), cpu_bytes = w.m.ReplicaBytes(Model::CPU);
+        const auto old_tags = w.m.ReplicaVersions(ra);
+        auto newer = w.GPU(b, rb, 77, {old.model});
+        Reject(w.m, Error::ResourceBusy, [&] { return w.m.Evict(ra); });
+        if (cancel) {
+            OK(w.m.Cancel(newer.model));
+            Require(w.oracle.Cancel(newer.oracle), "oracle successor cancel");
+            Require(w.m.ReplicaBytes(ra) == old_bytes && w.m.ReplicaVersions(ra) == old_tags,
+                    "cancel lost old producer bytes");
+            w.Read(a);
+            Require(w.m.ReplicaBytes(Model::CPU)[0] == 99, "cancel restored stale CPU10");
+            OK(w.m.Scatter(old.model));
+            OK(w.m.Evict(ra));
+        } else {
+            w.m.Inject(Fault::Submit);
+            Is(w.m.Submit(newer.model), Error::Unknown);
+            Require(w.m.ReplicaBytes(ra) == old_bytes && old_bytes == Bytes(16, 99) &&
+                        w.m.ReplicaVersions(ra) == old_tags &&
+                        w.m.ReplicaBytes(Model::CPU) == cpu_bytes,
+                    "submission uncertainty destroyed prior GPU99 or published CPU10");
+            Require(!w.oracle.Read(a.ranges),
+                    "pending successor unexpectedly observable in oracle");
+            Reject(w.m, Error::ResourceBusy, [&] { return w.m.Evict(ra); });
+            Reject(w.m, Error::ResourceBusy, [&] { return w.m.Evict(rb); });
+            Reject(w.m, Error::Invalid, [&] { return w.m.Cancel(newer.model); });
+            Reject(w.m, Error::Unknown, [&] { return w.m.Read(a.stamp, Model::CPU); });
+            w.m.CheckInvariants();
+        }
+    }
     {
         World w;
         auto a = w.ViewOf({{0, 16}}), b = w.ViewOf({{0, 16}}, 2, 0x9000, 0xa000);
