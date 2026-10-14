@@ -36,6 +36,7 @@
 #include "video_core/engines/kepler_compute.h"
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/memory_manager.h"
+#include "video_core/physical_shadow.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
 #include "video_core/surface.h"
 #include "video_core/texture_cache/types.h"
@@ -242,6 +243,9 @@ public:
     void UpdateGraphicsBuffers(bool is_indexed);
 
     void UpdateComputeBuffers();
+
+    // Read-only visitor of already prepared bindings; never resolves/scatters buffers.
+    void ObservePhysicalBindings(PhysicalShadow& shadow, bool compute);
 
     void BindHostGeometryBuffers(bool is_indexed);
 

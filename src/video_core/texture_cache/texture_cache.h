@@ -2522,6 +2522,10 @@ void TextureCache<P>::RemoveFramebuffers(std::span<const ImageViewId> removed_vi
 
 template <class P>
 void TextureCache<P>::MarkModification(ImageBase& image) noexcept {
+    if (physical_shadow && gpu_memory) {
+        physical_shadow->Observe(*gpu_memory, image.gpu_addr, image.guest_size_bytes,
+                                 ShadowKind::Texture, true, image.cpu_addr);
+    }
     image.flags |= ImageFlagBits::GpuModified;
     image.modification_tick = ++modification_tick;
 }

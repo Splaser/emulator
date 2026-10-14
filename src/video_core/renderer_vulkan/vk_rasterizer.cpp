@@ -241,6 +241,47 @@ RasterizerVulkan::RasterizerVulkan(Core::Frontend::EmuWindow& emu_window_, Tegra
       fence_manager(*this, gpu, texture_cache, buffer_cache, query_cache, device, scheduler),
       wfi_event(device.GetLogical().CreateEvent()) {
     scheduler.SetQueryCache(query_cache);
+    if (Settings::values.physical_coherency_shadow.GetValue()) {
+        physical_shadow.emplace();
+        texture_cache.SetPhysicalShadow(&*physical_shadow);
+    }
+}
+
+void RasterizerVulkan::ReportPhysicalShadow() noexcept {
+    if (!physical_shadow) {
+        return;
+    }
+    try {
+        const auto& s = physical_shadow->Counters();
+        LOG_INFO(Render_Vulkan,
+                 "Physical shadow: dispatches={} queries={} query_ns={} max_dispatch_query_ns={} "
+                 "observer_ns={} max_dispatch_observer_ns={} validation_ns={} hits={} cache_invalidations={} "
+                 "snapshot_invalidations={} aliases={} different_daddr={} different_manager={} "
+                 "holes={} budget_drops={} provenance_mismatches={} comparison_drops={} errors={} "
+                 "evictions={} outside_dispatch_queries={} max_dispatch_queries={}",
+                 s.dispatches, s.queries, s.query_ns, s.max_dispatch_query_ns, s.observer_ns,
+                 s.max_dispatch_observer_ns, s.validation_ns, s.cache_hits, s.cache_invalidations,
+                 s.snapshot_invalidations, s.historical_aliases, s.different_daddr_aliases,
+                 s.different_manager_aliases, s.holes, s.budget_drops, s.provenance_mismatches,
+                 s.comparison_drops, s.errors, s.evictions, s.outside_dispatch_queries,
+                 s.max_dispatch_queries);
+        constexpr std::array names{"buffer", "scratch", "texel", "texture"};
+        for (size_t i = 0; i < names.size(); ++i) {
+            const auto& c = s.coverage[i];
+            LOG_INFO(Render_Vulkan,
+                     "Physical shadow coverage: kind={} observations={} write_intents={} "
+                     "registered_writes={} unregistered_write_intents={} unresolved={} "
+                     "bytes={} max_range={} segments={} split_observations={} "
+                     "size_buckets=[{},{},{},{},{},{},{},{}]",
+                     names[i], c.observations, c.write_intents, c.registered_writes,
+                     c.write_intents - c.registered_writes, c.unresolved, c.bytes, c.max_range,
+                     c.registered_segments, c.split_observations, c.size_buckets[0], c.size_buckets[1],
+                     c.size_buckets[2], c.size_buckets[3], c.size_buckets[4], c.size_buckets[5],
+                     c.size_buckets[6], c.size_buckets[7]);
+        }
+    } catch (...) {
+        // Logging/allocation failures in diagnostics must never stop the guest.
+    }
 }
 
 void RasterizerVulkan::Shutdown() {
@@ -248,6 +289,13 @@ void RasterizerVulkan::Shutdown() {
         return;
     }
     std::unique_lock exclusive_guard{shutdown_mutex};
+    if (physical_shadow) {
+        // Texture copies/clears also use the cache mutex outside draw preparation.
+        // Serialize final diagnostic reads and detach its pointer before teardown.
+        std::scoped_lock cache_guard{texture_cache.mutex, buffer_cache.mutex};
+        ReportPhysicalShadow();
+        texture_cache.SetPhysicalShadow(nullptr);
+    }
 
     // 1. Tell the GPU to finish current work
     scheduler.Finish();
@@ -294,6 +342,14 @@ GraphicsPipeline* RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_fun
         std::scoped_lock lock{buffer_cache.mutex, texture_cache.mutex};
         // update engine as channel may be different.
         pipeline->SetEngine(maxwell3d, gpu_memory);
+        if (physical_shadow) {
+            physical_shadow->BeginDispatch();
+        }
+        SCOPE_EXIT {
+            if (physical_shadow) {
+                physical_shadow->EndDispatch();
+            }
+        };
 #if CITRON_ARM64_REGISTER_GUARD_SUPPORTED
         if (Settings::values.android_arm64_register_guards.GetValue()) {
             pipeline_configure_exception = {};
@@ -317,6 +373,13 @@ GraphicsPipeline* RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_fun
 #endif
 
         if (!configure_exception) {
+            if (physical_shadow) {
+                buffer_cache.ObservePhysicalBindings(*physical_shadow, false);
+                physical_shadow->EndDispatch();
+                if (physical_shadow->Counters().dispatches % 4096 == 0) {
+                    ReportPhysicalShadow();
+                }
+            }
             UpdateDynamicStates();
 
             HandleTransformFeedback();
@@ -731,7 +794,22 @@ void RasterizerVulkan::DispatchCompute() {
         return;
     }
     std::scoped_lock lock{texture_cache.mutex, buffer_cache.mutex};
+    if (physical_shadow) {
+        physical_shadow->BeginDispatch();
+    }
+    SCOPE_EXIT {
+        if (physical_shadow) {
+            physical_shadow->EndDispatch();
+        }
+    };
     pipeline->Configure(*kepler_compute, *gpu_memory, scheduler, buffer_cache, texture_cache);
+    if (physical_shadow) {
+        buffer_cache.ObservePhysicalBindings(*physical_shadow, true);
+        physical_shadow->EndDispatch();
+        if (physical_shadow->Counters().dispatches % 4096 == 0) {
+            ReportPhysicalShadow();
+        }
+    }
 
     const auto& qmd{kepler_compute->launch_description};
     auto indirect_address = kepler_compute->GetIndirectComputeAddress();

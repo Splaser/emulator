@@ -28,6 +28,7 @@
 #include "video_core/compatible_formats.h"
 #include "video_core/control/channel_state_cache.h"
 #include "video_core/delayed_destruction_ring.h"
+#include "video_core/physical_shadow.h"
 #include "video_core/engines/fermi_2d.h"
 #include "video_core/surface.h"
 #include "video_core/texture_cache/descriptor_table.h"
@@ -129,6 +130,8 @@ class TextureCache : public VideoCommon::ChannelSetupCaches<TextureCacheChannelI
 
 public:
     explicit TextureCache(Runtime&, Tegra::MaxwellDeviceMemoryManager&);
+
+    void SetPhysicalShadow(PhysicalShadow* shadow) noexcept { physical_shadow = shadow; }
 
     /// Notify the cache that a new frame has been queued
     void TickFrame(u64 cache_usage, u64 cache_target, std::span<const HeapMemoryBudget> heaps);
@@ -250,6 +253,9 @@ public:
     void PrepareImage(ImageId image_id, bool is_modification, bool invalidate);
 
     mutable std::recursive_mutex mutex;
+
+    // Borrowed renderer diagnostic, outlives this cache; GPU-thread confined.
+    PhysicalShadow* physical_shadow{};
 
 private:
     /// Iterate over all page indices in a range

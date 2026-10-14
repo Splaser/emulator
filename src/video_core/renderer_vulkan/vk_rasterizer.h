@@ -218,6 +218,11 @@ private:
     BlitImageHelper blit_image;
     RenderPassCache render_pass_cache;
 
+    // Declared before caches so their borrowed diagnostic pointer dies first.
+    std::optional<VideoCommon::PhysicalShadow> physical_shadow;
+
+    void ReportPhysicalShadow() noexcept;
+
     TextureCacheRuntime texture_cache_runtime;
     TextureCache texture_cache;
     BufferCacheRuntime buffer_cache_runtime;

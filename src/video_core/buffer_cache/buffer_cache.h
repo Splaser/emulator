@@ -2608,6 +2608,63 @@ boost::container::small_vector<Binding*, 32> BufferCache<P>::GatherBindings(bool
 }
 
 template <class P>
+void BufferCache<P>::ObservePhysicalBindings(PhysicalShadow& shadow, bool compute) {
+    const auto observe = [&](const Binding& binding, ShadowKind kind, bool written) {
+        if (!binding.size) {
+            return;
+        }
+        if (binding.gather_gpu_addr) {
+            kind = ShadowKind::Scratch;
+            const auto it = gather_buffers.find(binding.gather_gpu_addr);
+            if (it != gather_buffers.end() && it->second.buffer && IsDirectGuest(*it->second.buffer)) {
+                kind = ShadowKind::Buffer;
+            }
+        }
+        // Cached texel views require their real contiguous DAddr to match. Split
+        // uniform/storage views instead describe logical GPU ranges in scratch.
+        const std::optional<DAddr> expected = binding.gather_gpu_addr ? std::nullopt
+                                                                    : std::optional{binding.device_addr};
+        // A writable gathered view scatters its whole prepared allocation, including padding.
+        shadow.Observe(*gpu_memory, binding.gather_gpu_addr ? binding.gather_gpu_addr : binding.gpu_addr,
+                       binding.gather_gpu_addr ? binding.gather_size : binding.size, kind, written, expected);
+    };
+    if (compute) {
+        ForEachEnabledBit(channel_state->enabled_compute_uniform_buffer_mask, [&](u32 i) {
+            observe(channel_state->compute_uniform_buffers[i], ShadowKind::Buffer, false);
+        });
+        ForEachEnabledBit(channel_state->enabled_compute_storage_buffers, [&](u32 i) {
+            observe(channel_state->compute_storage_buffers[i], ShadowKind::Buffer,
+                    ((channel_state->written_compute_storage_buffers >> i) & 1) != 0);
+        });
+        ForEachEnabledBit(channel_state->enabled_compute_texture_buffers, [&](u32 i) {
+            observe(channel_state->compute_texture_buffers[i], ShadowKind::Texel,
+                    ((channel_state->written_compute_texture_buffers >> i) & 1) != 0);
+        });
+    } else {
+        for (size_t stage = 0; stage < NUM_STAGES; ++stage) {
+            ForEachEnabledBit(channel_state->enabled_uniform_buffer_masks[stage], [&](u32 i) {
+                observe(channel_state->uniform_buffers[stage][i], ShadowKind::Buffer, false);
+            });
+            ForEachEnabledBit(channel_state->enabled_storage_buffers[stage], [&](u32 i) {
+                observe(channel_state->storage_buffers[stage][i], ShadowKind::Buffer,
+                        ((channel_state->written_storage_buffers[stage] >> i) & 1) != 0);
+            });
+            ForEachEnabledBit(channel_state->enabled_texture_buffers[stage], [&](u32 i) {
+                observe(channel_state->texture_buffers[stage][i], ShadowKind::Texel,
+                        ((channel_state->written_texture_buffers[stage] >> i) & 1) != 0);
+            });
+        }
+        if (maxwell3d->regs.transform_feedback_enabled) {
+            for (const auto& binding : channel_state->transform_feedback_buffers) {
+                // Current TF bindings don't retain a GPU VA. Explicit unresolved
+                // write intent, rather than inventing a physical resource identity.
+                observe(binding, ShadowKind::Buffer, true);
+            }
+        }
+    }
+}
+
+template <class P>
 void BufferCache<P>::ResetGatherBindings(bool compute) {
     for (Binding* binding : GatherBindings(compute)) {
         binding->gather_gpu_addr = binding->gpu_addr != 0 && binding->size != 0 &&

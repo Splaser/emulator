@@ -507,6 +507,9 @@ struct Values {
                                                   Category::RendererAdvanced};
     SwitchableSetting<bool> guest_chunk_import_diagnostics{
         linkage, false, "guest_chunk_import_diagnostics", Category::RendererAdvanced};
+    // Observation-only physical geometry/producer coverage; no coherency decisions.
+    SwitchableSetting<bool> physical_coherency_shadow{
+        linkage, false, "physical_coherency_shadow", Category::RendererAdvanced};
     SwitchableSetting<bool> use_reactive_flushing{linkage,
 #ifdef ANDROID
                                                   false,
