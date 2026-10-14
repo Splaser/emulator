@@ -103,6 +103,12 @@ and the upstream merge/integration commit is `eabdc59cd4`.
   for its actual status; do not treat the local extraction tests as full compilation proof.
 - Do not claim the integration ready for main/#375 until native builds and regressions pass.
 
+CI follow-up: run `38576377755` failed before compilation. The Linux shell rejected checkout
+ownership at `Record exact build inputs`; that step now trusts only `$GITHUB_WORKSPACE` via
+`safe.directory` before invoking Git. Android setup tried to install the obsolete SDK `tools`
+package; its explicit package list now requests `platform-tools`. Both fixes are workflow-only;
+production compilation remains unverified until a subsequent run passes.
+
 ### Resume on another computer
 
 ```powershell

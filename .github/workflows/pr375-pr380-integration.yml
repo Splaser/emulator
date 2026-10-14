@@ -23,6 +23,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install cross-build host tools and NDK
         run: |
           sudo apt-get update -qq
@@ -65,6 +67,9 @@ jobs:
           persist-credentials: false
       - name: Record exact build inputs
         run: |
+          # checkout and container shell use different HOME/ownership contexts.
+          # Trust this checkout explicitly before shell-side Git operations.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir -p .diagnostics/pr375-pr380
           git rev-parse HEAD | tee .diagnostics/pr375-pr380/source.txt
           git submodule status > .diagnostics/pr375-pr380/submodules.txt
