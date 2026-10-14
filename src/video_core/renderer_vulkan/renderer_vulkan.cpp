@@ -142,8 +142,7 @@ RendererVulkan::RendererVulkan(Core::Frontend::EmuWindow& emu_window,
 }
 
 RendererVulkan::~RendererVulkan() {
-    scheduler.RegisterOnSubmit([] {});
-    void(device.GetLogical().WaitIdle());
+    Shutdown();
     if (chunk_import_diagnostics) {
         chunk_import_diagnostics->Close();
         const auto stats = chunk_import_diagnostics->GetStats();
@@ -153,6 +152,23 @@ RendererVulkan::~RendererVulkan() {
                  stats.device_epoch, stats.backing_generation, stats.active_imports,
                  stats.imported_logical_bytes, stats.cache_entries_released);
     }
+}
+
+void RendererVulkan::Shutdown() {
+    if (is_shut_down) {
+        return;
+    }
+    // GPU emulation and CompositeState callbacks have already stopped. Keep every
+    // referenced cache, GPU owner and Vulkan object alive through these boundaries.
+    rasterizer.Shutdown(); // includes joining the fencing callback thread
+    scheduler.WaitWorker(); // publish even a final recorded Present callback
+    present_manager.Shutdown(); // drain presentation and stop its queue submissions
+    scheduler.Shutdown(); // no recording/submission callbacks can run after this
+    scheduler.RegisterOnSubmit({}); // safe only after the recording worker joined
+    turbo_mode.reset(); // stop its separate device/worker before renderer resources
+    void(device.GetLogical().WaitIdle()); // all host submission sources are now stopped
+    scheduler.GetMasterSemaphore().Shutdown(); // no remaining completion-helper access
+    is_shut_down = true;
 }
 
 void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebuffers) {

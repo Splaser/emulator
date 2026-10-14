@@ -44,7 +44,26 @@ Scheduler::Scheduler(const Device& device_, StateTracker& state_tracker_)
     worker_thread = std::jthread([this](std::stop_token token) { WorkerThread(token); });
 }
 
-Scheduler::~Scheduler() = default;
+Scheduler::~Scheduler() {
+    // Normal renderer shutdown explicitly drains while callback owners still live.
+    // On construction failure/unwinding, never dispatch new callbacks from here:
+    // later-declared renderer members may already have been destroyed.
+    worker_thread.request_stop();
+    event_cv.notify_all();
+    if (worker_thread.joinable()) {
+        worker_thread.join();
+    }
+}
+
+void Scheduler::Shutdown() {
+    if (!worker_thread.joinable()) {
+        return;
+    }
+    WaitWorker();
+    worker_thread.request_stop();
+    event_cv.notify_all();
+    worker_thread.join();
+}
 
 u64 Scheduler::Flush(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {
     // When flushing, we only send data to the worker thread; no waiting is necessary.

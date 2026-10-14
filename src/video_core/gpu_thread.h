@@ -105,6 +105,9 @@ struct SynchState final {
     u64 last_fence{};
     std::atomic<u64> signaled_fence{};
     std::condition_variable_any cv;
+    // Protected by write_lock. Stop closes admission before requesting thread cancellation.
+    bool accepting{};
+    std::stop_token stop_token;
 };
 
 /// Class used to manage the GPU thread
@@ -116,6 +119,10 @@ public:
     /// Creates and starts the GPU thread.
     void StartThread(VideoCore::RendererBase& renderer, Core::Frontend::GraphicsContext& context,
                      Tegra::Control::Scheduler& scheduler);
+
+    /// Owner-thread teardown: reject new commands, stop/join, then destroy queued captures.
+    /// The renderer, control scheduler and channels must remain alive until this returns.
+    void Stop();
 
     /// Push GPU command entries to be processed
     void SubmitList(s32 channel, Tegra::CommandList&& entries);
@@ -134,7 +141,7 @@ public:
     /// Wait until all commands queued before this call have been processed by the GPU thread.
     void Synchronize();
 
-    bool IsGpuThread() const { return thread.get_id() == std::this_thread::get_id(); }
+    bool IsGpuThread() const { return current_manager == this; }
     void RunOnGpuThread(std::function<void()> callback);
 
 private:
@@ -147,6 +154,8 @@ private:
 
     SynchState state;
     std::jthread thread;
+    // Thread identity remains safe to query during join and cannot alias a recycled thread ID.
+    inline static thread_local const ThreadManager* current_manager{};
 };
 
 } // namespace VideoCommon::GPUThread

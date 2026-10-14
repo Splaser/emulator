@@ -44,6 +44,8 @@ public:
                             std::unique_ptr<Core::Frontend::GraphicsContext> context_);
     ~RendererVulkan() override;
 
+    void Shutdown() override;
+
     void Composite(std::span<const Tegra::FramebufferConfig> framebuffers) override;
 
     std::vector<u8> GetAppletCaptureBuffer() override;
@@ -98,6 +100,7 @@ private:
     std::unique_ptr<GuestChunkImportDiagnostics> chunk_import_diagnostics;
     Common::GuestChunkLease diagnostic_chunk; // one candidate per backing generation, GPU thread only
     std::chrono::steady_clock::time_point next_chunk_diagnostic{};
+    bool is_shut_down{}; // owning teardown thread only
 };
 
 } // namespace Vulkan

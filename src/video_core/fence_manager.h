@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <cstring>
 #include <deque>
@@ -46,6 +47,33 @@ class FenceManager {
     static constexpr bool can_async_check = Traits::HAS_ASYNC_CHECK;
 
 public:
+    /// Terminal owner-thread cancellation after producers stop and device work is
+    /// finished. Join an active callback; discard unstarted callbacks without execution.
+    void Shutdown() {
+        if (is_shutting_down.exchange(true)) {
+            return;
+        }
+        if constexpr (can_async_check) {
+            if (fence_thread.joinable()) {
+                {
+                    // ReleaseThreadFunc uses a plain condition_variable: serialize
+                    // the stop predicate with its check/wait to avoid a lost wake.
+                    std::scoped_lock lock{guard};
+                    fence_thread.request_stop();
+                }
+                cv.notify_all();
+                fence_thread.join();
+            }
+        }
+        // No producer or fencing thread remains. Destruct captures outside guard;
+        // reentrant publication observes is_shutting_down and is rejected.
+        uncommitted_operations.clear();
+        pending_operations.clear();
+        while (!fences.empty()) {
+            fences.pop();
+        }
+    }
+
     /// Notify the fence manager about a new frame
     void TickFrame() {
         std::unique_lock lock(ring_guard);
@@ -67,10 +95,16 @@ public:
     }
 
     void SyncOperation(std::function<void()>&& func) {
+        if (is_shutting_down.load()) {
+            return;
+        }
         uncommitted_operations.emplace_back(std::move(func));
     }
 
     void SignalFence(std::function<void()>&& func) {
+        if (is_shutting_down.load()) {
+            return;
+        }
         const bool delay_fence = Settings::IsGPULevelNormal();
         if constexpr (!can_async_check) {
             TryReleasePendingFences<false>();
@@ -107,6 +141,9 @@ public:
     }
 
     void WaitPendingFences([[maybe_unused]] bool force) {
+        if (is_shutting_down.load()) {
+            return;
+        }
         if constexpr (!can_async_check) {
             TryReleasePendingFences<true>();
         } else {
@@ -141,11 +178,7 @@ protected:
     }
 
     virtual ~FenceManager() {
-        if constexpr (can_async_check) {
-            fence_thread.request_stop();
-            cv.notify_all();
-            fence_thread.join();
-        }
+        Shutdown();
     }
 
     /// Creates a Fence Interface, does not create a backend fence if 'is_stubbed' is
@@ -262,6 +295,7 @@ private:
     std::condition_variable cv;
 
     std::jthread fence_thread;
+    std::atomic<bool> is_shutting_down{};
 
     DelayedDestructionRing<TFence, 8> delayed_destruction_ring;
 };

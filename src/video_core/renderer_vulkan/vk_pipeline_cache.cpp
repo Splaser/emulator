@@ -504,15 +504,18 @@ PipelineCache::PipelineCache(Tegra::MaxwellDeviceMemoryManager& device_memory_,
 }
 
 PipelineCache::~PipelineCache() {
-    workers.WaitForRequests();
-    // Drain all pending SerializePipeline tasks before the serialization_thread
-    // member is destroyed.
-    serialization_thread.WaitForRequests();
+    DrainWorkers();
 
     if (use_vulkan_pipeline_cache && !vulkan_pipeline_cache_filename.empty()) {
         SerializeVulkanPipelineCache(vulkan_pipeline_cache_filename, vulkan_pipeline_cache,
                                      VULKAN_PIPELINE_CACHE_VERSION);
     }
+}
+
+void PipelineCache::DrainWorkers() {
+    workers.WaitForRequests();
+    // Compilation tasks can enqueue serialization tasks.
+    serialization_thread.WaitForRequests();
 }
 
 GraphicsPipeline* PipelineCache::CurrentGraphicsPipeline() {

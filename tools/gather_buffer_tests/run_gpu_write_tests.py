@@ -45,6 +45,8 @@ struct ThreadManager {
     bool IsGpuThread() const { return owner == std::this_thread::get_id(); }
     void PushCommand(ExecuteCallbackCommand command, bool block) {
         assert(block);
+        // Production admission moved into PushCommand so it is atomic with Stop.
+        if (thread.stopped) return;
         ++queued;
         std::thread worker([&, command = std::move(command)] {
             owner = std::this_thread::get_id();

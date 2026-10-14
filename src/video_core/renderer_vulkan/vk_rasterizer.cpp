@@ -358,11 +358,19 @@ void RasterizerVulkan::Shutdown() {
         texture_cache.SetPhysicalShadow(nullptr);
     }
 
+    // No rendering producers remain. Join callbacks without retaining a renderer
+    // lock that they could reenter; guarded entries already reject shutdown work.
+    exclusive_guard.unlock();
+    pipeline_cache.DrainWorkers();
+
     // 1. Tell the GPU to finish current work
     scheduler.Finish();
 
-    // 2. Force runtimes to release internal references/handles FIRST
-    // This ensures VkBuffer/VkImage handles are gone before the memory they sit on is freed
+    // Fence callbacks may still use query/cache/GPU objects. Join them while the
+    // complete renderer and GPU Impl are alive, not from a base-class destructor.
+    fence_manager.Shutdown();
+
+    // 2. Complete any final runtime work. Finish is a device wait, not a cache clear.
     buffer_cache_runtime.Finish();
     texture_cache_runtime.Finish();
 }

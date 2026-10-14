@@ -50,6 +50,9 @@ public:
     /// safe to touch worker resources.
     void WaitWorker();
 
+    /// Owner-thread teardown after all recording producers stop. Drain host work and join.
+    void Shutdown();
+
     /// Sends currently recorded work to the worker thread.
     void DispatchWork();
 

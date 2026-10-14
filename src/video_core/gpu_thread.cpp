@@ -56,6 +56,11 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
         if (stop_token.stop_requested()) {
             break;
         }
+        if (have_command) {
+            // Wake producers waiting for queue space before executing a potentially blocking job.
+            std::scoped_lock lk{state.write_lock};
+            state.cv.notify_all();
+        }
         CITRON_PROFILE_SCOPE("GPUThread::ProcessCommand");
         // After failure, retire queued commands without executing partially updated GPU state.
         // Barriers below still wake their callers, allowing frontend shutdown to join the CPUs.
@@ -118,14 +123,44 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
 ThreadManager::ThreadManager(Core::System& system_, bool is_async_)
     : system{system_}, is_async{is_async_} {}
 
-ThreadManager::~ThreadManager() = default;
+ThreadManager::~ThreadManager() {
+    Stop();
+}
 
 void ThreadManager::StartThread(VideoCore::RendererBase& renderer,
                                 Core::Frontend::GraphicsContext& context,
                                 Tegra::Control::Scheduler& scheduler) {
     rasterizer = renderer.ReadRasterizer();
-    thread = std::jthread(RunThread, std::ref(system), std::ref(renderer), std::ref(context),
-                          std::ref(scheduler), std::ref(state));
+    thread = std::jthread([this, &renderer, &context, &scheduler](std::stop_token token) {
+        current_manager = this;
+        RunThread(token, system, renderer, context, scheduler, state);
+        current_manager = nullptr;
+    });
+    std::scoped_lock lk{state.write_lock};
+    state.stop_token = thread.get_stop_token();
+    state.accepting = true;
+}
+
+void ThreadManager::Stop() {
+    if (!thread.joinable()) {
+        return;
+    }
+    // Called by the owning teardown thread, never by RunThread's failure callback.
+    assert(!IsGpuThread());
+    {
+        std::scoped_lock lk{state.write_lock};
+        state.accepting = false;
+    }
+    thread.request_stop();
+    state.cv.notify_all();
+    thread.join();
+
+    // Drop unexecuted callbacks while their owner objects are still alive. Cancellation
+    // does not advance signaled_fence or execute callbacks to manufacture completion.
+    CommandDataContainer cancelled;
+    while (state.queue.TryPop(cancelled)) {
+        cancelled = {};
+    }
 }
 
 void ThreadManager::SubmitList(s32 channel, Tegra::CommandList&& entries) {
@@ -152,8 +187,7 @@ void ThreadManager::TickGPU() {
 }
 
 void ThreadManager::Synchronize() {
-    if (!is_async || !thread.joinable() || thread.get_stop_token().stop_requested() ||
-        thread.get_id() == std::this_thread::get_id()) {
+    if (!is_async || IsGpuThread()) {
         return;
     }
     PushCommand(SynchronizeCommand(), true);
@@ -164,9 +198,7 @@ void ThreadManager::RunOnGpuThread(std::function<void()> callback) {
         callback();
         return;
     }
-    if (!thread.joinable() || thread.get_stop_token().stop_requested()) {
-        return; // Match Synchronize: never enqueue a blocking request after shutdown.
-    }
+    // Admission and cancellation are checked under write_lock by PushCommand.
     PushCommand(ExecuteCallbackCommand{std::move(callback)}, true);
 }
 
@@ -186,11 +218,22 @@ u64 ThreadManager::PushCommand(CommandData&& command_data, bool block) {
     }
 
     std::unique_lock lk(state.write_lock);
+    // A non-cancellable EmplaceWait can strand a producer when Stop closes a full
+    // queue. Assign the fence only when a slot is obtained, preserving FIFO order
+    // even while this wait releases write_lock for another producer or Stop.
+    for (;;) {
+        if (!state.accepting) {
+            return 0;
+        }
+        if (state.queue.TryEmplace(std::move(command_data), state.last_fence + 1, block)) {
+            break;
+        }
+        state.cv.wait(lk);
+    }
     const u64 fence{++state.last_fence};
-    state.queue.EmplaceWait(std::move(command_data), fence, block);
 
     if (block) {
-        Common::CondvarWait(state.cv, lk, thread.get_stop_token(), [this, fence] {
+        Common::CondvarWait(state.cv, lk, state.stop_token, [this, fence] {
             return fence <= state.signaled_fence.load(std::memory_order_relaxed);
         });
     }

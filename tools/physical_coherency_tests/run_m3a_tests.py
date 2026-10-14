@@ -83,6 +83,8 @@ public:
     void Stop() { thread.request_stop(); cv.notify_all(); if(thread.joinable()) thread.join(); }
     ~ThreadManager() { Stop(); }
     void PushCommand(ExecuteCallbackCommand cmd,bool block) {
+        // Model the stopped admission check now owned by production PushCommand.
+        if(!thread.joinable() || thread.get_stop_token().stop_requested()) return;
         auto job=std::make_shared<Job>(); job->callback=std::move(cmd.callback);
         auto done=job->done.get_future();
         { std::lock_guard lock{mutex}; queue.push_back(job); } cv.notify_all();

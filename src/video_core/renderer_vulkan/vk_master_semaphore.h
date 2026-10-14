@@ -25,6 +25,9 @@ public:
     explicit MasterSemaphore(const Device& device);
     ~MasterSemaphore();
 
+    /// Stop completion helpers after submission sources/waiters stop and device idle.
+    void Shutdown();
+
     /// Returns the current logical tick.
     [[nodiscard]] u64 CurrentTick() const noexcept {
         return current_tick.load(std::memory_order_acquire);
