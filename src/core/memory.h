@@ -423,8 +423,8 @@ public:
      *
      * @return True only if all reads and writes succeeded. Known mapping holes
      *         and snapshot allocation failure are rejected before destination
-     *         writes. A later failure/remap or exception may leave a completed
-     *         destination prefix; false does not promise rollback.
+     *         copy stores. A later failure/remap or exception may leave partial
+     *         destination changes; false does not promise rollback.
      */
     bool CopyBlock(Common::ProcessAddress dest_addr, Common::ProcessAddress src_addr,
                    std::size_t size);

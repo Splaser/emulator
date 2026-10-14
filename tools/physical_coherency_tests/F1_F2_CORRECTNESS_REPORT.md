@@ -4,12 +4,14 @@ Date: 2026-10-14. Production baseline: `3de1870c78babbdb934c875268fb49b43e5d3458
 Branch: `codex/fix-cpu-gpu-write-coherency`. Main was clean and
 `git pull --ff-only` reported already up to date before creating this branch.
 
-**F2: reproduced, blocked. F1: reproduced, blocked. Neither defect is fixed.**
+**F2/F1 remain open. Follow-up prerequisite corrections are recorded below.**
 The requested stop conditions apply: the existing production APIs do not provide
 a mapping-use/access obligation spanning preservation, the real store and
 publication. F1 additionally needs a native access epoch and signal-safe handoff.
-No production workaround is included. Tests and this report are local commits;
-there is no push or merge. The lifecycle repair at the baseline remains intact.
+No workaround claims to repair the full transaction or native lifetime. All
+changes remain local; there is no push or merge. The lifecycle repair at the
+baseline remains intact. Baseline investigation below is supplemented by the
+follow-up section, which describes the subsequent production changes.
 
 ## Current production call chains
 
@@ -177,8 +179,9 @@ boundary joined by controlled stores, cache consumers/producers, relevant
 mapping mutators and shutdown. It must preserve without recursively acquiring
 the obligation that its waiting CPU already owns. M3A's isolated prototype does
 not establish these production adapters. Integrating them here would cross the
-task's explicit boundary against general M3B integration; the requested F2
-mapping-use stop condition is reached. No partial production fix is committed.
+task's original boundary against general M3B integration; the F2 mapping-use
+stop condition remains unresolved. The follow-up adds prerequisite corrections,
+but no controlled-store transaction is committed.
 
 Block APIs also need exact completed extents or an explicit unknown/failure
 state. `WalkBlock` can write valid chunks, encounter a hole, continue, and return
@@ -268,14 +271,141 @@ access. Host extracted-function tests cannot replace this execution evidence.
 
 ## Changes, performance and disposition
 
-Only the witness runner and this report are tracked changes. There are no new
-production locks, waits, Finish calls, allocations or hot-path costs. No overhead
+The original investigation added only witnesses and this report. Follow-up
+production changes and their costs are listed below. No overhead
 estimate is claimed for the missing production mechanism: physical conflict
 tracking, mapping use/drain, native quiescence and preservation waits will need
 measurement if implemented under a separately authorized scope.
 
 The report is committed separately after test commit `9f1b78c3a6`; its own SHA
 is available from `git log -1 -- tools/physical_coherency_tests/F1_F2_CORRECTNESS_REPORT.md`
-(a commit cannot embed its own hash). Main/issue branch and all production source
-remain at their existing contents. F2 and F1 remain open, with reproducible
-failure gates and the missing integration requirements recorded above.
+(a commit cannot embed its own hash). Main/issue branch remain unchanged. F2 and
+F1 remain open, with reproducible failure gates and the missing integration
+requirements recorded above.
+
+## Follow-up: CopyBlock and preservation acknowledgement
+
+The user's follow-up explicitly required separate source-snapshot/partial-copy
+proof and a real preservation outcome, without requiring a Vulkan completion
+registry. These prerequisites are now corrected independently on the same local
+branch. This does not close the original F2 store/publication window or F1.
+
+### CPU CopyBlock correction
+
+Commit `518c99aaac` (plus the subsequent wording clarification in this follow-up)
+changes `src/core/memory.cpp`, `src/core/memory.h`, the `ReadIoMemoryImpl` caller
+in `src/core/hle/kernel/k_page_table_base.cpp`, and adds
+`run_copy_block_tests.py`.
+
+The old outer WalkBlock used **dest_addr**, passing destination bytes as the
+source of nested writes. Even distinct non-overlapping source bytes were not
+copied correctly. This is independently reproduced by extracting the old
+production functions with `--revision 52ae351066`; the assertions fail (exit 1).
+
+The corrected CopyBlock rejects out-of-range addresses and known destination
+holes, allocates the entire owned source before destination copy stores, reads
+the actual source with existing preservation, rejects an incomplete source,
+then writes from the snapshot in logical destination order. Snapshot allocation
+failure returns false. `ReadIoMemoryImpl` now checks that false result instead
+of returning ResultSuccess unconditionally. Its write counterpart already
+checked the result.
+
+`run_copy_block_tests.py` extracts current WalkBlock, ReadBlockImpl,
+WriteBlockImpl, ZeroBlock and CopyBlock. Its fixture supplies page translations,
+stable byte backing and preservation callbacks. It verifies both physical
+overlap directions through distinct VAs, cached/ordinary pages, unaligned ranges
+crossing pages, repeated destination aliases, normal distinct-source copies,
+source and destination holes, snapshot OOM via operator new failure, zero length
+and bounds. A preservation exception on the second destination chunk propagates
+after the first chunk changed; the test checks those exact fixture bytes.
+
+**Explicit failure contract:** this copy is not atomic. Mapping preflight does
+not pin mappings; callers must keep mappings stable. A later exception can
+leave a completed prefix. A concurrent remap/hole during WriteBlock can leave
+noncontiguous completed chunks because WalkBlock continues past holes. The
+boolean reports failure, not completed byte extents or rollback. Therefore
+**CopyBlock remains excluded from an F2 transaction** until that integration
+supplies source/destination lifetime protection and an exact partial-write or
+unknown-state contract. Snapshot correctness under stable mappings alone does
+not establish concurrent CPU/GPU access correctness. Existing readback during
+source preservation is also distinct from destination copy stores.
+
+Performance: one source-sized allocation/copy, plus a destination preflight
+walk. This is intentionally limited to the CPU CopyBlock path; scalar/block
+writes, GPU MemoryManager::CopyBlock and DMA snapshot policy are not replaced.
+No performance measurement or negligible-overhead claim is made.
+
+### Preservation callback boundary
+
+Commit: `80eb1e8f40f91bbcf935edef3809cba39305596c`.
+
+`src/video_core/acknowledged_callback.h` adds host callback outcomes
+`Completed`, `Cancelled`, and `Failed`. A shared request has a CAS-protected
+Pending -> Running or Pending -> Cancelled transition. After a blocking dispatch
+returns without starting the action, cancellation prevents even a retained late
+closure from executing the action. After Running, an early stop-token wakeup
+must still wait on the callback's actual promise completion. Callback exceptions
+are transported to the waiting request and rethrown on the executing thread,
+preserving existing worker failure handling. Inline exceptions still propagate.
+No cache/PTE/queue mutex is retained by the waiting helper.
+
+`RasterizerVulkan::TryRunBufferCacheCpuWrite` exposes `optional<bool>`:
+nullopt means callback preservation was not confirmed; a contained false is a
+successful callback with no deferred-dirty requirement. This separates the two
+meanings that the old boolean conflated. The contained bool keeps its existing
+dirty-tracking meaning. Completed establishes only completion of the existing
+cache action; any required device visibility still comes from that action's
+existing readback/Finish, and does not reconcile unknown physical replicas.
+
+Legacy preservation callers (`check_gpu_writes` or `unmap`) with NCE disabled use the checked path,
+with an explicit legacy `.value_or(false)` adapter. **The Memory store wrappers
+still consume the old boolean and are not repaired transactions.** Future F2
+integration must consume the optional result and reject failure before stores;
+this adapter must not be reused as proof of preservation success.
+
+Default cache invalidation and all NCE-mode calls retain their original dispatch
+body. Further review found that NCE alignment-fault instruction emulation calls
+Memory::WriteBlock, so guarding only default invalidation was insufficient.
+The adapter explicitly excludes NCE mode using the existing IsNceEnabled flag.
+Neither the access fault nor alignment fault acquires the new promise/wait machinery. The
+acknowledged path is not signal-safe and is not inserted as an F1 workaround.
+ThreadManager shutdown/queue/fence behavior itself is unchanged.
+
+`run_preservation_callback_tests.py` compiles the production helper, adding only
+a copied-header signal immediately before its future wait. It covers inline
+completion, rejection, retained/skipped late closure, owned payload lifetime,
+active shutdown wait, callback failure, inline exception propagation and 200
+start/cancel races per run. Ten repetitions pass. These are host callback tests.
+
+The actual ThreadManager runner also uses the helper with the full production
+class/RunThread/queues. Ten repetitions pass for pre-start/post-stop rejection,
+normal completion, Stop waking an active request before its callback finishes,
+callback exception and the failed worker acknowledging a skipped command.
+The existing cache extraction runners now extract both helper methods; they
+also distinguish successful false from cancellation/nullopt.
+
+Performance: off-thread preservation adds a shared request/promise/future and
+waits for actual active callback completion on shutdown. It adds no Finish or
+Vulkan completion registry. Clean writes acquire no new allocation or wait;
+the legacy adapter adds a backend-flag/dispatch branch. NCE mode and default
+invalidation retain the original path. Costs are not benchmarked.
+
+### Follow-up Windows validation and remaining scope
+
+Windows MinGW GCC 13.2.0: the four lifecycle runners, M3A, M2, resolver, M0 DMA,
+M1/M1.1 shadow with the pinned real fmt headers, nine gather runners, new CPU
+CopyBlock tests and new acknowledged callback tests pass. Logs are in
+`.diagnostics/f1-f2-followup`. The final native-dispatch/backend separation was followed
+by rerunning the affected cache extraction runners and defect witnesses.
+
+The five F1/F2 defect witnesses still reproduce; they are **not fixed-code
+passes**. No full emulator link, Linux, sanitizer or Android/device validation
+is claimed in this follow-up. Windows fixtures cannot discharge F1 signal
+safety, native cross-core exclusion or reprotection obligations.
+
+The remaining F2 work is a production mapping/access reservation joined by CPU
+stores, GPU consumers/producers and mapping mutations, with post-store exact
+publication and explicit failure. CopyBlock must remain separately scoped as
+above. Remaining F1 work is signal-safe handoff plus native access epochs across
+all supported cores/aliases and close/reprotect before GPU reuse. These were
+not replaced with a global hot-path mutex or speculative signal-handler waits.
