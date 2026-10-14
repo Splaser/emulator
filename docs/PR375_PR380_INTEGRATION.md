@@ -73,3 +73,64 @@ build from extracted-source tests and from Linux/Android/device execution.
 
 Status: conflict resolution and Windows focused regressions completed; native CI compilation
 and Linux regression validation pending. F2 remains isolated on its original branch.
+
+## Handoff: 2026-10-14 (Asia/Taipei)
+
+The integration is committed and pushed to the personal fork, on
+`Splaser/emulator:codex/pr375-pr380-integration`. The roadmap commit is `6476a0e906`,
+and the upstream merge/integration commit is `eabdc59cd4`.
+
+### Completed locally
+
+- All seven conflicts resolved; upstream #380 is an ancestor of the integration branch.
+- Windows GCC 13.2: all 17 runnable existing regression entry points passed: four GPU lifecycle,
+  nine gather-buffer, DMA snapshot, physical resolver, physical shadow, and chunk-import mocks.
+- New `tools/pr375_pr380_tests/run_tests.py` also passed on Windows. It compiles extracted actual
+  submission usage, mapping parser/sparse registry, and the narrow NCE recovery code.
+- Renderer orchestration checks cover submission-lock availability while draining and lock
+  ownership during final WaitIdle. Normal CPU-read/composite completion regressions pass.
+- Linux-only HostMemory/export/cold resolver runners cannot run on this Windows host. The
+  Windows imported-buffer test uses mocked fstat/driver behavior, not a real dma-buf driver.
+
+### CI state at handoff
+
+- Initial source revision: `eabdc59cd4e3f8a573c08aa9665764427f822201`.
+- Initial run `38575916030`: Android setup failed before CMake because `sdkmanager` was absent
+  from PATH. The workflow now installs the Android SDK tools explicitly with setup-android.
+- A duplicate manual dispatch (`38575965148`) interacted with cancel-in-progress; both initial
+  runs ended cancelled. Neither is evidence of a successful production build.
+- The handoff commit push starts a fresh single push run. Use the latest integration-branch run
+  for its actual status; do not treat the local extraction tests as full compilation proof.
+- Do not claim the integration ready for main/#375 until native builds and regressions pass.
+
+### Resume on another computer
+
+```powershell
+git fetch origin
+git switch --track origin/codex/pr375-pr380-integration
+git pull --ff-only
+gh run list --repo Splaser/emulator --branch codex/pr375-pr380-integration --limit 5
+```
+
+If that local branch already exists, use `git switch codex/pr375-pr380-integration` instead of
+creating it again. Inspect the first failing compiler/configure error in the latest run and fix
+it on this branch. Keep Linux HostMemory tests and actual Android/NCE/device validation distinct.
+
+Remaining work, in order:
+
+1. Finish real Linux CLI/shader/tests and Android arm64 library compilation; repair actual
+   integration errors and rerun only the relevant checks.
+2. Finish Linux HostMemory/export/import and all existing coherency/lifecycle regression jobs.
+3. Keep HostMemory high risk: lazy alias remapping stays disabled pending target validation.
+   Run NCE compatibility cases on a device; Windows instruction fixtures are not signal tests.
+4. Review the final integrated diff before synchronizing PR #375 or personal main. Neither
+   branch has been updated by this integration work.
+5. Only then return to F2. Its separate snapshot is `codex/fix-cpu-gpu-write-coherency` at
+   `80c4f4d7f7` (eight commits beyond #375). No F2 commits were merged here. Candidate admission
+   remains test-only, and production F1/F2 remain unresolved.
+
+Local detailed logs live under `.diagnostics/pr375-pr380/` and are ignored by Git. The tracked
+tests/workflow reproduce them elsewhere; diagnostics from this Windows computer are not
+required inputs for the production build. The physical-shadow runner can use installed fmt
+headers via `--fmt-include`; on this computer the real headers were supplied from the existing
+ignored `.diagnostics/f1-f2-validation/fmt/include` fixture dependency.
