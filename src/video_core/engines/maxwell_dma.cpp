@@ -8,6 +8,7 @@
 #include "common/logging.h"
 #include "common/settings.h"
 #include "core/core.h"
+#include "video_core/engines/dma_source_snapshot.h"
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/engines/maxwell_dma.h"
 #include "video_core/guest_memory.h"
@@ -178,11 +179,8 @@ void MaxwellDMA::Launch() {
                 }
             } else {
                 if (!accelerate.BufferCopy(regs.offset_in, regs.offset_out, regs.line_length_in)) {
-                    Tegra::Memory::GpuGuestMemoryScoped<
-                        u8, Tegra::Memory::GuestMemoryFlags::SafeReadCachedWrite>
-                        tmp_write_buffer(memory_manager, regs.offset_in, regs.line_length_in,
-                                         &read_buffer);
-                    tmp_write_buffer.SetAddressAndSize(regs.offset_out, regs.line_length_in);
+                    CopyDmaSourceSnapshot(memory_manager, regs.offset_in, regs.offset_out,
+                                          regs.line_length_in, read_buffer);
                 }
             }
         }

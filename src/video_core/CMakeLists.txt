@@ -57,6 +57,7 @@ add_library(video_core STATIC
     engines/maxwell_3d.cpp
     engines/maxwell_3d.h
     engines/maxwell_dma.cpp
+    engines/dma_source_snapshot.h
     engines/maxwell_dma.h
     engines/puller.cpp
     engines/puller.h
