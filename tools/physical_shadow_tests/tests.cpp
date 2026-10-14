@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include <map>
 #include "video_core/physical_shadow.h"
+#define FMT_HEADER_ONLY
+#include <fmt/format.h>
 using namespace VideoCommon;
 constexpr size_t NUM_STAGES = 2;
 struct Binding {
     u64 device_addr{}, gpu_addr{}, size{}, gather_gpu_addr{}, gather_size{};
+    u32 buffer_id{1};
 };
+constexpr u32 NULL_BUFFER_ID = 0;
 struct Channel {
     u32 enabled_compute_uniform_buffer_mask{}, enabled_compute_storage_buffers{},
         written_compute_storage_buffers{}, enabled_compute_texture_buffers{},
@@ -32,6 +36,7 @@ struct BufferCache {
     struct Buffer {
         bool direct{};
     };
+    std::array<Buffer, 2> slot_buffers{};
     struct Gather {
         std::unique_ptr<Buffer> buffer;
     };
@@ -50,19 +55,47 @@ struct BufferCache {
 /* BINDING_VISITOR */
 namespace ImageFlagBits {
 constexpr u32 GpuModified = 2;
+constexpr u32 CpuModified = 4, Tracked = 8;
+} // namespace ImageFlagBits
+bool False(u32 flags) {
+    return !flags;
 }
+using ImageId = u32;
 struct ImageBase {
     u64 gpu_addr{}, cpu_addr{}, guest_size_bytes{}, modification_tick{};
     u32 flags{};
+    size_t lru_index{};
 };
 template <class P>
 struct TextureCache {
     PhysicalShadow* physical_shadow{};
     Tegra::MemoryManager* gpu_memory{};
     u64 modification_tick{};
-    void MarkModification(ImageBase&) noexcept;
+    using Image = ImageBase;
+    std::array<Image, 2> slot_images{};
+    struct Lru {
+        void Touch(size_t, u64) {}
+    } lru_cache;
+    u64 frame_tick{};
+    void TrackImage(Image&, ImageId) {}
+    void RefreshContents(Image&, ImageId) {}
+    void SynchronizeAliases(ImageId) {}
+    void MarkModification(ImageBase&, ShadowKind = ShadowKind::Texture) noexcept;
+    void PrepareImage(ImageId, bool, bool, ShadowKind = ShadowKind::Texture);
 };
 /* TEXTURE_HOOK */
+/* TEXTURE_PREPARE */
+
+namespace ReportFixture {
+std::vector<std::string> messages;
+#define LOG_INFO(category, ...) messages.push_back(fmt::format(__VA_ARGS__))
+struct RasterizerVulkan {
+    std::unique_ptr<PhysicalShadow> physical_shadow;
+    void ReportPhysicalShadow() noexcept;
+};
+/* SHADOW_REPORT */
+#undef LOG_INFO
+} // namespace ReportFixture
 
 struct RacyMemory {
     Tegra::MemoryManager& real;
@@ -73,10 +106,10 @@ struct RacyMemory {
     auto GpuToCpuAddress(u64 a) {
         return real.GpuToCpuAddress(a);
     }
-    auto ResolvePhysicalRanges(u64 a, u64 n) {
+    auto ResolvePhysicalRanges(u64 a, u64 n, Tegra::PhysicalResolveTiming* timing = nullptr) {
         if (fail)
             throw std::bad_alloc{};
-        auto snapshot = real.ResolvePhysicalRanges(a, n);
+        auto snapshot = real.ResolvePhysicalRanges(a, n, timing);
         if (remap)
             real.memory.Map(0x10000, 0x15000);
         return snapshot;
@@ -104,6 +137,11 @@ int main() {
     assert(gpu.MapGeneration() == gpu_generation && dev.MapGeneration() == device_generation);
     assert(shadow.Counters().dispatches == 1 && shadow.Counters().max_dispatch_queries == 4);
     assert(shadow.Counters().observer_ns >= shadow.Counters().query_ns);
+    assert(shadow.Counters().resolve_latency.count == shadow.Counters().queries);
+    assert(shadow.Counters().dispatch_latency.count == 1);
+    assert(shadow.Counters().max_distinct_gpu_refs >= 3);
+    assert(shadow.Counters().max_distinct_device_refs == 2);
+    assert(shadow.Counters().writable_alias_pairs > 0);
     std::cout << "PASS physical aliases across DAddr/MemoryManager, partial ranges, timing; "
                  "mapping state unchanged\n";
 
@@ -118,6 +156,8 @@ int main() {
     dev.Map(D, 0x9000);
     shadow.Observe(gpu, G, P, ShadowKind::Scratch, true);
     assert(shadow.Counters().cache_invalidations == 2);
+    assert(shadow.Counters().generation_invalidations == 2);
+    assert(shadow.Counters().generation_requeries == 2);
     std::cout << "PASS cache reuse and GPU/device mapping-generation invalidation\n";
 
     PhysicalShadow coverage;
@@ -214,5 +254,73 @@ int main() {
         bounded.Observe(gpu, G + i * P, P, ShadowKind::Buffer, true);
     }
     assert(bounded.Counters().evictions == 5);
+    assert(bounded.Counters().active_entries == PhysicalShadow::Capacity);
+    assert(bounded.Counters().peak_entries == PhysicalShadow::Capacity);
+    assert(bounded.Counters().peak_metadata_bytes >= bounded.Counters().metadata_bytes);
     std::cout << "PASS bounded historical metadata window with explicit evictions\n";
+
+    ShadowLatency latency;
+    for (u64 ns : {1, 2, 4, 8, 16, 32, 64, 128, 256, 512})
+        latency.Add(ns);
+    assert(latency.Percentile(50) == 16 && latency.Percentile(95) == 512 &&
+           latency.Percentile(99) == 512);
+    PhysicalShadow references;
+    dev.Map(D, 0x5000);
+    gpu.Map(G, D, P);
+    gpu.Map(G + 8 * P, D + 8 * P, P);
+    other.Map(G, D + 8 * P, P);
+    references.Observe(gpu, G, P, ShadowKind::Buffer, false);
+    references.Observe(gpu, G, P, ShadowKind::Texel, false); // two descriptors, one GPU reference
+    references.Observe(gpu, G + 8 * P, P, ShadowKind::Buffer, false);
+    references.Observe(other, G, P, ShadowKind::Buffer, false);
+    assert(references.Counters().max_distinct_gpu_refs == 3);
+    assert(references.Counters().max_distinct_device_refs == 2);
+    assert(references.Counters().readonly_alias_pairs > 0 &&
+           references.Counters().writable_alias_pairs == 0);
+    references.Observe(gpu, G, P, ShadowKind::Scratch, true);
+    assert(references.Counters().max_distinct_gpu_refs == 3 &&
+           references.Counters().max_writable_refs == 1);
+    assert(references.Counters().sample_length == P);
+    std::cout << "PASS percentile buckets, distinct references and read-only versus "
+                 "potential-write classification\n";
+
+    Tegra::PhysicalResolveTiming timing;
+    gpu.ResolvePhysicalRanges(G, P, &timing);
+    assert(timing.walk_ns > 0);
+    gpu.ResolvePhysicalRanges(G, P); // default path uses null timer sinks
+    std::cout << "PASS production optional resolver timing separates lock acquisition and walk; "
+                 "default sinks absent\n";
+    PhysicalShadow classified;
+    buffers.slot_buffers[1].direct = true;
+    buffers.channel.compute_uniform_buffers[0].buffer_id = 1;
+    buffers.ObservePhysicalBindings(classified, true);
+    assert(classified.Counters()
+               .coverage[static_cast<size_t>(ShadowKind::DirectBuffer)]
+               .observations == 1);
+    textures.physical_shadow = &classified;
+    textures.MarkModification(image, ShadowKind::RenderTarget);
+    assert(classified.Counters()
+               .coverage[static_cast<size_t>(ShadowKind::RenderTarget)]
+               .write_intents == 1);
+    assert(classified.Counters().coverage[static_cast<size_t>(ShadowKind::Texture)].observations ==
+           0);
+    textures.slot_images[0] = image;
+    const auto tick = textures.modification_tick;
+    textures.PrepareImage(0, false, false);
+    assert(classified.Counters().coverage[static_cast<size_t>(ShadowKind::Texture)].observations ==
+           1);
+    assert(classified.Counters().coverage[static_cast<size_t>(ShadowKind::Texture)].write_intents ==
+           0);
+    assert(textures.modification_tick == tick);
+    std::cout << "PASS direct/staged classifications and explicit render-target producer tag\n";
+    ReportFixture::RasterizerVulkan reporting;
+    reporting.ReportPhysicalShadow();
+    assert(ReportFixture::messages.empty());
+    reporting.physical_shadow = std::make_unique<PhysicalShadow>();
+    reporting.ReportPhysicalShadow();
+    assert(ReportFixture::messages.size() == 10);
+    assert(ReportFixture::messages[0].find("coverage=unknown") != std::string::npos);
+    assert(ReportFixture::messages[2].find("resolve_p99_upper_ns=") != std::string::npos);
+    assert(ReportFixture::messages[8].find("kind=render_target") != std::string::npos);
+    std::cout << "PASS production report with real fmt: explicit unknown coverage and percentile fields; disabled report is inert\n";
 }

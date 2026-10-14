@@ -2617,8 +2617,11 @@ void BufferCache<P>::ObservePhysicalBindings(PhysicalShadow& shadow, bool comput
             kind = ShadowKind::Scratch;
             const auto it = gather_buffers.find(binding.gather_gpu_addr);
             if (it != gather_buffers.end() && it->second.buffer && IsDirectGuest(*it->second.buffer)) {
-                kind = ShadowKind::Buffer;
+                kind = ShadowKind::DirectBuffer;
             }
+        } else if (kind == ShadowKind::Buffer && binding.buffer_id &&
+                   binding.buffer_id != NULL_BUFFER_ID && IsDirectGuest(slot_buffers[binding.buffer_id])) {
+            kind = ShadowKind::DirectBuffer;
         }
         // Cached texel views require their real contiguous DAddr to match. Split
         // uniform/storage views instead describe logical GPU ranges in scratch.

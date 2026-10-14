@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <bit>
 #include <chrono>
 #include <optional>
 #include <vector>
@@ -11,11 +12,40 @@ namespace VideoCommon {
 
 // Access intent and historical geometry only. Never a data owner, resource lease,
 // dispatch permission, or reason to change synchronization/fallback selection.
-enum class ShadowKind : size_t { Buffer, Scratch, Texel, Texture, Count };
+enum class ShadowKind : size_t {
+    Buffer,
+    Scratch,
+    Texel,
+    Texture,
+    RenderTarget,
+    DirectBuffer,
+    Count
+};
 struct ShadowCoverage {
     u64 observations{}, write_intents{}, registered_writes{}, unresolved{};
     u64 bytes{}, max_range{}, registered_segments{}, split_observations{};
     std::array<u64, 8> size_buckets{};
+};
+// Fixed log2 histogram. Percentiles are bucket upper bounds, not exact samples.
+struct ShadowLatency {
+    std::array<u64, 65> buckets{};
+    u64 count{};
+    void Add(u64 ns) noexcept {
+        ++buckets[std::bit_width(ns ? ns - 1 : 0)];
+        ++count;
+    }
+    u64 Percentile(u64 percent) const noexcept {
+        if (!count)
+            return 0;
+        const u64 rank = count / 100 * percent + (count % 100 * percent + 99) / 100;
+        u64 accumulated = 0;
+        for (size_t i = 0; i < buckets.size(); ++i) {
+            accumulated += buckets[i];
+            if (accumulated >= rank)
+                return i == 64 ? ~u64{0} : u64{1} << i;
+        }
+        return ~u64{0};
+    }
 };
 struct ShadowCounters {
     std::array<ShadowCoverage, static_cast<size_t>(ShadowKind::Count)> coverage{};
@@ -25,6 +55,17 @@ struct ShadowCounters {
     u64 historical_aliases{}, different_daddr_aliases{}, different_manager_aliases{};
     u64 provenance_mismatches{}, comparison_drops{}, errors{}, evictions{};
     u64 outside_dispatch_queries{}, max_dispatch_queries{};
+    u64 generation_requeries{}, generation_invalidations{}, lifetime_invalidations{};
+    u64 registered_observations{}, readonly_alias_pairs{}, writable_alias_pairs{};
+    u64 alias_observations{}, alias_samples{}, cardinality_drops{};
+    u64 max_distinct_gpu_refs{}, max_distinct_device_refs{}, max_readonly_refs{},
+        max_writable_refs{};
+    u64 sample_epoch{}, sample_offset{}, sample_length{}, sample_gpu_refs{}, sample_device_refs{};
+    u64 sample_readonly_refs{}, sample_writable_refs{};
+    u64 active_entries{}, peak_entries{}, metadata_bytes{}, peak_metadata_bytes{};
+    u64 gpu_lock_wait_ns{}, device_lock_wait_ns{}, walk_ns{};
+    u64 validation_lock_wait_ns{}, provenance_walk_ns{};
+    ShadowLatency resolve_latency, lock_latency, walk_latency, dispatch_latency;
 };
 
 // GPU-thread confined. Bounded metadata; contains no backing allocation, driver
@@ -35,6 +76,10 @@ public:
     static constexpr size_t Capacity = 128;
     static constexpr u64 MaxRange = 64ULL << 20;
     static constexpr size_t MaxSegments = 256;
+
+    PhysicalShadow() {
+        TrackMetadata();
+    }
 
     void BeginDispatch() noexcept {
         in_dispatch = true;
@@ -51,6 +96,7 @@ public:
         counters.max_dispatch_queries = std::max(counters.max_dispatch_queries, dispatch_queries);
         counters.max_dispatch_observer_ns =
             std::max(counters.max_dispatch_observer_ns, dispatch_observer_ns);
+        counters.dispatch_latency.Add(dispatch_observer_ns);
         in_dispatch = false;
     }
     const ShadowCounters& Counters() const noexcept {
@@ -97,17 +143,30 @@ public:
             }
             if (entry) {
                 const auto start = Clock::now();
-                const bool current = Tegra::ValidatePhysicalSnapshot(entry->physical);
+                const bool current = Tegra::ValidatePhysicalSnapshot(
+                    entry->physical, &counters.validation_lock_wait_ns);
                 counters.validation_ns += NsSince(start);
                 if (current) {
                     ++counters.cache_hits;
                 } else {
                     ++counters.cache_invalidations;
+                    const auto& stamp = entry->physical.stamp;
+                    if (!stamp.gpu_address_space->alive.load() ||
+                        !stamp.device_address_space->alive.load() || !stamp.backing->alive.load()) {
+                        ++counters.lifetime_invalidations;
+                    } else if (stamp.gpu_address_space->generation.load() !=
+                                   stamp.gpu_mapping_generation ||
+                               stamp.device_address_space->generation.load() !=
+                                   stamp.device_mapping_generation) {
+                        ++counters.generation_invalidations;
+                        ++counters.generation_requeries;
+                    }
                     entry = nullptr;
                 }
             }
             if (!entry) {
                 auto physical = ResolveTimed(memory, address, size);
+                TrackMetadata(physical.segments.capacity() * sizeof(Tegra::PhysicalSegment));
                 if (physical.status != Tegra::PhysicalResolveStatus::Success ||
                     std::ranges::any_of(physical.segments,
                                         [](const auto& s) { return !s.physical; })) {
@@ -126,6 +185,8 @@ public:
                 // assembling a physical/DAddr pair that never existed together.
                 const auto validate_start = Clock::now();
                 const bool captured = CaptureDeviceRanges(memory, next);
+                TrackMetadata(next.physical.segments.capacity() * sizeof(Tegra::PhysicalSegment) +
+                              next.device.capacity() * sizeof(DeviceRange));
                 counters.validation_ns += NsSince(validate_start);
                 if (!captured) {
                     ++counters.snapshot_invalidations;
@@ -141,8 +202,11 @@ public:
                 // entry first in the array would turn every lookup into a miss.
                 auto& slot = cache_slot ? *cache_slot : entries[cursor++ % Capacity];
                 counters.evictions += !cache_slot && slot.has_value();
+                counters.active_entries += !slot.has_value();
+                counters.peak_entries = std::max(counters.peak_entries, counters.active_entries);
                 slot = std::move(next);
                 entry = &*slot;
+                TrackMetadata();
             }
             // A cached texture/texel resource is identified by its actual DAddr
             // span. Its old GPU VA may now name different storage. Don't register
@@ -158,7 +222,10 @@ public:
             coverage.registered_segments += entry->physical.segments.size();
             coverage.split_observations += entry->physical.segments.size() > 1;
             entry->registered = true;
+            entry->writable_seen |= writable;
+            ++counters.registered_observations;
             Compare(*entry);
+            SampleCardinality(*entry);
         } catch (...) {
             // Diagnostics must not reject work or alter emulation on OOM/error.
             ++counters.errors;
@@ -178,6 +245,7 @@ private:
         std::vector<DeviceRange> device;
         ShadowKind kind{};
         bool registered{};
+        bool writable_seen{};
     };
     static u64 NsSince(Clock::time_point start) {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
@@ -185,10 +253,17 @@ private:
     template <class Memory>
     Tegra::PhysicalResolveResult ResolveTimed(Memory& memory, u64 address, u64 size) {
         const auto start = Clock::now();
+        Tegra::PhysicalResolveTiming timing;
         ++counters.queries;
         const auto record = [&] {
             const u64 elapsed = NsSince(start);
             counters.query_ns += elapsed;
+            counters.gpu_lock_wait_ns += timing.gpu_lock_wait_ns;
+            counters.device_lock_wait_ns += timing.device_lock_wait_ns;
+            counters.walk_ns += timing.walk_ns;
+            counters.resolve_latency.Add(elapsed);
+            counters.lock_latency.Add(timing.gpu_lock_wait_ns + timing.device_lock_wait_ns);
+            counters.walk_latency.Add(timing.walk_ns);
             if (in_dispatch) {
                 dispatch_query_ns += elapsed;
                 ++dispatch_queries;
@@ -197,7 +272,7 @@ private:
             }
         };
         try {
-            auto result = memory.ResolvePhysicalRanges(address, size);
+            auto result = memory.ResolvePhysicalRanges(address, size, &timing);
             record();
             return result;
         } catch (...) {
@@ -206,14 +281,21 @@ private:
         }
     }
     template <class Memory>
-    static bool CaptureDeviceRanges(Memory& memory, Entry& entry) {
+    bool CaptureDeviceRanges(Memory& memory, Entry& entry) {
         const auto& stamp = entry.physical.stamp;
         if (!stamp.gpu_address_space || !stamp.device_address_space ||
             stamp.gpu_address_space == stamp.device_address_space) {
             return false;
         }
-        std::unique_lock gpu_lock{stamp.gpu_address_space->mutex};
-        std::unique_lock device_lock{stamp.device_address_space->mutex};
+        const auto gpu_lock = [&] {
+            Common::MappingTimer timer{&counters.validation_lock_wait_ns};
+            return std::unique_lock{stamp.gpu_address_space->mutex};
+        }();
+        const auto device_lock = [&] {
+            Common::MappingTimer timer{&counters.validation_lock_wait_ns};
+            return std::unique_lock{stamp.device_address_space->mutex};
+        }();
+        Common::MappingTimer walk_timer{&counters.provenance_walk_ns};
         if (!Tegra::Detail::MappingStampCurrentLocked(stamp)) {
             return false;
         }
@@ -250,6 +332,7 @@ private:
     }
     void Compare(const Entry& current) {
         size_t comparisons = 0;
+        bool any_alias = false;
         for (const auto& old : entries) {
             if (!old || !old->registered || &*old == &current) {
                 continue;
@@ -263,6 +346,7 @@ private:
                     }
                     if (Tegra::PhysicalRangesOverlap(*a.physical, *b.physical)) {
                         alias = true;
+                        any_alias = true;
                         u64 physical =
                             std::max(a.physical->physical_offset, b.physical->physical_offset);
                         const u64 end = std::min(a.physical->physical_offset + a.length,
@@ -287,10 +371,142 @@ private:
                 }
             }
             counters.historical_aliases += alias;
+            counters.readonly_alias_pairs += alias && !current.writable_seen && !old->writable_seen;
+            counters.writable_alias_pairs += alias && (current.writable_seen || old->writable_seen);
             counters.different_daddr_aliases += alias && different_device;
             counters.different_manager_aliases +=
                 alias &&
                 current.physical.stamp.gpu_address_space != old->physical.stamp.gpu_address_space;
+        }
+        counters.alias_observations += any_alias;
+    }
+    void TrackMetadata(u64 transient = 0) noexcept {
+        u64 bytes = sizeof(*this);
+        for (const auto& entry : entries) {
+            if (entry)
+                bytes += entry->physical.segments.capacity() * sizeof(Tegra::PhysicalSegment) +
+                         entry->device.capacity() * sizeof(DeviceRange);
+        }
+        counters.metadata_bytes = bytes;
+        counters.peak_metadata_bytes = std::max(counters.peak_metadata_bytes, bytes + transient);
+    }
+    // Sample exact constant-membership intervals at segment/alias starts. Reference
+    // cardinalities are distinct token+address pairs, not descriptor counts.
+    // Historical window only, bounded scans; no claim of complete/live topology.
+    void SampleCardinality(const Entry& current) noexcept {
+        struct Ref {
+            const Common::MappingEpoch* token{};
+            u64 address{};
+            bool writable{};
+        };
+        size_t scans = 0, samples = 0;
+        std::array<u64, 8> anchors{};
+        for (const auto& segment : current.physical.segments) {
+            const u64 begin = segment.physical->physical_offset;
+            const u64 end = begin + segment.length;
+            size_t anchor_count = 1;
+            anchors[0] = begin;
+            for (const auto& other : entries) {
+                if (!other || !other->registered)
+                    continue;
+                for (const auto& s : other->physical.segments) {
+                    if (++scans > 4096) {
+                        ++counters.cardinality_drops;
+                        return;
+                    }
+                    if (Tegra::PhysicalRangesOverlap(*segment.physical, *s.physical)) {
+                        const u64 point = std::max(begin, s.physical->physical_offset);
+                        if (std::find(anchors.begin(), anchors.begin() + anchor_count, point) ==
+                            anchors.begin() + anchor_count) {
+                            if (anchor_count == anchors.size()) {
+                                ++counters.cardinality_drops;
+                                continue;
+                            }
+                            anchors[anchor_count++] = point;
+                        }
+                    }
+                }
+            }
+            for (size_t p = 0; p < anchor_count; ++p) {
+                if (++samples > 8) {
+                    ++counters.cardinality_drops;
+                    return;
+                }
+                const u64 point = anchors[p];
+                if (point >= end)
+                    continue;
+                u64 slice_end = end;
+                std::array<Ref, 256> gpu_refs{}, device_refs{};
+                size_t gpu_count = 0, device_count = 0;
+                const auto add = [&](auto& refs, size_t& count, const Common::MappingEpoch* token,
+                                     u64 address, bool writable) {
+                    for (size_t i = 0; i < count; ++i) {
+                        if (refs[i].token == token && refs[i].address == address) {
+                            refs[i].writable |= writable;
+                            return true;
+                        }
+                    }
+                    if (count == refs.size())
+                        return false;
+                    refs[count++] = {token, address, writable};
+                    return true;
+                };
+                for (const auto& other : entries) {
+                    if (!other || !other->registered)
+                        continue;
+                    for (const auto& s : other->physical.segments) {
+                        if (++scans > 4096) {
+                            ++counters.cardinality_drops;
+                            return;
+                        }
+                        if (s.physical->backing_epoch != segment.physical->backing_epoch)
+                            continue;
+                        if (point < s.physical->physical_offset) {
+                            slice_end = std::min(slice_end, s.physical->physical_offset);
+                            continue;
+                        }
+                        if (point - s.physical->physical_offset >= s.length)
+                            continue;
+                        slice_end = std::min(slice_end, s.physical->physical_offset + s.length);
+                        const u64 logical = s.logical_offset + point - s.physical->physical_offset;
+                        for (const auto& range : other->device) {
+                            if (logical >= range.logical &&
+                                logical - range.logical < range.length) {
+                                slice_end = std::min(slice_end, point + range.length -
+                                                                    (logical - range.logical));
+                                break;
+                            }
+                        }
+                        if (!add(gpu_refs, gpu_count, other->physical.stamp.gpu_address_space.get(),
+                                 other->address + logical, other->writable_seen) ||
+                            !add(device_refs, device_count,
+                                 other->physical.stamp.device_address_space.get(),
+                                 DeviceAt(*other, logical), other->writable_seen)) {
+                            ++counters.cardinality_drops;
+                            return;
+                        }
+                    }
+                }
+                const u64 writers = std::count_if(gpu_refs.begin(), gpu_refs.begin() + gpu_count,
+                                                  [](const auto& ref) { return ref.writable; });
+                ++counters.alias_samples;
+                counters.max_distinct_gpu_refs =
+                    std::max<u64>(counters.max_distinct_gpu_refs, gpu_count);
+                counters.max_distinct_device_refs =
+                    std::max<u64>(counters.max_distinct_device_refs, device_count);
+                counters.max_writable_refs = std::max(counters.max_writable_refs, writers);
+                counters.max_readonly_refs =
+                    std::max<u64>(counters.max_readonly_refs, gpu_count - writers);
+                if (gpu_count >= counters.sample_gpu_refs) {
+                    counters.sample_epoch = segment.physical->backing_epoch;
+                    counters.sample_offset = point;
+                    counters.sample_length = slice_end - point;
+                    counters.sample_gpu_refs = gpu_count;
+                    counters.sample_device_refs = device_count;
+                    counters.sample_writable_refs = writers;
+                    counters.sample_readonly_refs = gpu_count - writers;
+                }
+            }
         }
     }
     std::array<std::optional<Entry>, Capacity> entries;

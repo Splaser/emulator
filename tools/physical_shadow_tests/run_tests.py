@@ -7,6 +7,7 @@ import subprocess
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--cxx', default=os.environ.get('CXX', 'c++'))
+parser.add_argument('--fmt-include', type=Path, help='Directory containing real fmt headers (not stubs)')
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
 out = root / '.diagnostics/physical-shadow-tests' / ('windows' if os.name == 'nt' else 'linux')
@@ -39,11 +40,24 @@ fixture = fixture.replace('/* GPU_FUNCTIONS */', ''.join(
 test = Path(__file__).with_name('tests.cpp').read_text()
 buffer = (root / 'src/video_core/buffer_cache/buffer_cache.h').read_text()
 texture = (root / 'src/video_core/texture_cache/texture_cache.h').read_text()
+rasterizer = (root / 'src/video_core/renderer_vulkan/vk_rasterizer.cpp').read_text()
 test = test.replace('/* BINDING_VISITOR */', function(buffer, 'BufferCache<P>::ObservePhysicalBindings(', True))
 test = test.replace('/* TEXTURE_HOOK */', function(texture, 'TextureCache<P>::MarkModification(ImageBase&', True))
+test = test.replace('/* TEXTURE_PREPARE */', function(texture, 'TextureCache<P>::PrepareImage(', True))
+test = test.replace('/* SHADOW_REPORT */', function(rasterizer, 'RasterizerVulkan::ReportPhysicalShadow('))
 cpp = out / 'tests.cpp'
 cpp.write_text(fixture + test)
 exe = out / ('tests.exe' if os.name == 'nt' else 'tests')
+fmt_flags = []
+if args.fmt_include:
+    fmt_flags = ['-isystem', str(args.fmt_include.resolve())]
+else:
+    for include in [root / 'externals/fmt/include',
+                    root / '.diagnostics/chunk-import-tests/deps/extracted/usr/include']:
+        if (include / 'fmt/format.h').is_file():
+            fmt_flags = ['-isystem', str(include)]
+            break
 subprocess.run([args.cxx, '-std=c++23', '-O0', '-pthread', '-Wall', '-Wextra', '-Werror',
-                '-Wno-missing-field-initializers', '-I', str(root / 'src'), str(cpp), '-o', str(exe)], check=True)
+                '-Wno-missing-field-initializers', '-I', str(root / 'src'),
+                *fmt_flags, str(cpp), '-o', str(exe)], check=True)
 subprocess.run([str(exe)], check=True, timeout=60)

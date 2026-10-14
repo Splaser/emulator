@@ -60,17 +60,22 @@ MemoryManager::~MemoryManager() {
     mapping_lifetime.Invalidate(); // invalidate retained stamps before freeing tables
 }
 
-PhysicalResolveResult MemoryManager::ResolvePhysicalRanges(GPUVAddr address, u64 size) const {
-    const auto gpu_lock = AcquireMappingRead();
+PhysicalResolveResult MemoryManager::ResolvePhysicalRanges(GPUVAddr address, u64 size,
+                                                         PhysicalResolveTiming* timing) const {
+    const auto gpu_lock = [&] {
+        Common::MappingTimer timer{timing ? &timing->gpu_lock_wait_ns : nullptr};
+        return AcquireMappingRead();
+    }();
     return memory.ReadPhysicalMappingSnapshot(
         [&](auto device_epoch, u64 device_generation, auto backing, u64 backing_size,
             const auto& physical_address) {
+            Common::MappingTimer timer{timing ? &timing->walk_ns : nullptr};
             MappingStamp stamp{mapping_lifetime.Get(), std::move(device_epoch), GetID(),
                                MapGeneration(), device_generation, std::move(backing), backing_size};
             return Detail::ResolvePhysicalRangesLocked(
                 std::move(stamp), address, size, address_space_size, page_size, Core::DEVICE_PAGESIZE,
                 [this](GPUVAddr gpu) { return GpuToCpuAddress(gpu); }, physical_address);
-        });
+        }, timing ? &timing->device_lock_wait_ns : nullptr);
 }
 
 template <bool is_big_page>

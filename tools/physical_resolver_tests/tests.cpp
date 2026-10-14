@@ -117,7 +117,7 @@ public:
     u64 Map(u64, u64, size_t, PTEKind = PTEKind::INVALID, bool = false);
     void Unmap(u64, size_t);
     std::optional<DAddr> GpuToCpuAddress(u64) const;
-    PhysicalResolveResult ResolvePhysicalRanges(u64, u64) const;
+    PhysicalResolveResult ResolvePhysicalRanges(u64, u64, PhysicalResolveTiming* = nullptr) const;
     // Fixture subrange enumeration only. Map/Unmap, PTE mutation/generations,
     // GpuToCpuAddress and resolver wrapper below are extracted production code.
     template <bool>

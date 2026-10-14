@@ -475,10 +475,12 @@ void TextureCache<P>::UpdateRenderTargets(bool is_clear) {
     if (!flags[Dirty::RenderTargets]) {
         for (size_t index = 0; index < NUM_RT; ++index) {
             ImageViewId& color_buffer_id = render_targets.color_buffer_ids[index];
-            PrepareImageView(color_buffer_id, true, is_clear && IsFullClear(color_buffer_id));
+            PrepareImageView(color_buffer_id, true, is_clear && IsFullClear(color_buffer_id),
+                             ShadowKind::RenderTarget);
         }
         const ImageViewId depth_buffer_id = render_targets.depth_buffer_id;
-        PrepareImageView(depth_buffer_id, true, is_clear && IsFullClear(depth_buffer_id));
+        PrepareImageView(depth_buffer_id, true, is_clear && IsFullClear(depth_buffer_id),
+                         ShadowKind::RenderTarget);
         return;
     }
 
@@ -491,11 +493,13 @@ void TextureCache<P>::UpdateRenderTargets(bool is_clear) {
 
     for (size_t index = 0; index < NUM_RT; ++index) {
         ImageViewId& color_buffer_id = render_targets.color_buffer_ids[index];
-        PrepareImageView(color_buffer_id, true, is_clear && IsFullClear(color_buffer_id));
+        PrepareImageView(color_buffer_id, true, is_clear && IsFullClear(color_buffer_id),
+                         ShadowKind::RenderTarget);
     }
     const ImageViewId depth_buffer_id = render_targets.depth_buffer_id;
 
-    PrepareImageView(depth_buffer_id, true, is_clear && IsFullClear(depth_buffer_id));
+    PrepareImageView(depth_buffer_id, true, is_clear && IsFullClear(depth_buffer_id),
+                     ShadowKind::RenderTarget);
 
     for (size_t index = 0; index < NUM_RT; ++index) {
         render_targets.draw_buffers[index] = static_cast<u8>(maxwell3d->regs.rt_control.Map(index));
@@ -2521,10 +2525,10 @@ void TextureCache<P>::RemoveFramebuffers(std::span<const ImageViewId> removed_vi
 }
 
 template <class P>
-void TextureCache<P>::MarkModification(ImageBase& image) noexcept {
+void TextureCache<P>::MarkModification(ImageBase& image, ShadowKind shadow_kind) noexcept {
     if (physical_shadow && gpu_memory) {
         physical_shadow->Observe(*gpu_memory, image.gpu_addr, image.guest_size_bytes,
-                                 ShadowKind::Texture, true, image.cpu_addr);
+                                 shadow_kind, true, image.cpu_addr);
     }
     image.flags |= ImageFlagBits::GpuModified;
     image.modification_tick = ++modification_tick;
@@ -2584,7 +2588,8 @@ void TextureCache<P>::SynchronizeAliases(ImageId image_id) {
 }
 
 template <class P>
-void TextureCache<P>::PrepareImage(ImageId image_id, bool is_modification, bool invalidate) {
+void TextureCache<P>::PrepareImage(ImageId image_id, bool is_modification, bool invalidate,
+                                  ShadowKind shadow_kind) {
     Image& image = slot_images[image_id];
     if (invalidate) {
         image.flags &= ~(ImageFlagBits::CpuModified | ImageFlagBits::GpuModified);
@@ -2596,14 +2601,17 @@ void TextureCache<P>::PrepareImage(ImageId image_id, bool is_modification, bool 
         SynchronizeAliases(image_id);
     }
     if (is_modification) {
-        MarkModification(image);
+        MarkModification(image, shadow_kind);
+    } else if (physical_shadow && gpu_memory) {
+        physical_shadow->Observe(*gpu_memory, image.gpu_addr, image.guest_size_bytes,
+                                 shadow_kind, false, image.cpu_addr);
     }
     lru_cache.Touch(image.lru_index, frame_tick);
 }
 
 template <class P>
 void TextureCache<P>::PrepareImageView(ImageViewId image_view_id, bool is_modification,
-                                       bool invalidate) {
+                                       bool invalidate, ShadowKind shadow_kind) {
     if (!image_view_id) {
         return;
     }
@@ -2611,7 +2619,7 @@ void TextureCache<P>::PrepareImageView(ImageViewId image_view_id, bool is_modifi
     if (image_view.IsBuffer()) {
         return;
     }
-    PrepareImage(image_view.image_id, is_modification, invalidate);
+    PrepareImage(image_view.image_id, is_modification, invalidate, shadow_kind);
 }
 
 template <class P>

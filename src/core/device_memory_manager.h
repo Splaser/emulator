@@ -141,8 +141,11 @@ public:
     // Do not retain the translation callback, allocate backing, submit work or wait
     // for the GPU inside query. Retained results must contain values/tokens only.
     template <typename Func>
-    auto ReadPhysicalMappingSnapshot(Func&& query) const {
-        std::scoped_lock lock{mapping_guard};
+    auto ReadPhysicalMappingSnapshot(Func&& query, u64* lock_wait_ns = nullptr) const {
+        const auto lock = [&] {
+            Common::MappingTimer timer{lock_wait_ns};
+            return std::unique_lock{mapping_guard};
+        }();
         return query(std::shared_ptr<const Common::MappingEpoch>{mapping_lifetime.Get()},
                      MapGeneration(), backing_epoch, physical_backing_size,
                      [this](DAddr address) -> std::optional<PAddr> {

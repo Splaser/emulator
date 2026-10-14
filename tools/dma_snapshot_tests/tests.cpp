@@ -148,7 +148,7 @@ public:
                    std::string_view = "test") const;
     void WriteBlockCached(u64, const void*, size_t);
     std::optional<DAddr> GpuToCpuAddress(u64) const;
-    PhysicalResolveResult ResolvePhysicalRanges(u64, u64) const;
+    PhysicalResolveResult ResolvePhysicalRanges(u64, u64, PhysicalResolveTiming* = nullptr) const;
 };
 /* PRODUCTION_FUNCTIONS */
 } // namespace Tegra

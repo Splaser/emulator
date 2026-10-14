@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <memory>
 #include <optional>
 #include <shared_mutex>
 
@@ -219,7 +220,7 @@ private:
     RenderPassCache render_pass_cache;
 
     // Declared before caches so their borrowed diagnostic pointer dies first.
-    std::optional<VideoCommon::PhysicalShadow> physical_shadow;
+    std::unique_ptr<VideoCommon::PhysicalShadow> physical_shadow;
 
     void ReportPhysicalShadow() noexcept;
 

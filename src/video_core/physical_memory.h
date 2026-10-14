@@ -12,6 +12,10 @@ namespace Tegra {
 
 inline constexpr u64 PhysicalBackingChunkSize = 32ULL << 20;
 
+struct PhysicalResolveTiming {
+    u64 gpu_lock_wait_ns{}, device_lock_wait_ns{}, walk_ns{};
+};
+
 struct PhysicalRange {
     u64 backing_epoch{};
     u64 physical_offset{};
@@ -75,14 +79,21 @@ inline bool MappingStampCurrentLocked(const MappingStamp& stamp) {
 }
 } // namespace Detail
 
-[[nodiscard]] inline bool ValidatePhysicalSnapshot(const PhysicalResolveResult& result) {
+[[nodiscard]] inline bool ValidatePhysicalSnapshot(const PhysicalResolveResult& result,
+                                                   u64* lock_wait_ns = nullptr) {
     const auto& stamp = result.stamp;
     if (result.status != PhysicalResolveStatus::Success || !stamp.gpu_address_space ||
         !stamp.device_address_space || stamp.gpu_address_space == stamp.device_address_space) {
         return false;
     }
-    std::unique_lock gpu_lock{stamp.gpu_address_space->mutex};
-    std::unique_lock device_lock{stamp.device_address_space->mutex};
+    const auto gpu_lock = [&] {
+        Common::MappingTimer timer{lock_wait_ns};
+        return std::unique_lock{stamp.gpu_address_space->mutex};
+    }();
+    const auto device_lock = [&] {
+        Common::MappingTimer timer{lock_wait_ns};
+        return std::unique_lock{stamp.device_address_space->mutex};
+    }();
     return Detail::MappingStampCurrentLocked(stamp);
 }
 

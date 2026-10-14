@@ -31,10 +31,17 @@ Metrics:
 | `hits`, `cache_invalidations` | Valid cached stamp reuse versus stale stamp; invalidation rate = invalidations / (hits + invalidations) |
 | `snapshot_invalidations` | Fresh resolve became invalid before paired-lock provenance capture; denominator is queries |
 | `outside_dispatch_queries` | Texture producer marks outside observed draw/compute configuration (e.g. copy/clear) |
-| coverage by `buffer/scratch/texel/texture` | Observation/write-intent counts; successful full-range registration; unregistered write intents; unresolved observations including reads |
+| coverage by `staged_buffer/scratch/texel/texture/render_target/direct_buffer` | Observation/write-intent counts; successful full-range registration; unregistered write intents; unresolved observations including reads |
 | coverage `bytes/max_range/size_buckets` | Descriptor/event-weighted requested range distribution, including unresolved attempts; bucket edges are 64 B, 1 KiB, 16 KiB, 64 KiB, 256 KiB, 1 MiB, 16 MiB (upper bucket includes edge) |
 | coverage `segments/split_observations` | Registered physical segment sum and multi-segment observation count; multi-segment includes chunk boundaries, not only noncontiguous mappings |
 | `aliases`, `different_daddr`, `different_manager` | Repeated overlap encounters in bounded historical window; not unique aliases/conflicts or live resource counts |
+| `registered_observations/alias_observations`, read-only/potential-write pairs | Event-weighted encounter frequency; partial scans are lower bounds when comparison drops occur |
+| distinct GPU/DAddr refs and `sample_epoch/offset/length` | Deduplicated mapping-token+address references to a sampled constant-membership physical interval, plus read-only/potential-write counts; not descriptor multiplicity |
+| resolve/lock/walk/dispatch P50/P95/P99 | Fixed 65-bin log2 histograms, **bucket upper bounds** (`*_upper_ns`), not exact quantiles; empty histogram gives zero |
+| `gpu_lock_wait_ns/device_lock_wait_ns/walk_ns` | Resolver lock acquisition time (includes uncontended overhead/scheduling) separated from locked traversal, stamp construction and metadata allocation |
+| `validation_lock_wait_ns/provenance_walk_ns` | Cached-stamp/fresh provenance lock acquisition versus DAddr provenance walk/validation/allocation; excluded from resolver-only histograms |
+| `generation_invalidations/generation_requeries/lifetime_invalidations` | Stale cache classifications and generation-triggered re-resolve attempts, including failed attempts |
+| `entries/peak_entries`, `metadata_bytes/peak_metadata_bytes` | Current/peak entry count; object+retained vector capacity plus observed overlapping query/provenance temporary payload, not RSS/allocator or in-flight reallocation peak |
 | `holes`, `provenance_mismatches` | Failed/hole-containing physical resolution; cached resource DAddr inconsistent with current GPU translation |
 | `budget_drops`, `comparison_drops`, `evictions`, `errors` | Sampling/coverage loss; these must accompany any interpretation of alias counts |
 
@@ -52,17 +59,22 @@ Compute: DispatchCompute -> Configure -> `ObservePhysicalBindings(true)` before
 direct/indirect dispatch recording. Visitor only reads prepared bindings/masks;
 it never calls FindBuffer, GatherBuffer, ResolveScatter or synchronization APIs.
 
-- Enabled graphics/compute uniforms and SSBOs: resolved GPU logical ranges.
+- Enabled graphics/compute uniforms and SSBOs: resolved GPU logical ranges,
+  staged and directly shared cached buffers reported separately.
 - Gathered uniform/storage: whole prepared gather allocation including scatter
   padding. Classified as scratch unless existing allocation is directly shared.
   Shared allocation observations may repeat once per descriptor; not unique producers.
 - Enabled image/texel buffer views: actual cached contiguous DAddr checked against
   the current resolved GPU footprint. Both share the texel coverage category.
-- Ordinary texture producers: existing private `MarkModification(ImageBase&)`,
+- Ordinary texture producers: existing private `MarkModification(ImageBase&, kind)`,
   reached from storage-image descriptors, render-target PrepareImage, and texture
   copy/conversion preparation. Observes the entire guest allocation bounding
   range, **not an exact subresource/layout write mask**. Repeated marks are intents,
   not evidence a GPU write executed or completed.
+- Texture read preparation also observes read-only intent. Render-target color/
+  depth preparation passes an explicit diagnostic tag through PrepareImageView/
+  PrepareImage; it is reported separately from texture/image descriptors and copies.
+  No image flags, modification ticks, refresh or GPU commands change with the tag.
 - Transform feedback: present bindings are counted as unresolved write intents
   because current binding metadata does not retain GPU VA. No guessed identity.
 
@@ -108,18 +120,42 @@ escape into GPU execution. No CPU read, scheduler wait or nested GPU callback.
 ## Bounded cost and validation
 
 128 range entries; at most 64 MiB/query, 256 physical/DAddr spans per retained
-entry, 4096 geometry/page comparisons per observation. Eviction is a ring, not a
+entry, 4096 pair geometry/page comparisons and separately 4096 cardinality segment
+scans per observation; at most eight sampled intervals and 256 deduplicated GPU/
+DAddr references per sample. Reference deduplication/provenance lookup also have
+fixed bounds. Eviction is a ring, not a
 live resource retirement decision. Cache lookup is O(128); compare cost is bounded
 but can be significant when enabled. Resolver plus DAddr page walks are O(pages),
 including every mapped segment. Cache hits still acquire both mapping locks.
 Whole-address-space generations may invalidate otherwise unchanged ranges; M1
 measures that cost before any per-range generation optimization. Resolve can
 temporarily allocate more than 256 segments before this observer applies its cap.
-No diagnostic objects are allocated when disabled; only optional/pointer branches
-are added to the paths. No per-dispatch process-wide fd/VMA scanning or GPU stall.
+The renderer owns the diagnostic through a unique_ptr allocated **only when
+enabled**, avoiding a large inline metadata reservation in the disabled renderer.
+With it disabled all binding visitors, observations, clocks and paired mapping
+locks for shadow work are bypassed. Ordinary resolver/validation callers use null
+timer sinks: no timing clock reads, no additional mapping locks; original GPU->
+device lock order remains unchanged. Startup diagnostic OOM leaves it disabled.
+Only pointer branches and explicit render-target kind arguments remain on the
+ordinary paths. No per-dispatch process-wide fd/VMA scanning or GPU stall.
+
+Every runtime report starts with **coverage=unknown** and the uninstrumented
+categories. Zero observed overlaps must never be read as global "no conflicts".
+References retain conservative potential-write intent until their cache entry is
+replaced/evicted, not actual data authority. Cardinality samples include partial
+overlaps and repeated mappings and clip their interval at membership/provenance
+boundaries. They are bounded historical samples, not a complete interval index.
+Peak metadata measures payload at explicit observation points; errors can hide a
+temporary allocator peak. Fixed window/histograms and capped ranges establish the
+growth bound independently of the measured peak. Cardinality and cache updates
+may be a significant enabled CPU cost; observer timing includes these, resolver
+timing does not. Read-only vs potential-write data cannot prove the frequency of
+the actual A=99/B=10 overwrite without GPU/data/version observations (out of M1).
 
 ```sh
 python tools/physical_shadow_tests/run_tests.py --cxx g++
+# If real fmt 9+ headers are not on the compiler's system include path:
+python tools/physical_shadow_tests/run_tests.py --cxx g++ --fmt-include /path/to/include
 ```
 
 Tests use the production observer and extracted production binding visitor,
@@ -135,8 +171,10 @@ Linux ASan/UBSan passes. All nine existing gather/scatter runners pass on both
 platforms, including CPU-write, unmap preservation, GPU-stop and mixed binding
 alias tests. Production resolver and M0 suites pass Linux (M0 also Windows).
 Actual vk_rasterizer.cpp compiles on Linux with real manager/cache headers and
-isolated logging/assert/platform shims; not a full Android link/build. Shimmed
-logging does not validate runtime log output. No local Android full build.
+isolated logging/assert/platform shims; not a full Android link/build. The
+separately extracted production report is compiled/exercised with real fmt headers
+to check formatting, explicit unknown coverage and null diagnostic bypass. No
+local Android full build.
 
 Workflow APK and SMU/SMO diagnostic sampling are the next validation step. Record
 all counters above and an off/on same-scene comparison before choosing M2 data

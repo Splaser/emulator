@@ -55,7 +55,8 @@ public:
 
     // Caller retains this MemoryManager and its device manager during resolution.
     // Returned stamps can be validated safely after either manager is destroyed.
-    [[nodiscard]] PhysicalResolveResult ResolvePhysicalRanges(GPUVAddr address, u64 size) const;
+    [[nodiscard]] PhysicalResolveResult ResolvePhysicalRanges(
+        GPUVAddr address, u64 size, PhysicalResolveTiming* timing = nullptr) const;
 
     [[nodiscard]] std::optional<DAddr> GpuToCpuAddress(GPUVAddr addr, std::size_t size) const;
 

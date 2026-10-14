@@ -250,7 +250,8 @@ public:
     void CreateChannel(Tegra::Control::ChannelState& channel) final override;
 
     /// Prepare an image to be used
-    void PrepareImage(ImageId image_id, bool is_modification, bool invalidate);
+    void PrepareImage(ImageId image_id, bool is_modification, bool invalidate,
+                      ShadowKind shadow_kind = ShadowKind::Texture);
 
     mutable std::recursive_mutex mutex;
 
@@ -407,13 +408,14 @@ public:
     void RemoveFramebuffers(std::span<const ImageViewId> removed_views);
 
     /// Mark an image as modified from the GPU
-    void MarkModification(ImageBase& image) noexcept;
+    void MarkModification(ImageBase& image, ShadowKind shadow_kind = ShadowKind::Texture) noexcept;
 
     /// Synchronize image aliases, copying data if needed
     void SynchronizeAliases(ImageId image_id);
 
     /// Prepare an image view to be used
-    void PrepareImageView(ImageViewId image_view_id, bool is_modification, bool invalidate);
+    void PrepareImageView(ImageViewId image_view_id, bool is_modification, bool invalidate,
+                          ShadowKind shadow_kind = ShadowKind::Texture);
 
     /// Execute copies from one image to the other, even if they are incompatible
     void CopyImage(ImageId dst_id, ImageId src_id, std::vector<ImageCopy> copies);

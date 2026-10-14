@@ -242,8 +242,16 @@ RasterizerVulkan::RasterizerVulkan(Core::Frontend::EmuWindow& emu_window_, Tegra
       wfi_event(device.GetLogical().CreateEvent()) {
     scheduler.SetQueryCache(query_cache);
     if (Settings::values.physical_coherency_shadow.GetValue()) {
-        physical_shadow.emplace();
-        texture_cache.SetPhysicalShadow(&*physical_shadow);
+        try {
+            physical_shadow = std::make_unique<VideoCommon::PhysicalShadow>();
+            texture_cache.SetPhysicalShadow(physical_shadow.get());
+        } catch (...) {
+            // Startup diagnostics are optional, including their metadata allocation.
+            try {
+                LOG_WARNING(Render_Vulkan, "Physical shadow coverage=unknown status=allocation_failed");
+            } catch (...) {
+            }
+        }
     }
 }
 
@@ -253,6 +261,12 @@ void RasterizerVulkan::ReportPhysicalShadow() noexcept {
     }
     try {
         const auto& s = physical_shadow->Counters();
+        LOG_INFO(Render_Vulkan,
+                 "Physical shadow coverage=unknown uninstrumented=cpu_nce_raw,query,dma_inline,"
+                 "upload,internal_texture_copy_scale,vertex_index_indirect_reads "
+                 "alias_window=historical sampling_loss={} ",
+                 s.errors + s.holes + s.budget_drops + s.provenance_mismatches +
+                     s.comparison_drops + s.cardinality_drops + s.evictions);
         LOG_INFO(Render_Vulkan,
                  "Physical shadow: dispatches={} queries={} query_ns={} max_dispatch_query_ns={} "
                  "observer_ns={} max_dispatch_observer_ns={} validation_ns={} hits={} cache_invalidations={} "
@@ -265,7 +279,36 @@ void RasterizerVulkan::ReportPhysicalShadow() noexcept {
                  s.different_manager_aliases, s.holes, s.budget_drops, s.provenance_mismatches,
                  s.comparison_drops, s.errors, s.evictions, s.outside_dispatch_queries,
                  s.max_dispatch_queries);
-        constexpr std::array names{"buffer", "scratch", "texel", "texture"};
+        LOG_INFO(Render_Vulkan,
+                 "Physical shadow costs: resolve_p50_upper_ns={} resolve_p95_upper_ns={} "
+                 "resolve_p99_upper_ns={} lock_p50_upper_ns={} lock_p95_upper_ns={} lock_p99_upper_ns={} "
+                 "walk_p50_upper_ns={} walk_p95_upper_ns={} walk_p99_upper_ns={} "
+                 "dispatch_p50_upper_ns={} dispatch_p95_upper_ns={} dispatch_p99_upper_ns={} "
+                 "gpu_lock_wait_ns={} device_lock_wait_ns={} walk_ns={} validation_lock_wait_ns={} provenance_walk_ns={} "
+                 "generation_invalidations={} generation_requeries={} lifetime_invalidations={} "
+                 "metadata_bytes={} peak_metadata_bytes={} entries={} peak_entries={}",
+                 s.resolve_latency.Percentile(50), s.resolve_latency.Percentile(95),
+                 s.resolve_latency.Percentile(99), s.lock_latency.Percentile(50),
+                 s.lock_latency.Percentile(95), s.lock_latency.Percentile(99),
+                 s.walk_latency.Percentile(50), s.walk_latency.Percentile(95),
+                 s.walk_latency.Percentile(99), s.dispatch_latency.Percentile(50),
+                 s.dispatch_latency.Percentile(95), s.dispatch_latency.Percentile(99),
+                 s.gpu_lock_wait_ns, s.device_lock_wait_ns, s.walk_ns,
+                 s.validation_lock_wait_ns, s.provenance_walk_ns,
+                 s.generation_invalidations, s.generation_requeries, s.lifetime_invalidations,
+                 s.metadata_bytes, s.peak_metadata_bytes, s.active_entries, s.peak_entries);
+        LOG_INFO(Render_Vulkan,
+                 "Physical shadow aliases: registered_observations={} alias_observations={} "
+                 "readonly_pairs={} potential_write_pairs={} samples={} cardinality_drops={} "
+                 "max_distinct_gpu_refs={} max_distinct_daddr_refs={} max_readonly_refs={} max_write_refs={} "
+                 "sample_epoch={} sample_offset={} sample_length={} sample_gpu_refs={} sample_daddr_refs={} "
+                 "sample_readonly_refs={} sample_write_refs={}",
+                 s.registered_observations, s.alias_observations, s.readonly_alias_pairs,
+                 s.writable_alias_pairs, s.alias_samples, s.cardinality_drops,
+                 s.max_distinct_gpu_refs, s.max_distinct_device_refs, s.max_readonly_refs,
+                 s.max_writable_refs, s.sample_epoch, s.sample_offset, s.sample_length,
+                 s.sample_gpu_refs, s.sample_device_refs, s.sample_readonly_refs, s.sample_writable_refs);
+        constexpr std::array names{"staged_buffer", "scratch", "texel", "texture", "render_target", "direct_buffer"};
         for (size_t i = 0; i < names.size(); ++i) {
             const auto& c = s.coverage[i];
             LOG_INFO(Render_Vulkan,
