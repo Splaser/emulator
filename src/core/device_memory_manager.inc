@@ -26,6 +26,17 @@ public:
     MultiAddressContainer() = default;
     ~MultiAddressContainer() = default;
 
+    bool GatherValuesBounded(u32 entry, std::span<u32> output, size_t& count) const {
+        count = 0;
+        while (entry) {
+            if (count == output.size() || entry > storage.size()) return false;
+            const auto& current = storage[entry - 1];
+            output[count++] = current.value;
+            entry = current.next_entry;
+        }
+        return count != 0;
+    }
+
     void GatherValues(u32 start_entry, Common::ScratchBuffer<u32>& buffer) {
         buffer.resize(8);
         buffer.resize(0);
@@ -381,6 +392,33 @@ void DeviceMemoryManager<Traits>::InnerGatherDeviceAddresses(Common::ScratchBuff
     }
     buffer.resize(1);
     buffer[0] = backing;
+}
+
+template <typename Traits>
+bool DeviceMemoryManager<Traits>::CollectControlledAliasesLocked(PAddr physical,
+                                                                 std::span<DAddr> output,
+                                                                 size_t& count) const {
+    count = 0;
+    if (physical >= physical_backing_size) return false;
+    const u32 base = compressed_device_addr[physical >> page_bits];
+    if (!base) return false;
+    std::array<u32, 64> pages{};
+    size_t page_count = 1;
+    if (base & MULTI_FLAG) {
+        if (!impl->multi_dev_address.GatherValuesBounded(base & MULTI_MASK, pages, page_count))
+            return false;
+    } else
+        pages[0] = base;
+    if (page_count > output.size()) return false;
+    for (size_t i = 0; i < page_count; ++i) {
+        const DAddr address = (u64{pages[i]} << page_bits) + (physical & page_mask);
+        if (address < page_size || address >= device_as_size ||
+            !entries[address >> page_bits].compressed_physical_ptr ||
+            GetPhysicalRawAddressFromDAddr(address) != physical)
+            return false;
+        output[count++] = address;
+    }
+    return true;
 }
 
 template <typename Traits>

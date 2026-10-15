@@ -37,6 +37,338 @@ template <class P>
 BufferCache<P>::~BufferCache() = default;
 
 template <class P>
+auto BufferCache<P>::BeginControlledFirstRegistration(
+    DAddr address, u32 size, std::span<const Core::Memory::PreparedCpuPage> views)
+    -> ControlledRegistrationPtr {
+    if constexpr (!requires {
+                      runtime.SupportsControlledTransfers();
+                      runtime.PrepareControlledTransfer(std::declval<const Buffer&>());
+                  }) {
+        return {};
+    } else {
+        if (!runtime.SupportsControlledTransfers() || views.empty() || views.size() > 64 ||
+            !IsRegionPageTableAddressable(address, size) || scatter_busy ||
+            std::ranges::any_of(gather_buffers,
+                                [](const auto& item) { return item.second.scatter_pending; }))
+            return {};
+        const u64 begin = Common::AlignDown(address, CACHING_PAGESIZE);
+        const u64 length = Common::AlignUp(address + size, CACHING_PAGESIZE) - begin;
+        if (length > 64 * DEVICE_PAGESIZE) return {};
+        for (u64 page = begin / CACHING_PAGESIZE; page < (begin + length) / CACHING_PAGESIZE;
+             ++page)
+            if (GetPageBufferId(page)) return {}; // Overlap expansion is deliberately ineligible.
+        std::erase_if(controlled_registrations, [](const auto& entry) {
+            return entry.use_count() == 1 &&
+                   (entry->phase == ControlledRegistration::Phase::Ready ||
+                    entry->phase == ControlledRegistration::Phase::Cancelled);
+        });
+        if (controlled_registrations.size() >= 64) return {};
+        auto plan = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, begin, length);
+        if (!plan) return {};
+        std::vector<Common::PreparedPhysicalCpuPage> pages;
+        for (const auto& segment : plan->Segments()) {
+            const auto& pin = segment.storage;
+            auto page =
+                device_memory.PrepareGuestPhysicalCpuPage(pin.PhysicalOffset(), pin.Epoch());
+            if (!page || std::ranges::none_of(views, [&](const auto& view) {
+                    return view.physical.GateIdentity() == page->GateIdentity() &&
+                           view.IsCurrentForRegistration();
+                }))
+                return {};
+            pages.push_back(std::move(*page));
+        }
+        auto operation =
+            ControlledRegistrationPtr{new ControlledRegistration{std::move(*plan), views}};
+        operation->address = begin;
+        operation->id =
+            slot_buffers.insert(runtime, begin, length); // Hidden: no page-table/LRU entry.
+        try {
+            operation->transfer = runtime.PrepareControlledTransfer(slot_buffers[operation->id]);
+            if (!operation->transfer) {
+                slot_buffers.erase(operation->id);
+                return {};
+            }
+            // Retain the session before gate closure, so caller drop cannot strand a hidden slot.
+            controlled_registrations.push_back(operation);
+            auto admission = Common::PhysicalRegistrationBundle::Begin(pages, operation->transfer);
+            if (!admission) {
+                controlled_registrations.pop_back();
+                slot_buffers.erase(operation->id);
+                return {};
+            }
+            operation->admission.emplace(std::move(*admission));
+        } catch (...) {
+            if (!controlled_registrations.empty() && controlled_registrations.back() == operation)
+                controlled_registrations.pop_back();
+            slot_buffers.erase(operation->id);
+            throw;
+        }
+        return operation;
+    }
+}
+
+template <class P>
+BufferId BufferCache<P>::ControlledReadyBuffer(const ControlledRegistrationPtr& operation) {
+    return ControlledBufferId(operation, true);
+}
+
+template <class P>
+BufferId BufferCache<P>::ControlledBufferId(const ControlledRegistrationPtr& operation,
+                                            bool require_clean) {
+    if constexpr (!requires(const Buffer& buffer) { buffer.PinStagedRepresentation(0, 1); }) {
+        return NULL_BUFFER_ID;
+    } else {
+        if (!operation || operation->phase != ControlledRegistration::Phase::Ready ||
+            std::ranges::find(controlled_registrations, operation) ==
+                controlled_registrations.end() ||
+            !slot_buffers.contains(operation->id))
+            return NULL_BUFFER_ID;
+        if (!operation->plan.MatchesCurrentDevice(device_memory, operation->address))
+            return NULL_BUFFER_ID;
+        if (require_clean &&
+            memory_tracker.IsRegionCpuModified(operation->address, operation->plan.Size()))
+            return NULL_BUFFER_ID;
+        const auto& buffer = slot_buffers[operation->id];
+        auto pin = buffer.PinStagedRepresentation(0, buffer.SizeBytes());
+        return pin && pin->Identity() == operation->transfer->DestinationIdentity()
+                   ? operation->id
+                   : NULL_BUFFER_ID;
+    }
+}
+
+template <class P>
+template <typename Store>
+Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCachedWrite(
+    const ControlledRegistrationPtr& operation, const Core::Memory::PreparedCpuPage& view,
+    Common::PhysicalRegistrationBundle::CachedWrite& write, u64 address, u64 size, Store&& store) {
+    using Result = Core::Memory::PreparedCpuWriteResult;
+    if (!ControlledBufferId(operation, false) || !write.Granted() || !size ||
+        size > DEVICE_PAGESIZE - address % DEVICE_PAGESIZE ||
+        view.physical.Epoch()->generation != operation->plan.BackingGeneration())
+        return Result::NeedSlow;
+    if (std::ranges::none_of(operation->plan.Segments(), [&](const auto& segment) {
+            return segment.storage.Epoch() == view.physical.Epoch() &&
+                   segment.storage.PhysicalOffset() == view.physical.PhysicalOffset();
+        }))
+        return Result::Invalid;
+    Result result = Result::Busy;
+    try {
+        const bool qualified = device_memory.WithControlledPhysicalAliases(
+            view.physical.PhysicalOffset() + address % DEVICE_PAGESIZE,
+            operation->plan.DeviceEpoch(), operation->plan.DeviceGeneration(), [&](auto aliases) {
+                // Include ALL device aliases, even those with no buffer yet. They must not keep
+                // clean tracker state after the physical store. Preservation remains fail-closed.
+                if (scatter_busy || std::ranges::any_of(gather_buffers, [](const auto& entry) {
+                        return entry.second.scatter_pending;
+                    })) {
+                    result = Result::NeedSlow;
+                    return;
+                }
+                for (const auto alias : aliases)
+                    if (memory_tracker.IsRegionGpuModified(alias, size)) {
+                        result = Result::NeedSlow;
+                        return;
+                    }
+                result = store(); // Actual prepared Memory cached Write, same write capability.
+                if (result != Result::Stored) return;
+                for (const auto alias : aliases) {
+                    NotifyGatherWrite(alias, size);
+                    memory_tracker.MarkRegionAsCpuModified(alias, size);
+                }
+            });
+        return qualified ? result : Result::Busy;
+    } catch (...) {
+        (void)write.MarkUnknown();
+        operation->phase = ControlledRegistration::Phase::Unknown;
+        throw;
+    }
+}
+
+template <class P>
+bool BufferCache<P>::BeginControlledRefresh(const ControlledRegistrationPtr& operation) {
+    if constexpr (!requires { runtime.PrepareControlledTransfer(std::declval<const Buffer&>()); }) {
+        return false;
+    } else {
+        if (!ControlledBufferId(operation, false) || !runtime.SupportsControlledTransfers() ||
+            !operation->plan.MatchesCurrentDevice(device_memory, operation->address))
+            return false;
+        // Refresh into a NEW hidden allocation. Existing bindings cannot read uninitialized data.
+        const auto id = slot_buffers.insert(runtime, operation->address, operation->plan.Size());
+        try {
+            auto transfer = runtime.PrepareControlledTransfer(slot_buffers[id]);
+            if (!transfer) {
+                slot_buffers.erase(id);
+                return false;
+            }
+            auto admission = operation->admission->BeginCachedWrite(transfer);
+            if (!admission) {
+                slot_buffers.erase(id);
+                return false;
+            }
+            operation->previous = operation->id;
+            operation->previous_identity = operation->transfer->DestinationIdentity();
+            operation->id = id;
+            operation->transfer = std::move(transfer);
+            operation->refresh.emplace(std::move(*admission));
+            operation->phase = ControlledRegistration::Phase::Waiting;
+            return true;
+        } catch (...) {
+            slot_buffers.erase(id);
+            throw;
+        }
+    }
+}
+
+template <class P>
+auto BufferCache<P>::PollControlledRegistration(const ControlledRegistrationPtr& operation) ->
+    typename ControlledRegistration::Phase {
+    using Phase = typename ControlledRegistration::Phase;
+    if (!operation ||
+        std::ranges::find(controlled_registrations, operation) == controlled_registrations.end())
+        return Phase::Unknown;
+    auto& op = *operation;
+    const auto unknown = [&] {
+        if (op.refresh)
+            (void)op.refresh->MarkUnknown();
+        else
+            (void)op.admission->MarkUnknown();
+        return op.phase = Phase::Unknown;
+    };
+    const auto membership_valid = [&] {
+        if constexpr (requires(const Buffer& buffer) { buffer.PinStagedRepresentation(0, 1); }) {
+            if (!slot_buffers.contains(op.id)) return false;
+            auto target = slot_buffers[op.id].PinStagedRepresentation(0, op.plan.Size());
+            if (!target || target->Identity() != op.transfer->DestinationIdentity()) return false;
+            if (op.previous) {
+                if (!slot_buffers.contains(op.previous)) return false;
+                auto previous =
+                    slot_buffers[op.previous].PinStagedRepresentation(0, op.plan.Size());
+                if (!previous || previous->Identity() != op.previous_identity) return false;
+            }
+        } else {
+            return false;
+        }
+        for (u64 page = op.address / CACHING_PAGESIZE;
+             page < (op.address + op.plan.Size()) / CACHING_PAGESIZE; ++page)
+            if (GetPageBufferId(page) != op.previous) return false;
+        return true;
+    };
+    if (op.phase == Phase::Ready)
+        return ControlledBufferId(operation, false) ? Phase::Ready : (op.phase = Phase::Cancelled);
+    if (op.phase == Phase::Unknown || op.phase == Phase::Cancelled) return op.phase;
+    bool registered = false;
+    try {
+        if (op.phase == Phase::Waiting || op.phase == Phase::Admitted) {
+            if (op.phase == Phase::Waiting) {
+                if (op.refresh) {
+                    const auto start = op.refresh->TryStart();
+                    if (start == Common::PhysicalRangeAdmission::Start::Park) return op.phase;
+                    if (start != Common::PhysicalRangeAdmission::Start::Granted) return unknown();
+                } else {
+                    const auto start = op.admission->TryStart();
+                    if (start == Common::PhysicalRegistrationBundle::Start::Draining ||
+                        start == Common::PhysicalRegistrationBundle::Start::Park)
+                        return op.phase;
+                    if (start != Common::PhysicalRegistrationBundle::Start::Granted)
+                        return unknown();
+                }
+                op.phase = Phase::Admitted;
+            }
+            if (!op.plan.DeviceEpoch()->alive.load() ||
+                op.plan.DeviceEpoch()->generation.load() != op.plan.DeviceGeneration() ||
+                !membership_valid() ||
+                (!op.refresh && std::ranges::any_of(op.views, [](const auto& view) {
+                    return !view.IsCurrentForRegistration();
+                }))) {
+                if (op.refresh)
+                    (void)op.refresh->CompleteAfterTrackerPublication();
+                else
+                    (void)op.admission->CancelBeforeEffects();
+                slot_buffers.erase(op.id);
+                return op.phase = Phase::Cancelled;
+            }
+            if (scatter_busy ||
+                std::ranges::any_of(
+                    gather_buffers,
+                    [](const auto& entry) { return entry.second.scatter_pending; }) ||
+                memory_tracker.IsRegionGpuModified(op.address, op.plan.Size()))
+                return unknown();
+            // Actual tracker/protection body, after ALL entered writers have published.
+            bool views_current = true;
+            const bool marked = device_memory.WithControlledMapping(
+                op.plan.DeviceEpoch(), op.plan.DeviceGeneration(), [&](const auto& aliases_for) {
+                    views_current =
+                        op.refresh || std::ranges::none_of(op.views, [](const auto& view) {
+                            return !view.IsCurrentForRegistration();
+                        });
+                    std::array<DAddr, 64> aliases{};
+                    for (const auto& segment : op.plan.Segments()) {
+                        size_t count{};
+                        if (!aliases_for(segment.storage.PhysicalOffset(), aliases, count)) {
+                            views_current = false;
+                            break;
+                        }
+                        for (size_t i = 0; i < count; ++i)
+                            if (memory_tracker.IsRegionGpuModified(aliases[i], DEVICE_PAGESIZE))
+                                views_current = false;
+                    }
+                    if (views_current)
+                        memory_tracker.ForEachUploadRange(op.address, op.plan.Size(),
+                                                          [](u64, u64) {});
+                });
+            if (!marked)
+                return op.phase; // Full admission retained; no mapping/cache/PTE lock retained.
+            if (!views_current) {
+                if (op.refresh)
+                    (void)op.refresh->CompleteAfterTrackerPublication();
+                else
+                    (void)op.admission->CancelBeforeEffects();
+                slot_buffers.erase(op.id);
+                return op.phase = Phase::Cancelled;
+            }
+            if (!op.transfer->Submit(op.plan)) return unknown();
+            return op.phase = Phase::Submitted;
+        }
+        const auto result = op.transfer->Poll(op.plan);
+        if (result == ControlledTransferPoll::Pending) return op.phase;
+        if (result != ControlledTransferPoll::Complete ||
+            !op.plan.MatchesCurrentDevice(device_memory, op.address) || !membership_valid() ||
+            memory_tracker.IsRegionCpuModified(op.address, op.plan.Size()) ||
+            memory_tracker.IsRegionGpuModified(op.address, op.plan.Size()))
+            return unknown();
+        // Revalidate and publish under the same short device-mapping guard. Never bind old
+        // physical contents to a remapped live DAddr between the check and Register.
+        bool published = false;
+        const bool locked = device_memory.WithControlledMapping(
+            op.plan.DeviceEpoch(), op.plan.DeviceGeneration(), [&](const auto&) {
+                if (!membership_valid() ||
+                    memory_tracker.IsRegionCpuModified(op.address, op.plan.Size()) ||
+                    memory_tracker.IsRegionGpuModified(op.address, op.plan.Size()))
+                    return;
+                if (op.previous) DeleteBuffer(op.previous, true);
+                Register(op.id);
+                registered = true;
+                MarkGpuUse(slot_buffers[op.id], 0, op.plan.Size());
+                published = op.refresh ? op.refresh->CompleteAfterTrackerPublication()
+                                       : op.admission->CompleteWithExternalEvidence();
+                if (!published) {
+                    Unregister(op.id);
+                    registered = false;
+                }
+            });
+        if (!locked) return op.phase;
+        return published ? (op.phase = Phase::Ready) : unknown();
+    } catch (...) {
+        if (registered) {
+            for (u64 page = op.address / CACHING_PAGESIZE;
+                 page < (op.address + op.plan.Size()) / CACHING_PAGESIZE; ++page)
+                SetPageBufferId(page, BufferId{});
+        }
+        return unknown();
+    }
+}
+
+template <class P>
 bool BufferCache<P>::RunGarbageCollector(bool aggressive_gc) {
     const u64 ticks_to_destroy = aggressive_gc ? 60 : 120;
     const size_t max_evictions = aggressive_gc ? 64 : 32;

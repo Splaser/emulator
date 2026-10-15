@@ -752,6 +752,9 @@ public:
 
     void Invalidate() const;
 
+    [[nodiscard]] VkResult FlushChecked() const;
+    [[nodiscard]] VkResult InvalidateChecked() const;
+
     void SetObjectNameEXT(const char* name) const;
 
 private:
@@ -921,6 +924,19 @@ class Semaphore : public Handle<VkSemaphore, VkDevice, DeviceDispatch> {
     using Handle<VkSemaphore, VkDevice, DeviceDispatch>::Handle;
 
 public:
+    [[nodiscard]] VkResult GetCounterChecked(u64& value) const noexcept {
+        value = 0;
+        return dld->vkGetSemaphoreCounterValue(owner, handle, &value);
+    }
+    [[nodiscard]] VkResult WaitChecked(u64 value, u64 timeout) const noexcept {
+        const VkSemaphoreWaitInfo info{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+                                        .pNext = nullptr,
+                                        .flags = 0,
+                                       .semaphoreCount = 1,
+                                       .pSemaphores = &handle,
+                                       .pValues = &value};
+        return dld->vkWaitSemaphores(owner, &info, timeout);
+    }
     /// Set object name.
     void SetObjectNameEXT(const char* name) const;
 

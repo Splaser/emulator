@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <functional>
@@ -37,11 +38,24 @@ struct QueryCacheParams;
 /// OpenGL-like operations on Vulkan command buffers.
 class Scheduler {
 public:
+    class CheckedSubmission {
+        friend class Scheduler;
+        explicit CheckedSubmission(std::shared_ptr<std::atomic_bool> owner_)
+            : owner{std::move(owner_)} {}
+        const std::shared_ptr<std::atomic_bool> owner;
+        std::atomic<VkResult> result{VK_NOT_READY};
+        u64 tick{};
+    };
+    using Submission = std::shared_ptr<CheckedSubmission>;
+
     explicit Scheduler(const Device& device, StateTracker& state_tracker);
     ~Scheduler();
 
     /// Sends the current execution context to the GPU.
     u64 Flush(VkSemaphore signal_semaphore = nullptr, VkSemaphore wait_semaphore = nullptr);
+
+    [[nodiscard]] Submission FlushChecked();
+    [[nodiscard]] VkResult PollChecked(const Submission& submission) const noexcept;
 
     /// Sends the current execution context to the GPU and waits for it to complete.
     void Finish(VkSemaphore signal_semaphore = nullptr, VkSemaphore wait_semaphore = nullptr);
@@ -259,7 +273,8 @@ private:
 
     void AllocateWorkerCommandBuffer();
 
-    u64 SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore);
+    u64 SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore,
+                        Submission checked = {});
 
     void AllocateNewContext();
 
@@ -273,6 +288,8 @@ private:
     void AcquireNewChunk();
 
     const Device& device;
+    const std::shared_ptr<std::atomic_bool> submission_owner{
+        std::make_shared<std::atomic_bool>(true)};
     StateTracker& state_tracker;
 
     std::unique_ptr<MasterSemaphore> master_semaphore;

@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "video_core/buffer_cache/buffer_cache_base.h"
+#include "video_core/buffer_cache/controlled_transfer.h"
 #include "video_core/buffer_cache/direct_guest_mapping.h"
 #include "video_core/buffer_cache/memory_tracker_base.h"
 #include "video_core/buffer_cache/usage_tracker.h"
@@ -128,6 +129,11 @@ public:
     /// Called after renderer producer exclusion, before shutdown drains. No waits/resource frees.
     void SealStagedPins() noexcept { staged_pin_domain->Seal(); }
 
+    [[nodiscard]] bool SupportsControlledTransfers() const;
+    [[nodiscard]] std::shared_ptr<VideoCommon::ControlledBufferTransfer> PrepareControlledTransfer(
+        const Buffer& buffer);
+    void RetireControlledTransfersAfterDeviceIdle();
+
     void TickFrame(Common::SlotVector<Buffer>& slot_buffers) noexcept;
 
     /// Tick of the command buffer being recorded; work recorded now completes at this tick.
@@ -234,6 +240,7 @@ public:
     }
 
 private:
+    std::vector<std::weak_ptr<VideoCommon::ControlledBufferTransfer>> controlled_transfers;
     std::shared_ptr<StagedBufferPinDomain> staged_pin_domain{
         std::make_shared<StagedBufferPinDomain>()};
     void BindBuffer(VkBuffer buffer, u32 offset, u32 size) {

@@ -1,5 +1,42 @@
 # M3B production integration progress
 
+## Actual BufferCache registration, immutable upload and checked completion: 2026-10-15
+
+CI [38727690858](https://github.com/Splaser/emulator/actions/runs/38727690858) passed both native
+jobs for `dc1a839308`. Continued on PR375 with an explicit real BufferCache/Rasterizer endpoint;
+ordinary game access remains unenrolled and F2 remains OPEN.
+
+The real controller prepares the complete aligned device-only physical plan, real unregistered
+slot/payload pin and dedicated Vulkan upload/readback buffers. One all-page bundle precedes gate
+closure and entered writers must drain. Initial real tracker/protection publication and final
+Register/readiness both qualify the device generation under short mapping guards. The transfer
+reads physical pins only, records actual ordered copies/barriers and polls a private submission
+identity: exact queue-submit success, checked native timeline progress, checked zero-timeout
+host semaphore wait, explicit transfer-to-host read visibility and checked mapped-memory
+flush/invalidate and matching real readback are mandatory. No callback/Flush/Finish or cached tick
+is completion evidence. Pending content has no page-table/LRU membership. Dirty controlled content
+cannot be returned to a protected reader.
+
+The registration-first cached continuation invokes actual Memory prepared cached Write8/16/32/64
+and publishes to every bounded physical device alias while the device mapping remains qualified.
+Actual CPU/PTE execution guards end before tracker callbacks. GPU-dirty aliases refuse pending a
+preservation adapter. Refresh uses another hidden allocation and only replaces the old buffer
+after checked completion/readback. Errors and uncertain effects retain owners as Unknown. A
+renderer idle success after all producer joins retires native resources, never converts Unknown
+to successful data. Failed idle retains them. Cancelled gates and trusted Unknown recovery are
+still fail-closed/incomplete; do not enable general routing on that basis.
+
+The new pipeline suite composes actual production cache/native-transfer/checked-submit bodies
+with real HostMemory/PageTable/CPU stores/WordManager. Both orderings end at backing77/upload77
+with consistent real tracker state; the prior disabled-handshake control remains backing77/
+upload10. Delayed worker and device completion, cold/queued/submitted remap, busy mapping metadata,
+dirty physical alias, slot reuse, submit/counter/invalidate failures and bounded alias capacity
+are exercised. Removing target completion fails 82; losing post-store alias publication fails 83;
+omitting explicit host-read visibility fails 84.
+Vulkan dispatch, allocator/device execution and binding teardown collaborators remain fixtures;
+native CI compiles the actual Vulkan/Rasterizer endpoints. Real hardware evidence and actual
+normal CPU caller/deferred-write enrollment are still required before F2 can be closed.
+
 ## Controlled first-registration ordering and cached continuation: 2026-10-15 evening
 
 Continued from `8ca6197c67` on `codex/issue-372-fixes`. The user's step-3 gate explicitly requires

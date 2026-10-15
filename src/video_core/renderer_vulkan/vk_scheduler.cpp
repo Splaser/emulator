@@ -45,6 +45,7 @@ Scheduler::Scheduler(const Device& device_, StateTracker& state_tracker_)
 }
 
 Scheduler::~Scheduler() {
+    submission_owner->store(false, std::memory_order_release);
     // Normal renderer shutdown explicitly drains while callback owners still live.
     // On construction failure/unwinding, never dispatch new callbacks from here:
     // later-declared renderer members may already have been destroyed.
@@ -56,6 +57,7 @@ Scheduler::~Scheduler() {
 }
 
 void Scheduler::Shutdown() {
+    submission_owner->store(false, std::memory_order_release);
     if (!worker_thread.joinable()) {
         return;
     }
@@ -70,6 +72,24 @@ u64 Scheduler::Flush(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {
     const u64 signal_value = SubmitExecution(signal_semaphore, wait_semaphore);
     AllocateNewContext();
     return signal_value;
+}
+
+Scheduler::Submission Scheduler::FlushChecked() {
+    if (!submission_owner->load(std::memory_order_acquire) || !device.HasTimelineSemaphore())
+        return {};
+    auto submission = Submission{new CheckedSubmission{submission_owner}};
+    SubmitExecution(nullptr, nullptr, submission);
+    AllocateNewContext();
+    return submission;
+}
+
+VkResult Scheduler::PollChecked(const Submission& submission) const noexcept {
+    if (!submission || submission->owner != submission_owner ||
+        !submission_owner->load(std::memory_order_acquire))
+        return VK_ERROR_UNKNOWN;
+    const auto result = submission->result.load(std::memory_order_acquire);
+    if (result != VK_SUCCESS) return result;
+    return master_semaphore->PollTimeline(submission->tick);
 }
 
 void Scheduler::Finish(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {
@@ -276,40 +296,55 @@ void Scheduler::AllocateWorkerCommandBuffer() {
     });
 }
 
-u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {
+u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore,
+                               Submission checked) {
     CITRON_PROFILE_SCOPE("Vulkan::SubmitExecution");
     EndPendingOperations();
     InvalidateState();
 
     const u64 signal_value = master_semaphore->NextTick();
-    RecordWithUploadBuffer([signal_semaphore, wait_semaphore, signal_value,
+    if (checked) checked->tick = signal_value;
+    RecordWithUploadBuffer([signal_semaphore, wait_semaphore, signal_value, checked,
                             this](vk::CommandBuffer cmdbuf, vk::CommandBuffer upload_cmdbuf) {
-        static constexpr VkMemoryBarrier WRITE_BARRIER{
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
-        };
-        upload_cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, WRITE_BARRIER);
-        upload_cmdbuf.End();
-        cmdbuf.End();
+        try {
+            static constexpr VkMemoryBarrier WRITE_BARRIER{
+                .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                .pNext = nullptr,
+                .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            };
+            upload_cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, WRITE_BARRIER);
+            upload_cmdbuf.End();
+            cmdbuf.End();
 
-        if (on_submit) {
-            on_submit();
-        }
+            if (on_submit) {
+                on_submit();
+            }
 
-        std::scoped_lock lock{submit_mutex};
-        switch (const VkResult result = master_semaphore->SubmitQueue(
-                    cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value)) {
-        case VK_SUCCESS:
-            break;
-        case VK_ERROR_DEVICE_LOST:
-            device.ReportLoss();
-            [[fallthrough]];
-        default:
-            vk::Check(result);
-            break;
+            std::scoped_lock lock{submit_mutex};
+            const VkResult result = master_semaphore->SubmitQueue(
+                cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value);
+            if (checked) {
+                checked->result.store(result, std::memory_order_release);
+                return; // Caller observes failures as Unknown; never fabricate GPU completion.
+            }
+            switch (result) {
+            case VK_SUCCESS:
+                break;
+            case VK_ERROR_DEVICE_LOST:
+                device.ReportLoss();
+                [[fallthrough]];
+            default:
+                vk::Check(result);
+                break;
+            }
+        } catch (const vk::Exception& error) {
+            if (!checked) throw;
+            checked->result.store(error.GetResult(), std::memory_order_release);
+        } catch (...) {
+            if (!checked) throw;
+            checked->result.store(VK_ERROR_UNKNOWN, std::memory_order_release);
         }
     });
     chunk->MarkSubmit();

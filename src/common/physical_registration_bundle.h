@@ -100,6 +100,9 @@ public:
         return domain->StateOf(ticket) == PhysicalRangeAdmission::Phase::Running;
     }
     [[nodiscard]] bool MarkUnknown() { return domain->MarkUnknown(ticket); }
+    [[nodiscard]] bool CancelBeforeEffects() {
+        return domain->Cancel(ticket) || (Granted() && domain->Complete(ticket));
+    }
 
     /// External adapter must first certify real transfer completion/visibility and keep invalid
     /// content inaccessible on failure. Callback return is not such evidence. Gates become
@@ -159,7 +162,8 @@ public:
         bool active{};
     };
 
-    [[nodiscard]] std::optional<CachedWrite> BeginCachedWrite() const {
+    [[nodiscard]] std::optional<CachedWrite> BeginCachedWrite(
+        std::shared_ptr<const void> extra_owner = {}) const {
         if (!ready) return std::nullopt;
         std::vector<PhysicalRangeAdmission::Access> accesses;
         for (const auto& page : resources->pages) {
@@ -167,7 +171,12 @@ public:
             accesses.push_back({page.PhysicalOffset(), PhysicalPageGates::PageSize,
                                 PhysicalRangeAdmission::Mode::Write});
         }
-        auto write = domain->Enqueue(accesses, resources);
+        struct Owners {
+            std::shared_ptr<const Resources> pages;
+            std::shared_ptr<const void> extra;
+        };
+        auto owners = std::make_shared<const Owners>(Owners{resources, std::move(extra_owner)});
+        auto write = domain->Enqueue(accesses, std::move(owners));
         if (!write) return std::nullopt;
         return CachedWrite{resources, domain, std::move(write)};
     }

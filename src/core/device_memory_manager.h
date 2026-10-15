@@ -10,6 +10,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string_view>
 
 #include "common/common_types.h"
@@ -85,6 +86,50 @@ public:
     }
 
     DAddr Allocate(size_t size);
+
+    /// Short initial tracker/protection publication for an already accepted immutable plan.
+    /// The callback may not record/submit transfers, wait, dispatch or retain this guard.
+    template <typename Func>
+    [[nodiscard]] bool WithControlledMapping(
+        const std::shared_ptr<const Common::MappingEpoch>& expected, u64 generation,
+        Func&& operation) {
+        std::unique_lock lock{mapping_guard, std::try_to_lock};
+        if (!lock.owns_lock() || !expected || expected != mapping_lifetime.Get() ||
+            !expected->alive.load() || MapGeneration() != generation || (generation & 1) ||
+            !backing_epoch || !backing_epoch->alive.load())
+            return false;
+        operation([this](PAddr physical, std::span<DAddr> output, size_t& count) {
+            return CollectControlledAliasesLocked(physical, output, count);
+        });
+        return true;
+    }
+
+    /// Bounded store + post-store tracker publication only, on the GPU owner. No waits,
+    /// preservation/dispatch callbacks or cache/PTE guards may enclose this entry. The callback's
+    /// CPU context/PTE guards must be nonblocking and released before tracker/tag publication.
+    template <typename Func>
+    [[nodiscard]] bool WithControlledPhysicalAliases(
+        PAddr physical, const std::shared_ptr<const Common::MappingEpoch>& expected, u64 generation,
+        Func&& operation) {
+        std::unique_lock lock{mapping_guard, std::try_to_lock};
+        if (!lock.owns_lock() || expected != mapping_lifetime.Get() || !expected ||
+            !expected->alive.load() || MapGeneration() != generation || (generation & 1) ||
+            !backing_epoch || !backing_epoch->alive.load())
+            return false;
+        std::array<DAddr, 64> addresses{};
+        size_t count{};
+        if (!CollectControlledAliasesLocked(physical, addresses, count)) return false;
+        operation(std::span<const DAddr>{addresses.data(), count});
+        return true;
+    }
+
+    [[nodiscard]] std::optional<Common::PreparedPhysicalCpuPage> PrepareGuestPhysicalCpuPage(
+        u64 offset, const std::shared_ptr<const Common::GuestBackingEpoch>& epoch) const {
+        if (!guest_backing || epoch != backing_epoch || !epoch || !epoch->alive.load() ||
+            guest_backing->BackingEpoch() != epoch)
+            return std::nullopt;
+        return guest_backing->PreparePhysicalCpuPage(offset);
+    }
     void AllocateFixed(DAddr start, size_t size);
     void Free(DAddr start, size_t size);
 
@@ -200,6 +245,8 @@ public:
     static constexpr size_t AS_BITS = Traits::device_virtual_bits;
 
 private:
+    bool CollectControlledAliasesLocked(PAddr physical, std::span<DAddr> output,
+                                        size_t& count) const;
     static constexpr size_t device_virtual_bits = Traits::device_virtual_bits;
     static constexpr size_t device_as_size = 1ULL << device_virtual_bits;
     static constexpr size_t physical_min_bits = 32;  // 4GB

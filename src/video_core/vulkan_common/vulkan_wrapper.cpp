@@ -529,6 +529,15 @@ void Buffer::Invalidate() const {
     }
 }
 
+VkResult Buffer::FlushChecked() const {
+    return is_coherent ? VK_SUCCESS : vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+}
+
+VkResult Buffer::InvalidateChecked() const {
+    return is_coherent ? VK_SUCCESS
+                       : vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+}
+
 void Buffer::SetObjectNameEXT(const char* name) const {
     SetObjectName(dld, owner, handle, VK_OBJECT_TYPE_BUFFER, name);
 }

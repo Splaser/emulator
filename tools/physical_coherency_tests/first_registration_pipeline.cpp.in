@@ -1,0 +1,389 @@
+// Generated with actual production method bodies by run_registration_pipeline_tests.py.
+// CPU/HostMemory/PageTable/tracker, cache state machine, native transfer and checked scheduler
+// bodies are real. Vulkan dispatch/allocator, command execution and device mapping are fixtures.
+#include <deque>
+#include <limits>
+#include <vulkan/vulkan.h>
+#include "common/slot_vector.h"
+#include "common/scratch_buffer.h"
+#include "video_core/buffer_cache/controlled_transfer.h"
+// @ALIAS_CONTAINER@
+struct Allocation { std::vector<u8> bytes; explicit Allocation(size_t size):bytes(size) {} };
+struct Driver {
+    VkResult submit_result=VK_SUCCESS,counter_result=VK_SUCCESS,wait_result=VK_SUCCESS,flush_result=VK_SUCCESS,invalidate_result=VK_SUCCESS;
+    u64 counter=0,submitted_tick=0;
+    size_t submissions=0,barriers=0;
+    bool corrupt=false;
+    bool host_read_barrier=false;
+    VkBuffer readback_target=VK_NULL_HANDLE;
+    std::vector<std::function<void()>> recorded,submitted;
+    void Complete() {
+        for(auto& command:submitted) {command();}
+        submitted.clear();counter=submitted_tick;
+    }
+};
+inline Driver* driver;
+namespace vk {
+class Exception:public std::exception { public: VkResult GetResult() const {return VK_ERROR_UNKNOWN;} };
+inline void Check(VkResult result) {if(result!=VK_SUCCESS) throw Exception{};}
+class Buffer {
+    std::shared_ptr<Allocation> allocation;
+public:
+    Buffer()=default;
+    explicit Buffer(size_t size):allocation{std::make_shared<Allocation>(size)} {}
+    Buffer(const Buffer&)=delete;Buffer& operator=(const Buffer&)=delete;
+    Buffer(Buffer&&)=default;Buffer& operator=(Buffer&&)=default;
+    explicit operator bool() const {return bool(allocation);}
+    VkBuffer operator*() const {return reinterpret_cast<VkBuffer>(allocation.get());}
+    std::span<u8> Mapped() {return allocation?std::span<u8>{allocation->bytes}:std::span<u8>{};}
+    VkResult FlushChecked() const {return driver->flush_result;}
+    VkResult InvalidateChecked() const {return driver->invalidate_result;}
+    void reset() {allocation.reset();}
+};
+struct CommandBuffer {
+    void Begin(...) {} void End() {}
+    VkCommandBuffer operator*() const {return reinterpret_cast<VkCommandBuffer>(uintptr_t{1});}
+    void PipelineBarrier(VkPipelineStageFlags,VkPipelineStageFlags dst,u32,const VkMemoryBarrier& barrier) {
+        ++driver->barriers;
+        if((dst&VK_PIPELINE_STAGE_HOST_BIT) && (barrier.dstAccessMask&VK_ACCESS_HOST_READ_BIT))
+            driver->host_read_barrier=true;
+    }
+    template<class Copies> void CopyBuffer(VkBuffer source,VkBuffer destination,const Copies& copies) {
+        for(const auto& copy:copies) {
+            driver->recorded.push_back([=] {
+                auto& src=reinterpret_cast<Allocation*>(source)->bytes;
+                auto& dst=reinterpret_cast<Allocation*>(destination)->bytes;
+                std::memcpy(dst.data()+copy.dstOffset,src.data()+copy.srcOffset,copy.size);
+                if(driver->corrupt && destination==driver->readback_target) dst[copy.dstOffset+7]^=1;
+            });
+        }
+    }
+};
+}
+// The pin and payload ownership implementations are the actual production header.
+#include "video_core/renderer_vulkan/vk_buffer_payload.h"
+namespace VideoCommon {struct BufferCopy {u64 src_offset,dst_offset,size;};}
+namespace Vulkan {
+struct Semaphore {
+    explicit operator bool() const {return true;}
+    VkResult GetCounterChecked(u64& value) const {value=driver->counter;return driver->counter_result;}
+    VkResult WaitChecked(u64 tick,u64 timeout) const {
+        assert(timeout==0);
+        return driver->wait_result!=VK_SUCCESS?driver->wait_result:
+            (driver->counter>=tick?VK_SUCCESS:VK_TIMEOUT);
+    }
+    VkSemaphore operator*() const {return reinterpret_cast<VkSemaphore>(uintptr_t{1});}
+};
+struct Queue {
+    VkResult Submit(const VkSubmitInfo& info) {
+        ++driver->submissions;
+        if(driver->submit_result!=VK_SUCCESS) return driver->submit_result;
+        const auto* timeline=static_cast<const VkTimelineSemaphoreSubmitInfo*>(info.pNext);
+        assert(timeline && timeline->signalSemaphoreValueCount==1);
+        driver->submitted_tick=timeline->pSignalSemaphoreValues[0];
+        driver->submitted=std::move(driver->recorded);driver->recorded.clear();
+        return VK_SUCCESS;
+    }
+};
+struct Device {
+    bool timeline=true;
+    bool HasTimelineSemaphore() const {return timeline;}
+    Queue GetGraphicsQueue() const {return {};}
+    void ReportLoss() const {}
+};
+class MasterSemaphore {
+public:
+    Device& device;Semaphore semaphore;u64 tick=1;
+    explicit MasterSemaphore(Device& device_):device{device_} {}
+    u64 NextTick() {return tick++;}
+    VkResult SubmitQueue(vk::CommandBuffer& main,vk::CommandBuffer& upload,VkSemaphore signal,VkSemaphore wait,u64 value) {
+        return SubmitQueueTimeline(main,upload,signal,wait,value);
+    }
+    VkResult SubmitQueueTimeline(vk::CommandBuffer&,vk::CommandBuffer&,VkSemaphore,VkSemaphore,u64);
+    // @POLL_TIMELINE@
+};
+class Scheduler {
+public:
+    // @CHECKED_SUBMISSION@
+    Device& device;
+    const std::shared_ptr<std::atomic_bool> submission_owner{std::make_shared<std::atomic_bool>(true)};
+    std::unique_ptr<MasterSemaphore> master_semaphore;
+    std::mutex submit_mutex;
+    struct Chunk {void MarkSubmit() {}} chunk_storage;Chunk* chunk=&chunk_storage;
+    std::deque<std::function<void(vk::CommandBuffer,vk::CommandBuffer)>> commands;
+    explicit Scheduler(Device& device_):device{device_},master_semaphore{std::make_unique<MasterSemaphore>(device_)} {}
+    Submission FlushChecked();VkResult PollChecked(const Submission&) const noexcept;
+    u64 SubmitExecution(VkSemaphore,VkSemaphore,Submission checked={});
+    void EndPendingOperations() {} void InvalidateState() {} void AllocateNewContext() {}
+    std::function<void()> on_submit;
+    template<class F> void RecordWithUploadBuffer(F f) {commands.push_back(std::move(f));}
+    template<class F> void Record(F f) {RecordWithUploadBuffer([=](vk::CommandBuffer main,vk::CommandBuffer){f(main);});}
+    void DispatchWork() {} // Deliberately independent worker rendezvous.
+    void RunWorker() {while(!commands.empty()) {auto f=std::move(commands.front());commands.pop_front();f({},{});}}
+    void RequestOutsideRenderPassSyncedOperationContext() {}
+    void RequestOutsideRenderPassOperationContext() {}
+};
+#define CITRON_PROFILE_SCOPE(...) ((void)0)
+// @SUBMISSION_METHODS@
+enum class MemoryUsage {Upload,Download};
+struct Allocator {vk::Buffer CreateBuffer(const VkBufferCreateInfo& ci,MemoryUsage usage) {
+    vk::Buffer buffer(ci.size);if(usage==MemoryUsage::Download) driver->readback_target=*buffer;
+    return buffer;
+}};
+class BufferCacheRuntime;
+class Buffer {
+    std::shared_ptr<StagedBufferPayload> payload;
+    u64 base,size;size_t lru{};
+public:
+    Buffer(BufferCacheRuntime&,u64,u64);
+    u64 CpuAddr() const {return base;}u64 SizeBytes() const {return size;}
+    void setLRUID(size_t n) {lru=n;}size_t getLRUID() const {return lru;}
+    auto PinStagedRepresentation(u64 offset,u64 length) const {return StagedBufferPin::Build(payload,offset,length);}
+};
+class BufferCacheRuntime {
+public:
+    Device& device;Allocator memory_allocator;Scheduler& scheduler;
+    std::shared_ptr<StagedBufferPinDomain> staged_pin_domain=std::make_shared<StagedBufferPinDomain>();
+    std::vector<std::weak_ptr<VideoCommon::ControlledBufferTransfer>> controlled_transfers;
+    struct Staging {VkBuffer StreamBuf() const {return VK_NULL_HANDLE;}} staging_pool;
+    BufferCacheRuntime(Device& device_,Scheduler& scheduler_):device{device_},scheduler{scheduler_} {}
+    bool SupportsControlledTransfers() const;
+    std::shared_ptr<VideoCommon::ControlledBufferTransfer> PrepareControlledTransfer(const Buffer&);
+    void RetireControlledTransfersAfterDeviceIdle();
+    void CopyBuffer(VkBuffer,VkBuffer,std::span<const VideoCommon::BufferCopy>,bool,bool=false);
+};
+Buffer::Buffer(BufferCacheRuntime& runtime,u64 address,u64 length)
+    :payload{std::make_shared<StagedBufferPayload>(vk::Buffer(length),length,runtime.staged_pin_domain)},base{address},size{length} {}
+// @TRANSFER_METHODS@
+}
+using DAddr=u64;
+constexpr u64 DEVICE_PAGESIZE=4096,C=65536,A=65536,ALIAS=3*C,B=0x80000000;
+using Result=Core::Memory::PreparedCpuWriteResult;
+using BufferId=Common::SlotId;constexpr BufferId NULL_BUFFER_ID{0};
+bool count_hot_allocations=false;size_t hot_allocations=0;
+std::function<void()> snapshot_hook;
+namespace Common {void ObserveSnapshot() {if(snapshot_hook) snapshot_hook();}}
+// @DEVICE_TRACKER@
+struct Lru {size_t Insert(BufferId id,u64) {return id.index;}void Free(size_t) {}};
+template<class P> class BufferCache {
+public:
+    using Buffer=Vulkan::Buffer;using Runtime=Vulkan::BufferCacheRuntime;
+    Runtime& runtime;
+    DeviceTracker device_tracker;
+    VideoCommon::MemoryTrackerBase<DeviceTracker> memory_tracker;
+    struct DeviceMemory {
+        Common::HostMemory& backing;
+        Common::MappingLifetime mapping_lifetime;
+        std::shared_ptr<Common::MappingEpoch> epoch=mapping_lifetime.Get();
+        std::mutex& mapping_guard=epoch->mutex;
+        std::shared_ptr<const Common::GuestBackingEpoch> backing_epoch=backing.BackingEpoch();
+        std::function<void()> on_pin;
+        u64 MapGeneration() const {return epoch->generation.load();}
+        bool remapped=false;
+        template<class F> auto ReadPhysicalMappingSnapshot(F f) const {
+            std::scoped_lock lock{epoch->mutex};
+            return f(std::shared_ptr<const Common::MappingEpoch>{epoch},epoch->generation.load(),
+                backing.BackingEpoch(),backing.backing_size,[&](u64 address)->std::optional<u64> {
+                    if(address<A || address>=A+C) return {};
+                    return address-A+(remapped?C:0);
+                });
+        }
+        auto PinGuestPhysicalRange(u64 offset,u64 size,const auto& epoch_) const {
+            if(on_pin) on_pin();
+            assert(epoch_==backing.BackingEpoch());return backing.PinPhysicalRange(offset,size);
+        }
+        auto PrepareGuestPhysicalCpuPage(u64 offset,const auto& epoch_) const {
+            assert(epoch_==backing.BackingEpoch());return backing.PreparePhysicalCpuPage(offset);
+        }
+        bool CollectControlledAliasesLocked(u64 physical,std::span<DAddr> output,size_t& count) const {
+            if(output.size()<2) return false;
+            output[0]=A+physical;output[1]=ALIAS+physical;count=2;return true;
+        }
+        // @DEVICE_WRITE_GUARDS@
+    } device_memory;
+    Common::SlotVector<Buffer> slot_buffers;
+    Lru lru_cache;
+    u64 frame_tick=0,total_used_memory=0,buffer_count=0,large_buffer_memory=0,large_buffer_count=0;
+    static constexpr u64 LARGE_BUFFER_THRESHOLD=8ULL<<20,CACHING_PAGESIZE=C;
+    bool scatter_busy=false;struct Gather {bool scatter_pending=false;};std::map<u64,Gather> gather_buffers;
+    std::map<u64,BufferId> page_table;
+    // @REGISTRATION_CLASS@
+    std::vector<ControlledRegistrationPtr> controlled_registrations;
+    BufferCache(Cpu& cpu,Runtime& runtime_):runtime{runtime_},device_tracker{cpu},memory_tracker{device_tracker},
+        device_memory{cpu.system.device.buffer} {(void)slot_buffers.insert(runtime,0,C);}
+    bool IsRegionPageTableAddressable(u64 address,u64 size) const {return size && address<1ULL<<39 && size<=(1ULL<<39)-address;}
+    BufferId GetPageBufferId(u64 page) const {
+        auto it=page_table.find(page);return it==page_table.end()?BufferId{}:it->second;
+    }
+    void SetPageBufferId(u64 page,BufferId id) {page_table[page]=id;}
+    bool IsRegionRegistered(u64 address,u64 size) const {return size && bool(GetPageBufferId(address/C)) && bool(GetPageBufferId((address+size-1)/C));}
+    void NotifyGatherWrite(u64,u64) {}
+    void MarkGpuUse(Buffer&,u64,u64) {} // Usage/renderer collaborators, not completion evidence.
+    void DeleteBuffer(BufferId id,bool) {Unregister(id);slot_buffers.erase(id);} // Binding teardown fixture.
+    void Register(BufferId);void Unregister(BufferId);
+    template<bool insert> void ChangeRegister(BufferId);
+    ControlledRegistrationPtr BeginControlledFirstRegistration(DAddr,u32,std::span<const Core::Memory::PreparedCpuPage>);
+    typename ControlledRegistration::Phase PollControlledRegistration(const ControlledRegistrationPtr&);
+    bool BeginControlledRefresh(const ControlledRegistrationPtr&);
+    BufferId ControlledReadyBuffer(const ControlledRegistrationPtr&);
+    BufferId ControlledBufferId(const ControlledRegistrationPtr&,bool);
+    template<class Store> Result CommitControlledCpuWrite(Common::PhysicalRegistrationBundle::CachedWrite&,std::span<const DAddr>,u64,Store&&);
+    template<class Store> Result CommitControlledCachedWrite(const ControlledRegistrationPtr&,
+        const Core::Memory::PreparedCpuPage&,Common::PhysicalRegistrationBundle::CachedWrite&,u64,u64,Store&&);
+    void ReuseHidden(const ControlledRegistrationPtr& op) {
+        auto id=op->id;slot_buffers.erase(id);auto replacement=slot_buffers.insert(runtime,op->address,C);assert(replacement==id);
+    }
+};
+// @CACHE_METHODS@
+using Cache=BufferCache<int>;using Phase=Cache::ControlledRegistration::Phase;
+struct Scenario {
+    Driver gpu;
+    Vulkan::Device device;
+    Vulkan::Scheduler scheduler{device};
+    Vulkan::BufferCacheRuntime runtime{device,scheduler};
+    System system;Common::PageTable table;Cpu cpu{system,&table};
+    std::unique_ptr<Cache> cache;
+    std::vector<Core::Memory::PreparedCpuPage> views;
+    Scenario() {
+        driver=&gpu;table.Resize(20,12);
+        cpu.MapPages(table,1,16,B,Common::PageType::Memory);
+        cpu.MapPages(table,32,16,B,Common::PageType::Memory);
+        std::memset(system.device.buffer.BackingBasePointer(),10,2*C);
+        for(u64 i=0;i<16;++i) {auto view=cpu.PrepareControlledCpuPage(4096+i*4096);assert(view);views.push_back(*view);}
+        cache=std::make_unique<Cache>(cpu,runtime);
+    }
+    ~Scenario() {
+        scheduler.RunWorker();gpu.Complete(); // Fixture checked idle, after the producer stopped.
+        runtime.staged_pin_domain->Seal();runtime.RetireControlledTransfersAfterDeviceIdle();
+    }
+    u8 backing(u64 off) const {return system.device.buffer.BackingBasePointer()[off];}
+    u8 cached(const Cache::ControlledRegistrationPtr& op,u64 off) {
+        const auto id=cache->ControlledReadyBuffer(op);assert(id && id!=NULL_BUFFER_ID);
+        const auto pin=cache->slot_buffers[id].PinStagedRepresentation(0,C);assert(pin);
+        return reinterpret_cast<Allocation*>(pin->Handle())->bytes[off];
+    }
+    void finish(const Cache::ControlledRegistrationPtr& op) {
+        assert(cache->PollControlledRegistration(op)==Phase::Submitted);
+        assert(cache->ControlledReadyBuffer(op)==NULL_BUFFER_ID && !op->BeginCachedWrite());
+        scheduler.RunWorker();
+        if(!gpu.host_read_barrier) {std::cerr<<"missing explicit host visibility barrier\n";std::exit(84);}
+        if(cache->PollControlledRegistration(op)!=Phase::Submitted) {
+            std::cerr<<"callback/submit return mistaken for completed readback\n";std::exit(82);
+        }
+        gpu.Complete();assert(cache->PollControlledRegistration(op)==Phase::Ready);
+    }
+};
+void writer_first(size_t index) {
+    auto s=std::make_unique<Scenario>();const u64 off=index*4096+7;
+    auto alias=s->cpu.PrepareControlledCpuPage(32*4096+index*4096);assert(alias);
+    std::latch entered{1},release{1};Result result=Result::Invalid;
+    before_cpu_store=[&]{entered.count_down();release.wait();};
+    std::thread writer([&]{result=s->cpu.Write<u8>(*alias,32*4096+off,77);});entered.wait();
+    auto op=s->cache->BeginControlledFirstRegistration(A+off,1,s->views);assert(op);
+    assert(s->cache->PollControlledRegistration(op)==Phase::Waiting);
+    assert(s->cache->device_tracker.markings==0 && !s->cache->IsRegionRegistered(A,C));
+    std::thread independent([&]{release.count_down();});writer.join();independent.join();before_cpu_store={};
+    assert(result==Result::Stored && s->backing(off)==77);
+    assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);
+    s->finish(op);
+    assert(s->cached(op,off)==77 && !s->cache->memory_tracker.IsRegionCpuModified(A,C));
+    assert(s->gpu.submissions==1 && s->gpu.barriers>=4);
+}
+void registration_first() {
+    auto s=std::make_unique<Scenario>();constexpr u64 off=15*4096+7;
+    auto op=s->cache->BeginControlledFirstRegistration(A+off,1,s->views);assert(op);
+    assert(s->cpu.Write<u8>(s->views.back(),4096+off,77)==Result::NeedSlow && s->backing(off)==10);
+    assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
+    // Model a previously tracked device alias whose old cache has been removed. Its initially
+    // clean real tracker must still receive the physical write's post-store publication.
+    s->cache->memory_tracker.ForEachUploadRange(ALIAS,C,[](u64,u64) {});
+    auto view=s->cpu.PrepareControlledCpuPage(32*4096+15*4096);assert(view);
+    auto write=op->BeginCachedWrite();assert(write);
+    assert(write->TryStart()==Common::PhysicalRangeAdmission::Start::Granted);
+    assert(s->cache->CommitControlledCachedWrite(op,*view,*write,32*4096+off,1,[&] {
+        return s->cpu.WriteCached<u8>(*view,*write,32*4096+off,77);
+    })==Result::Stored);
+    if(s->backing(off)!=77 || !s->cache->memory_tracker.IsRegionCpuModified(A+off,1) ||
+       !s->cache->memory_tracker.IsRegionCpuModified(ALIAS+off,1)) {
+        std::cerr<<"cached continuation missed a real tracker alias\n";std::exit(83);
+    }
+    assert(s->cache->ControlledReadyBuffer(op)==NULL_BUFFER_ID); // No protected read of stale 10.
+    assert(write->CompleteAfterTrackerPublication());
+    assert(s->cache->BeginControlledRefresh(op));
+    assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
+    assert(s->cached(op,off)==77 && !s->cache->memory_tracker.IsRegionCpuModified(A,C));
+    assert(s->gpu.submissions==2);
+}
+void faults() {
+    {auto s=std::make_unique<Scenario>();s->device.timeline=false;
+     assert(!s->cache->BeginControlledFirstRegistration(A,1,s->views));
+     assert(s->gpu.submissions==0 && s->cache->device_tracker.markings==0);}
+    {auto s=std::make_unique<Scenario>();s->gpu.flush_result=VK_ERROR_MEMORY_MAP_FAILED;
+     auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
+     assert(s->cache->PollControlledRegistration(op)==Phase::Unknown);
+     assert(!s->cache->IsRegionRegistered(A,C) && s->gpu.submissions==0);}
+    {auto s=std::make_unique<Scenario>();bool once=false;
+     s->cache->device_memory.on_pin=[&] {if(!once) {once=true;++s->cache->device_memory.epoch->generation;}};
+     assert(!s->cache->BeginControlledFirstRegistration(A,1,s->views));
+     assert(s->cache->device_tracker.markings==0 && s->gpu.submissions==0);
+     assert(s->cpu.Write<u8>(s->views.front(),4103,77)==Result::Stored);}
+    // Remap before acceptance cancels without protection/upload effects.
+    {auto s=std::make_unique<Scenario>();auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
+     ++s->cache->device_memory.epoch->generation;
+     assert(s->cache->PollControlledRegistration(op)==Phase::Cancelled);
+     assert(s->cache->device_tracker.markings==0 && s->gpu.submissions==0);}
+    {auto s=std::make_unique<Scenario>();
+     s->cache->memory_tracker.ForEachUploadRange(ALIAS,C,[](u64,u64) {});
+     s->cache->memory_tracker.MarkRegionAsGpuModified(ALIAS,4096);
+     s->views.clear();
+     for(u64 i=0;i<16;++i) {auto view=s->cpu.PrepareControlledCpuPage(4096+i*4096);assert(view);s->views.push_back(*view);}
+     s->cache->device_tracker.markings=0;
+     auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
+     assert(s->cache->PollControlledRegistration(op)==Phase::Cancelled);
+     assert(s->gpu.submissions==0 && s->cache->device_tracker.markings==0);}
+    {auto s=std::make_unique<Scenario>();
+     auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
+     {std::unique_lock lock{s->cache->device_memory.epoch->mutex};
+      assert(s->cache->PollControlledRegistration(op)==Phase::Admitted);
+      assert(s->cache->device_tracker.markings==0);}
+     assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);}
+    for(int fault=0;fault<7;++fault) {
+        auto s=std::make_unique<Scenario>();
+        assert(s->cpu.Write<u8>(s->views.front(),4103,77)==Result::Stored);
+        auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
+        assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);
+        if(fault==0) s->gpu.submit_result=VK_ERROR_DEVICE_LOST;
+        if(fault==6) s->gpu.corrupt=true;
+        s->scheduler.RunWorker();s->gpu.Complete();
+        if(fault==0) s->gpu.counter=999; // Later ticks never excuse this submit's own failure.
+        if(fault==1) {s->gpu.counter_result=VK_ERROR_DEVICE_LOST;s->gpu.counter=999;}
+        if(fault==2) s->gpu.invalidate_result=VK_ERROR_MEMORY_MAP_FAILED;
+        if(fault==3) {++s->cache->device_memory.epoch->generation;s->cache->device_memory.remapped=true;}
+        if(fault==4) s->cache->ReuseHidden(op);
+        if(fault==5) s->gpu.wait_result=VK_ERROR_DEVICE_LOST;
+        assert(s->cache->PollControlledRegistration(op)==Phase::Unknown);
+        assert(!s->cache->IsRegionRegistered(A,C) && s->cache->ControlledReadyBuffer(op)==NULL_BUFFER_ID);
+        assert(!op->BeginCachedWrite());
+        auto physical=s->views.front().physical;
+        const auto domain=physical.Epoch()->ranges;
+        const std::array access{Common::PhysicalRangeAdmission::Access{0,4096,Common::PhysicalRangeAdmission::Mode::Read}};
+        auto reader=domain->Enqueue(access,std::make_shared<int>(1));assert(reader);
+        assert(domain->TryStart(reader)==Common::PhysicalRangeAdmission::Start::Park);
+        assert(domain->Cancel(reader));
+    }
+}
+int main(int argc,char** argv) {
+    {
+        MultiAddressContainer aliases;const auto first=aliases.Register(1);
+        for(u32 i=2;i<=64;++i) aliases.Register(i,first);
+        std::array<u32,64> values{};size_t count{};
+        assert(aliases.GatherValuesBounded(first,values,count) && count==64);
+        aliases.Register(65,first);
+        assert(!aliases.GatherValuesBounded(first,values,count));
+        assert(!aliases.GatherValuesBounded(0,values,count));
+    }
+    const int repeats=argc>1?std::atoi(argv[1]):1;
+    for(int i=0;i<repeats;++i) {writer_first(1);writer_first(15);registration_first();}
+    faults();
+    std::cout<<"PASS actual cache registration pipeline: writer-first and registration-first cached continuation, immutable upload/readback, exact checked submission/counter, delayed completion, remap/slot reuse/failure quarantine; repeat="<<repeats<<" (Vulkan dispatch/device execution remain fixtures)\n";
+}

@@ -21,6 +21,7 @@
 #include "common/logging.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
+#include "core/memory.h"
 #include "video_core/acknowledged_callback.h"
 #include "video_core/arm64_register_guard.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -1069,6 +1070,46 @@ VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64
     merge_area(texture_cache.GetFlushArea(addr, size));
     merge_area(buffer_cache.GetFlushArea(addr, size));
     return new_area;
+}
+
+Core::Memory::PreparedCpuWriteResult RasterizerVulkan::WriteControlledCached8(
+    const ControlledRegistrationPtr& operation, Core::Memory::Memory& memory,
+    const Core::Memory::PreparedCpuPage& view,
+    Common::PhysicalRegistrationBundle::CachedWrite& write, Common::ProcessAddress address,
+    u8 value) {
+    return buffer_cache.CommitControlledCachedWrite(
+        operation, view, write, GetInteger(address), sizeof(value),
+        [&] { return memory.WritePreparedCached8(view, write, address, value); });
+}
+
+Core::Memory::PreparedCpuWriteResult RasterizerVulkan::WriteControlledCached16(
+    const ControlledRegistrationPtr& operation, Core::Memory::Memory& memory,
+    const Core::Memory::PreparedCpuPage& view,
+    Common::PhysicalRegistrationBundle::CachedWrite& write, Common::ProcessAddress address,
+    u16 value) {
+    return buffer_cache.CommitControlledCachedWrite(
+        operation, view, write, GetInteger(address), sizeof(value),
+        [&] { return memory.WritePreparedCached16(view, write, address, value); });
+}
+
+Core::Memory::PreparedCpuWriteResult RasterizerVulkan::WriteControlledCached32(
+    const ControlledRegistrationPtr& operation, Core::Memory::Memory& memory,
+    const Core::Memory::PreparedCpuPage& view,
+    Common::PhysicalRegistrationBundle::CachedWrite& write, Common::ProcessAddress address,
+    u32 value) {
+    return buffer_cache.CommitControlledCachedWrite(
+        operation, view, write, GetInteger(address), sizeof(value),
+        [&] { return memory.WritePreparedCached32(view, write, address, value); });
+}
+
+Core::Memory::PreparedCpuWriteResult RasterizerVulkan::WriteControlledCached64(
+    const ControlledRegistrationPtr& operation, Core::Memory::Memory& memory,
+    const Core::Memory::PreparedCpuPage& view,
+    Common::PhysicalRegistrationBundle::CachedWrite& write, Common::ProcessAddress address,
+    u64 value) {
+    return buffer_cache.CommitControlledCachedWrite(
+        operation, view, write, GetInteger(address), sizeof(value),
+        [&] { return memory.WritePreparedCached64(view, write, address, value); });
 }
 
 bool RasterizerVulkan::RunBufferCacheCpuWrite(DAddr addr, u64 size, bool check_gpu_writes,

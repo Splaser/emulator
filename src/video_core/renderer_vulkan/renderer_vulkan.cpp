@@ -170,7 +170,8 @@ void RendererVulkan::Shutdown() {
         // All producers are joined before taking the submission lock. Never hold it
         // across worker drains, which may submit their final command buffers.
         std::scoped_lock lock{scheduler.submit_mutex};
-        void(device.GetLogical().WaitIdle());
+        const auto idle = device.GetLogical().WaitIdle();
+        if (idle == VK_SUCCESS) rasterizer.RetireControlledTransfersAfterDeviceIdle();
     }
     scheduler.GetMasterSemaphore().Shutdown(); // no remaining completion-helper access
     is_shut_down = true;

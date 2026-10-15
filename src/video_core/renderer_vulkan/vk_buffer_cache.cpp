@@ -115,6 +115,130 @@ vk::Buffer CreateBuffer(const Device& device, const MemoryAllocator& memory_allo
 
 } // Anonymous namespace
 
+namespace {
+class ControlledTransfer final : public VideoCommon::ControlledBufferTransfer {
+public:
+    ControlledTransfer(BufferCacheRuntime& runtime_, Scheduler& scheduler_, StagedBufferPin target_,
+                       vk::Buffer upload_, vk::Buffer readback_)
+        : runtime{runtime_}, scheduler{scheduler_}, target{std::move(target_)},
+          upload{std::move(upload_)}, readback{std::move(readback_)} {}
+
+    const void* DestinationIdentity() const override {
+        return target ? target->Identity() : nullptr;
+    }
+
+    bool Submit(const Tegra::PhysicalAccessPlan& plan) override {
+        if (retired || submitted || !target || !target->IsUsable() ||
+            plan.Size() != target->Size() || upload.Mapped().size() < plan.Size() ||
+            readback.Mapped().size() < plan.Size())
+            return false;
+        u64 covered = 0;
+        for (const auto& segment : plan.Segments()) {
+            const auto bytes = segment.storage.Bytes();
+            if (!segment.storage.OwnerAlive() || segment.logical_offset != covered ||
+                covered > plan.Size() || bytes.size() > plan.Size() - covered)
+                return false;
+            std::memcpy(upload.Mapped().data() + covered, bytes.data(), bytes.size());
+            covered += bytes.size();
+        }
+        if (covered != plan.Size() || upload.FlushChecked() != VK_SUCCESS) return false;
+        // All buffers are dedicated retained allocations, never shared stream/GC slots.
+        // Once recording starts any failure is uncertain; this object cannot replay effects.
+        submitted = true;
+        try {
+            const std::array copy{VideoCommon::BufferCopy{0, target->Offset(), plan.Size()}};
+            runtime.CopyBuffer(target->Handle(), *upload, copy, true, false);
+            const std::array download{VideoCommon::BufferCopy{target->Offset(), 0, plan.Size()}};
+            runtime.CopyBuffer(*readback, target->Handle(), download, true, false);
+            scheduler.Record([](vk::CommandBuffer cmdbuf) {
+                static constexpr VkMemoryBarrier HOST_READ{
+                    .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                    .pNext = nullptr,
+                    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                    .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+                };
+                cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+                                       0, HOST_READ);
+            });
+            submission = scheduler.FlushChecked();
+            return bool(submission);
+        } catch (...) {
+            return false;
+        }
+    }
+
+    VideoCommon::ControlledTransferPoll Poll(const Tegra::PhysicalAccessPlan& plan) override {
+        using Result = VideoCommon::ControlledTransferPoll;
+        if (retired || !target || !target->IsUsable() || !submitted || !submission)
+            return Result::Unknown;
+        if (verified) return Result::Complete;
+        const auto result = scheduler.PollChecked(submission);
+        if (result == VK_NOT_READY) return Result::Pending;
+        if (result != VK_SUCCESS || readback.InvalidateChecked() != VK_SUCCESS)
+            return Result::Unknown;
+        for (const auto& segment : plan.Segments()) {
+            const auto bytes = segment.storage.Bytes();
+            if (segment.logical_offset > readback.Mapped().size() ||
+                bytes.size() > readback.Mapped().size() - segment.logical_offset ||
+                std::memcmp(readback.Mapped().data() + segment.logical_offset, bytes.data(),
+                            bytes.size()) != 0)
+                return Result::Unknown;
+        }
+        verified = true;
+        return Result::Complete;
+    }
+
+    void RetireAfterDeviceIdle() override {
+        retired = true;
+        target.reset();
+        upload.reset();
+        readback.reset();
+        submission.reset();
+    }
+
+private:
+    BufferCacheRuntime& runtime;
+    Scheduler& scheduler;
+    std::optional<StagedBufferPin> target;
+    vk::Buffer upload, readback;
+    Scheduler::Submission submission;
+    bool submitted{}, verified{}, retired{};
+};
+} // namespace
+
+bool BufferCacheRuntime::SupportsControlledTransfers() const {
+    return device.HasTimelineSemaphore() && !staged_pin_domain->IsSealed();
+}
+
+std::shared_ptr<VideoCommon::ControlledBufferTransfer> BufferCacheRuntime::
+    PrepareControlledTransfer(const Buffer& buffer) {
+    std::erase_if(controlled_transfers, [](const auto& weak) { return weak.expired(); });
+    if (!SupportsControlledTransfers() || controlled_transfers.size() >= 256) return {};
+    auto target = buffer.PinStagedRepresentation(0, buffer.SizeBytes());
+    if (!target) return {};
+    VkBufferCreateInfo ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                          .pNext = nullptr,
+                          .flags = 0,
+                          .size = buffer.SizeBytes(),
+                          .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                          .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                          .queueFamilyIndexCount = 0,
+                          .pQueueFamilyIndices = nullptr};
+    auto upload = memory_allocator.CreateBuffer(ci, MemoryUsage::Upload);
+    ci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    auto readback = memory_allocator.CreateBuffer(ci, MemoryUsage::Download);
+    auto transfer = std::make_shared<ControlledTransfer>(*this, scheduler, std::move(*target),
+                                                         std::move(upload), std::move(readback));
+    controlled_transfers.push_back(transfer);
+    return transfer;
+}
+
+void BufferCacheRuntime::RetireControlledTransfersAfterDeviceIdle() {
+    for (const auto& weak : controlled_transfers)
+        if (const auto transfer = weak.lock()) transfer->RetireAfterDeviceIdle();
+    controlled_transfers.clear();
+}
+
 bool BufferCacheRuntime::TryDirectGuestBuffer(Buffer& target, Common::GuestBackingRange backing) {
 #ifdef __linux__
     if (!Settings::values.use_uma_zero_copy.GetValue() || !device.IsIntegrated() ||

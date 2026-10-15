@@ -133,6 +133,40 @@ public:
     u64 GetTextureMemoryUsage() const;
     u64 GetStagingMemoryUsage() const;
 
+    /// Explicit GPU-owner controlled endpoint. Ordinary game routing remains unenrolled.
+    using ControlledRegistrationPtr = BufferCache::ControlledRegistrationPtr;
+    [[nodiscard]] ControlledRegistrationPtr BeginControlledBufferRegistration(
+        DAddr address, u32 size, std::span<const Core::Memory::PreparedCpuPage> views) {
+        return buffer_cache.BeginControlledFirstRegistration(address, size, views);
+    }
+    [[nodiscard]] BufferCache::ControlledRegistration::Phase PollControlledBufferRegistration(
+        const ControlledRegistrationPtr& operation) {
+        return buffer_cache.PollControlledRegistration(operation);
+    }
+    [[nodiscard]] bool RefreshControlledBufferRegistration(
+        const ControlledRegistrationPtr& operation) {
+        return buffer_cache.BeginControlledRefresh(operation);
+    }
+    void RetireControlledTransfersAfterDeviceIdle() {
+        buffer_cache_runtime.RetireControlledTransfersAfterDeviceIdle();
+    }
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult WriteControlledCached8(
+        const ControlledRegistrationPtr&, Core::Memory::Memory&,
+        const Core::Memory::PreparedCpuPage&, Common::PhysicalRegistrationBundle::CachedWrite&,
+        Common::ProcessAddress, u8);
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult WriteControlledCached16(
+        const ControlledRegistrationPtr&, Core::Memory::Memory&,
+        const Core::Memory::PreparedCpuPage&, Common::PhysicalRegistrationBundle::CachedWrite&,
+        Common::ProcessAddress, u16);
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult WriteControlledCached32(
+        const ControlledRegistrationPtr&, Core::Memory::Memory&,
+        const Core::Memory::PreparedCpuPage&, Common::PhysicalRegistrationBundle::CachedWrite&,
+        Common::ProcessAddress, u32);
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult WriteControlledCached64(
+        const ControlledRegistrationPtr&, Core::Memory::Memory&,
+        const Core::Memory::PreparedCpuPage&, Common::PhysicalRegistrationBundle::CachedWrite&,
+        Common::ProcessAddress, u64);
+
     bool AccelerateConditionalRendering() override;
     bool AccelerateSurfaceCopy(const Tegra::Engines::Fermi2D::Surface& src,
                                const Tegra::Engines::Fermi2D::Surface& dst,

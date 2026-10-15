@@ -41,6 +41,17 @@ struct PreparedCpuPage {
     const std::shared_ptr<CpuAccessContext> context;
     const u64 context_generation;
 
+    /// Queued registration qualification, not a mapping lease across suspension.
+    [[nodiscard]] bool IsCurrentForRegistration() const {
+        if (!context || !mapping.domain) return false;
+        std::shared_lock context_guard{context->mutex, std::try_to_lock};
+        if (!context_guard.owns_lock() || !context->alive.load() ||
+            context->generation.load() != context_generation)
+            return false;
+        std::shared_lock mapping_guard{mapping.domain->mutex, std::try_to_lock};
+        return mapping_guard.owns_lock() && mapping.IsCurrent();
+    }
+
     template <typename T>
         requires(std::is_trivially_copyable_v<T> && sizeof(T) <= 16)
     [[nodiscard]] PreparedCpuWriteResult TryStore(const CpuAccessContext* caller,

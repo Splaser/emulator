@@ -74,6 +74,7 @@ head=r'''
 template<class... T> void Log(const T&...) {}
 #define LOG_INFO(category, format, ...) Log(__VA_ARGS__)
 using namespace std::chrono_literals;
+constexpr int VK_SUCCESS=0;
 void Require(bool b,const char* m) { if(!b) throw std::runtime_error(m); }
 struct Event {
     std::mutex mutex; std::condition_variable cv; bool set=false;
@@ -90,6 +91,7 @@ void SetCurrentThreadPriority(ThreadPriority) {}
 }
 Event* drain_entered=nullptr;
 struct Scheduler {
+    std::shared_ptr<std::atomic_bool> submission_owner=std::make_shared<std::atomic_bool>(true);
     struct CommandChunk {
         std::function<void()> operation; bool Empty() { return !operation; }
         bool HasSubmit() { return false; }
@@ -145,6 +147,7 @@ fence_shutdown=fence_shutdown.replace('cv.notify_all();','cv.notify_all();\n    
 orchestration=r'''
 std::vector<std::string> order;
 struct RasterizerVulkan {
+    void RetireControlledTransfersAfterDeviceIdle() {order.push_back("controlled_retire");}
     std::atomic<bool> is_shutting_down=false; std::shared_mutex shutdown_mutex; bool physical_shadow=false;
     struct Cache { std::mutex mutex; void SetPhysicalShadow(void*){} } texture_cache,buffer_cache;
     void ReportPhysicalShadow(){}
@@ -207,6 +210,7 @@ struct RendererVulkan {
     struct TurboSpy { void reset() {order.push_back("turbo_join");} } turbo_mode;
     struct DeviceSpy {
         std::mutex* submit_mutex;
+        int idle_result=0;
         DeviceSpy& GetLogical() {return *this;}
         int WaitIdle() {
             auto probe=std::async(std::launch::async,[&]{
@@ -215,7 +219,7 @@ struct RendererVulkan {
                 return available;
             });
             Require(!probe.get(),"WaitIdle not protected by submit lock");
-            order.push_back("device_idle"); return 0;
+            order.push_back("device_idle"); return idle_result;
         }
     } device{&scheduler.submit_mutex};
     struct Stats {int device_epoch{},backing_generation{},active_imports{},imported_logical_bytes{},cache_entries_released{};};
@@ -227,8 +231,12 @@ struct RendererVulkan {
 tail=r'''
 void renderer_order() {
     order.clear(); {RendererVulkan renderer;}
-    const std::vector<std::string> expected={"pin_seal","pipelines","finish","fencing","runtime_finish","runtime_finish","recording","presentation_join","scheduler_join","detach_on_submit","turbo_join","device_idle","completion_join","imports"};
+    const std::vector<std::string> expected={"pin_seal","pipelines","finish","fencing","runtime_finish","runtime_finish","recording","presentation_join","scheduler_join","detach_on_submit","turbo_join","device_idle","controlled_retire","completion_join","imports"};
     Require(order==expected,"renderer destroys resources or waits idle before host workers are joined");
+}
+void renderer_failed_idle() {
+    order.clear(); {RendererVulkan renderer;renderer.device.idle_result=-4;renderer.Shutdown();}
+    for(const auto& event:order) Require(event!="controlled_retire","failed idle retired controlled resources");
 }
 void scheduler_drain() {
     Scheduler scheduler; scheduler.Start(); Event entered,release,draining;
@@ -297,6 +305,7 @@ int main(int argc,char** argv) {
     try {
         std::string test=argc>1?argv[1]:"renderer_order";
         if(test=="renderer_order") renderer_order(); else if(test=="scheduler") scheduler_drain();
+        else if(test=="renderer_failed_idle") renderer_failed_idle();
         else if(test=="scheduler_cancel") scheduler_cancel();
         else if(test=="presentation") present_drain(); else if(test=="fencing") fence_cancel();
         else if(test=="turbo") turbo_drain(); else if(test=="completion") completion_drain();
@@ -322,7 +331,7 @@ subprocess.run(flags+[str(cpp),'-o',str(exe)],check=True)
     'instrumentation':['signal on entry to wait/drain'],
 },indent=2))
 failed=False
-for case in args.case or ['renderer_order','scheduler','scheduler_cancel','presentation','fencing','turbo','completion']:
+for case in args.case or ['renderer_order','renderer_failed_idle','scheduler','scheduler_cancel','presentation','fencing','turbo','completion']:
     for i in range(args.repeat):
         result=subprocess.run([str(exe),case],capture_output=True,text=True,timeout=20)
         (out/f'renderer-{case}-{i}.log').write_text(result.stdout+result.stderr)

@@ -29,6 +29,7 @@
 #include "common/settings.h"
 #include "common/slot_vector.h"
 #include "video_core/buffer_cache/buffer_base.h"
+#include "video_core/buffer_cache/controlled_transfer.h"
 #include "video_core/buffer_cache/uma.h"
 #include "video_core/buffer_cache/direct_guest_mapping.h"
 #include "video_core/buffer_cache/gather_alias.h"
@@ -222,6 +223,49 @@ class BufferCache : public VideoCommon::ChannelSetupCaches<BufferCacheChannelInf
 public:
     explicit BufferCache(Tegra::MaxwellDeviceMemoryManager& device_memory_, Runtime& runtime_);
 
+    class ControlledRegistration {
+        friend class BufferCache;
+
+    public:
+        enum class Phase { Waiting, Admitted, Submitted, Ready, Unknown, Cancelled };
+        [[nodiscard]] Phase State() const { return phase; }
+        [[nodiscard]] std::optional<Common::PhysicalRegistrationBundle::CachedWrite>
+        BeginCachedWrite() const {
+            return phase == Phase::Ready ? admission->BeginCachedWrite() : std::nullopt;
+        }
+
+    private:
+        ControlledRegistration(Tegra::PhysicalAccessPlan plan_,
+                               std::span<const Core::Memory::PreparedCpuPage> views_)
+            : plan{std::move(plan_)}, views{views_.begin(), views_.end()} {}
+        Tegra::PhysicalAccessPlan plan;
+        std::vector<Core::Memory::PreparedCpuPage> views;
+        std::optional<Common::PhysicalRegistrationBundle> admission;
+        std::optional<Common::PhysicalRegistrationBundle::CachedWrite> refresh;
+        std::shared_ptr<ControlledBufferTransfer> transfer;
+        BufferId id{}, previous{};
+        const void* previous_identity{};
+        DAddr address{};
+        Phase phase{Phase::Waiting};
+    };
+    using ControlledRegistrationPtr = std::shared_ptr<ControlledRegistration>;
+
+    /// GPU/cache owner only, without a cache/PTE lock across retries. Explicit controlled
+    /// endpoint, not ordinary game routing. Overlaps, unsupported backends and unqualified
+    /// CPU views refuse before registration/marking/upload; no legacy fallback is permitted.
+    [[nodiscard]] ControlledRegistrationPtr BeginControlledFirstRegistration(
+        DAddr address, u32 size, std::span<const Core::Memory::PreparedCpuPage> views);
+    [[nodiscard]] typename ControlledRegistration::Phase PollControlledRegistration(
+        const ControlledRegistrationPtr& operation);
+    [[nodiscard]] bool BeginControlledRefresh(const ControlledRegistrationPtr& operation);
+    [[nodiscard]] BufferId ControlledReadyBuffer(const ControlledRegistrationPtr& operation);
+
+    template <typename Store>
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult CommitControlledCachedWrite(
+        const ControlledRegistrationPtr& operation, const Core::Memory::PreparedCpuPage& view,
+        Common::PhysicalRegistrationBundle::CachedWrite& write, u64 address, u64 size,
+        Store&& store);
+
     ~BufferCache();
 
     void TickFrame(u64 cache_usage, u64 cache_target, std::span<const HeapMemoryBudget> heaps);
@@ -368,6 +412,7 @@ public:
                              std::span<const DAddr> device_aliases, u64 size, Store&& store);
 
 private:
+    BufferId ControlledBufferId(const ControlledRegistrationPtr& operation, bool require_clean);
     template <typename Func>
     static void ForEachEnabledBit(u32 enabled_mask, Func&& func) {
         for (u32 index = 0; enabled_mask != 0; ++index, enabled_mask >>= 1) {
@@ -609,6 +654,7 @@ public:
     Tegra::MaxwellDeviceMemoryManager& device_memory;
 
     Common::SlotVector<Buffer> slot_buffers;
+    std::vector<ControlledRegistrationPtr> controlled_registrations;
     struct GatherChunk {
         DAddr device_addr;
         u32 size;

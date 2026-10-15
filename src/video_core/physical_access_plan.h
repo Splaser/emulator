@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <limits>
 #include <optional>
@@ -26,6 +27,69 @@ public:
     [[nodiscard]] std::span<const PinnedPhysicalSegment> Segments() const { return segments; }
     [[nodiscard]] u64 Size() const { return size; }
     [[nodiscard]] u64 BackingGeneration() const { return generation; }
+    [[nodiscard]] const auto& DeviceEpoch() const { return device_epoch; }
+    [[nodiscard]] u64 DeviceGeneration() const { return device_generation; }
+
+    /// Bounded cold device-only plan for the complete coarse cache allocation. Capture values
+    /// under the mapping lock, materialize pins outside it, then reject any intervening remap.
+    template <typename DeviceMemory>
+    [[nodiscard]] static std::optional<PhysicalAccessPlan> BuildDeviceRange(
+        const DeviceMemory& memory, u64 address, u64 length) {
+        constexpr u64 Page = Common::PhysicalPageGates::PageSize;
+        if (!length || address % Page || length % Page || length / Page > 64 ||
+            length > std::numeric_limits<u64>::max() - address)
+            return std::nullopt;
+        PhysicalAccessPlan plan;
+        std::array<u64, 64> offsets{};
+        std::shared_ptr<const Common::GuestBackingEpoch> backing;
+        const bool captured = memory.ReadPhysicalMappingSnapshot(
+            [&](auto epoch, u64 stamp, auto owner, u64 size, const auto& translate) {
+                if (!epoch || !owner || (stamp & 1) || !epoch->alive.load() || !owner->alive.load())
+                    return false;
+                for (u64 i = 0; i < length / Page; ++i) {
+                    const auto offset = translate(address + i * Page);
+                    if (!offset || *offset % Page || *offset >= size || Page > size - *offset)
+                        return false;
+                    offsets[i] = *offset;
+                }
+                plan.device_epoch = std::move(epoch);
+                plan.device_generation = stamp;
+                backing = std::move(owner);
+                return true;
+            });
+        if (!captured) return std::nullopt;
+        for (u64 i = 0; i < length / Page; ++i) {
+            auto pin = memory.PinGuestPhysicalRange(offsets[i], Page, backing);
+            if (!pin || !pin->OwnerAlive() || pin->Epoch() != backing ||
+                pin->PhysicalOffset() != offsets[i] || pin->Bytes().size() != Page)
+                return std::nullopt;
+            plan.segments.push_back({i * Page, std::move(*pin)});
+        }
+        plan.size = length;
+        plan.generation = backing->generation;
+        if (!plan.MatchesCurrentDevice(memory, address)) return std::nullopt;
+        return plan;
+    }
+
+    template <typename DeviceMemory>
+    [[nodiscard]] bool MatchesCurrentDevice(const DeviceMemory& memory, u64 address) const {
+        return memory.ReadPhysicalMappingSnapshot(
+            [&](auto epoch, u64 stamp, auto backing, u64 limit, const auto& translate) {
+                if (!device_epoch || epoch != device_epoch || stamp != device_generation ||
+                    !epoch->alive.load() || !backing || !backing->alive.load() ||
+                    backing->generation != generation)
+                    return false;
+                for (const auto& segment : segments) {
+                    const auto& pin = segment.storage;
+                    const auto offset = translate(address + segment.logical_offset);
+                    if (!pin.OwnerAlive() || pin.Epoch() != backing || !offset ||
+                        *offset != pin.PhysicalOffset() || *offset >= limit ||
+                        pin.Bytes().size() > limit - *offset)
+                        return false;
+                }
+                return true;
+            });
+    }
 
     [[nodiscard]] static std::optional<PhysicalAccessPlan> Build(
         const PhysicalResolveResult& snapshot, const Common::HostMemory& backing) {
@@ -93,6 +157,8 @@ private:
     PhysicalAccessPlan() = default;
     std::vector<PinnedPhysicalSegment> segments;
     u64 size{}, generation{};
+    std::shared_ptr<const Common::MappingEpoch> device_epoch;
+    u64 device_generation{};
 };
 
 struct PhysicalCopyPlan {

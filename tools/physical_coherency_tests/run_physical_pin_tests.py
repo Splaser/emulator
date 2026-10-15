@@ -215,12 +215,15 @@ guard = 'if (!Detail::MappingStampCurrentLocked(stamp)) {'
 if plan_header.count(guard) != 1:
     raise RuntimeError('Cannot form the check-before-pin negative control')
 control_header = plan_header.replace(guard, 'if (false) {')
-control_header = control_header.replace('        PhysicalAccessPlan plan;', '''        {
+plan_start = '        PhysicalAccessPlan plan;\n        plan.segments.reserve(snapshot.segments.size());'
+assert control_header.count(plan_start) == 1
+control_header = control_header.replace(plan_start, '''        {
             const auto gpu_lock = std::unique_lock{stamp.gpu_address_space->mutex};
             const auto device_lock = std::unique_lock{stamp.device_address_space->mutex};
             if (!Detail::MappingStampCurrentLocked(stamp)) return std::nullopt;
         }
-        PhysicalAccessPlan plan;''')
+        PhysicalAccessPlan plan;
+        plan.segments.reserve(snapshot.segments.size());''')
 post_pin = control_header.rindex(marker)
 control_header = ('namespace Tegra {void ObservePlanReady();}\n' + control_header[:post_pin] +
                   '        ObservePlanReady();\n' + control_header[post_pin:])

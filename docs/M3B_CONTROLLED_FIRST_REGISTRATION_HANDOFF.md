@@ -1,8 +1,67 @@
 # M3B - Controlled First Registration Integration
 
-Handoff updated 2026-10-15 (Asia/Singapore). **The end-to-end first-registration stage is
-NOT implemented or accepted yet. F2 remains open.** This file is the home-machine roadmap,
-not a claim that prepared-store tests fixed production cache registration.
+Handoff updated 2026-10-15 (Asia/Taipei). **The explicit controlled BufferCache/Vulkan path is
+implemented; end-to-end acceptance and ordinary-game F2 repair are NOT complete. F2 remains open.**
+Native compilation and dispatch fixtures do not replace real driver/device evidence.
+
+## Actual BufferCache and Vulkan continuation from `dc1a839308`
+
+Native [38727690858](https://github.com/Splaser/emulator/actions/runs/38727690858) passed Android
+and Linux at `dc1a839308`. The next implementation adds explicit GPU-owner Rasterizer endpoints
+for first registration, polling, cached Write8/16/32/64 and refresh. Ordinary game callers are
+still unenrolled; no NCE/JIT/raw-pointer/DMA/image activation is included.
+
+- Cold `PhysicalAccessPlan::BuildDeviceRange` covers the actual complete rounded cache allocation,
+  bounded to 64 physical pages. It snapshots device mappings, pins real HostMemory outside locks,
+  then rejects a post-pin remap. Holes, overlaps/overlap expansion, retired backing, missing CPU
+  prepared views and unsupported backends refuse before registration/protection/upload effects.
+- BufferCache allocates a real hidden slot and a real staged payload pin plus dedicated upload
+  and readback allocations BEFORE reserving the one all-page registration bundle. Hidden slots
+  have no cache page-table/LRU membership. Entered CPU writers drain before initial real tracker
+  marking. Mapping qualification and tracker publication share a short nonblocking device guard;
+  neither that guard nor a cache/PTE guard survives a retry or a GPU operation.
+- The actual Vulkan transfer copies exclusively from immutable physical pins, records ordered
+  destination upload and readback copies with existing real visibility barriers, then flushes
+  with a private checked submission token. Actual queue-submit status must succeed for THAT tick.
+  A checked native timeline query and checked zero-timeout host semaphore wait must reach it;
+  cached KnownGpuTick, callback/Flush return and
+  unchecked Finish/WaitIdle are not accepted. Checked VMA flush/invalidate and a full readback byte
+  comparison must succeed. This controlled backend requires timeline support; it never treats an
+  unsupported fence fallback as success.
+  The zero-timeout wait supplies host synchronization before invalidation, following the
+  [mapped-memory dependency chain](https://docs.vulkan.org/refpages/latest/refpages/source/vkInvalidateMappedMemoryRanges.html)
+  and [nonblocking wait rule](https://docs.vulkan.org/refpages/latest/refpages/source/vkWaitSemaphores.html).
+- Only after that proof does a second device-mapping guard permit actual BufferCache Register,
+  Tracked/readiness publication and admission release. A queued stale CPU view or device plan
+  refuses before effects; a remap after submission or slot/allocation identity replacement goes
+  Unknown. A CPU-dirty controlled representation cannot be returned by ControlledReadyBuffer.
+- Registration-first continues beyond NeedSlow through actual prepared cached Memory Write.
+  DeviceMemoryManager walks up to 64 real physical device aliases without allocation while holding
+  the mapping guard; the store's short CPU guards end BEFORE real tracker publication for every
+  alias, including an alias with no current buffer. GPU-dirty aliases require preservation and
+  refuse. Cached-store success must become dirty before its admission can be released. Refresh
+  uploads into another hidden allocation, verifies it the same way, then replaces the old buffer.
+- Submit/query/flush/invalidate/readback/publication failures retain resources and quarantine the
+  range as Unknown. Native allocations are retired only after producer joins and checked successful
+  device idle; failed idle is not retirement evidence. Unknown does not become successful upload
+  merely because shutdown reached idle. Cancelled closing gates are fail-closed: automatic gate
+  recovery and a complete trusted Unknown recovery policy remain future work.
+
+`run_registration_pipeline_tests.py --repeat 10` reuses the real prepared CPU, HostMemory,
+PageTable and tracker, and extracts the actual cache state machine, Vulkan transfer/CopyBuffer,
+checked Scheduler, timeline-submit and completion-query bodies. It preserves both 77 orderings
+and the earlier suite's stable disabled-handshake 10 control. Worker callback/submit return is
+separated from device completion. Bypassing target completion fails with 82; omitting a
+physical device alias's tracker publication fails with 83; omitting explicit host read visibility
+fails with 84. Cold/queued/submitted remaps, a busy
+metadata guard, dirty physical aliases, slot reuse and native API failures are checked.
+
+**Its Vulkan dispatch/allocator/device execution and alias page-table collaborators are fixtures.**
+The normal Android/Linux jobs compile the real endpoint and Vulkan bodies, but no passing
+fixture result closes F2. Before general routing or F2 closure, obtain exact-source real driver/
+device evidence, connect actual CPU caller/deferred-write ownership, prove GPU-dirty preservation,
+overlap/general alias eligibility, cancellation/recovery and final device-owner retirement. The
+unchanged original F2 witness must continue reporting backing77/cache10 until that route is fixed.
 
 ### Evening continuation from `8ca6197c67`: roadmap step 3 ordering gate
 
@@ -90,8 +149,9 @@ not the production source tested by that run.
 - Original F2 remains `expected=77 observed=10 backing=77`; `require-fixed` exits 1. Keep this
   failure, original stale-byte assertions, queue-cycle witnesses and unsafe-insertion controls.
 
-**There is no normal-game enrollment, actual controlled BufferCache first-registration path,
-cached-store preservation adapter, DMA admission or new Vulkan device evidence.** The current
+**The earlier handoff had no controlled BufferCache first-registration path. The continuation
+above installs the explicit path, but still has no normal-game enrollment, GPU-dirty cached-store
+preservation adapter, DMA admission or new Vulkan device evidence.** The current
 prepared Write result is explicit: Stored, NeedSlow, Stale, Busy, Retired or Invalid. Callers
 must not drop a refused write or bypass admission with legacy memcpy. No per-store cold pin,
 shared-owner creation, physical registry lookup or range ticket is allowed.
@@ -200,5 +260,5 @@ M3B_PROGRESS, commit English on PR375, fast-forward main, push both atomically, 
 gh workflow run pr375-pr380-integration.yml --repo Splaser/emulator --ref main
 ```
 
-This handoff intentionally separates verified groundwork from the unimplemented controlled
-first-registration positive gate. Do not mark the stage or F2 complete based on green CI alone.
+This handoff separates explicit pipeline/dispatch evidence from real-device acceptance and
+ordinary-game F2 repair. Do not mark the stage or F2 complete based on green CI alone.
