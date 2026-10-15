@@ -78,6 +78,13 @@ PhysicalResolveResult MemoryManager::ResolvePhysicalRanges(GPUVAddr address, u64
         }, timing ? &timing->device_lock_wait_ns : nullptr);
 }
 
+std::optional<PhysicalAccessPlan> MemoryManager::PinPhysicalRanges(GPUVAddr address, u64 size) const {
+    const auto snapshot = ResolvePhysicalRanges(address, size);
+    return PhysicalAccessPlan::BuildWithPins(snapshot, [this, &snapshot](u64 offset, u64 length) {
+        return memory.PinGuestPhysicalRange(offset, length, snapshot.stamp.backing);
+    });
+}
+
 template <bool is_big_page>
 MemoryManager::EntryType MemoryManager::GetEntry(size_t position) const {
     if constexpr (is_big_page) {

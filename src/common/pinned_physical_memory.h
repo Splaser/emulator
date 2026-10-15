@@ -19,6 +19,9 @@ public:
     [[nodiscard]] std::span<u8> Bytes() const noexcept { return owner ? bytes : std::span<u8>{}; }
     [[nodiscard]] u64 PhysicalOffset() const noexcept { return offset; }
     [[nodiscard]] u64 Generation() const noexcept { return epoch ? epoch->generation : 0; }
+    [[nodiscard]] const std::shared_ptr<const GuestBackingEpoch>& Epoch() const noexcept {
+        return epoch;
+    }
     /// False after the original HostMemory retires. Already accepted views remain allocated;
     /// this does not authorize creating new access obligations in a retired epoch.
     [[nodiscard]] bool OwnerAlive() const noexcept {

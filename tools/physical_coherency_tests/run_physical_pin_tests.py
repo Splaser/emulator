@@ -211,7 +211,7 @@ if os.name == 'nt':
 cmd += [str(cpp),'-o',str(exe)]
 subprocess.run(cmd,check=True)
 subprocess.run([str(exe)],check=True,timeout=30)
-guard = 'if (!Detail::MappingStampCurrentLocked(stamp) || stamp.backing != backing.BackingEpoch()) {'
+guard = 'if (!Detail::MappingStampCurrentLocked(stamp)) {'
 if plan_header.count(guard) != 1:
     raise RuntimeError('Cannot form the check-before-pin negative control')
 control_header = plan_header.replace(guard, 'if (false) {')

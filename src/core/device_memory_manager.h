@@ -72,6 +72,18 @@ public:
         return guest_backing ? guest_backing->BackingGeneration() : 0;
     }
 
+    /// Caller retains this manager and its DeviceMemory/HostMemory owner during resolution.
+    /// Call outside mapping/cache locks: cold backing may be materialized. No DAddr translation,
+    /// data admission or GPU representation is implied by this physical allocation pin.
+    [[nodiscard]] std::optional<Common::PinnedPhysicalMemory> PinGuestPhysicalRange(
+        u64 offset, u64 size, const std::shared_ptr<const Common::GuestBackingEpoch>& epoch) const {
+        if (!guest_backing || epoch != backing_epoch || !epoch || !epoch->alive.load() ||
+            guest_backing->BackingEpoch() != epoch) {
+            return std::nullopt;
+        }
+        return guest_backing->PinPhysicalRange(offset, size);
+    }
+
     DAddr Allocate(size_t size);
     void AllocateFixed(DAddr start, size_t size);
     void Free(DAddr start, size_t size);

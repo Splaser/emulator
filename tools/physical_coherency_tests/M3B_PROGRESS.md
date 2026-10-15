@@ -34,7 +34,7 @@ installation and semaphore continuation compatibility. A control bypassing admis
 because the blocked method executes. The extracted-source manifest records the real inputs.
 No actual driver, real physical admission, transfer visibility or production mapping pin is tested.
 
-## Next prepared boundary: pinned physical backing views
+## Physical backing views and immutable plans
 
 `HostMemory::PinPhysicalRange` materializes a complete bounded physical extent and returns a
 `PinnedPhysicalMemory` retaining the actual shared Impl and backing epoch. The immutable extent
@@ -48,8 +48,8 @@ Windows GCC standalone execution of the actual HostMemory implementation passes 
 cross-page extent, moved owner/view, epoch retirement, backing replacement and final release
 checks using real OS mappings. Only logging/assert formatting and unused dynamic-library filename
 formatting are stubbed. The same runner additionally checks real lazy cross-chunk creation and
-FD cleanup on Linux; those new checks have not run yet. No production consumer, CPU lookup epoch,
-device/GPU representation pin or physical admission is connected by this change.
+FD cleanup on Linux. These Linux checks subsequently passed in run `38674435729`. No CPU lookup
+epoch, device/GPU representation pin or physical admission is connected by this storage API.
 
 The prepared `PhysicalAccessPlan::Build` composes existing resolver snapshots with these real
 pins. It validates exact ordered coverage, holes, extent bounds and backing identity before
@@ -58,13 +58,13 @@ runs outside those locks. If a mapping generation changed, the plan is rejected;
 plan retains its original physical targets rather than re-resolving after a remap. Plans contain
 no mapping-use lock. Resource owners retire after temporary validation locks, including rejection.
 Windows tests use fixture mapping stamps with real allocations and exercise stale/retired stamps,
-backing mismatch, invalid coverage/hole/overflow and retained split views. This does not yet join
-the production GPU resolver, engine footprint adapter or CPU first-registration handshake.
+backing mismatch, invalid coverage/hole/overflow and retained split views. Engine footprint and
+CPU first-registration adapters remain separate from this allocation ownership boundary.
 
 The post-pin validation checkpoint also permits a controlled mapping change after pin acquisition.
 Its Windows test rejects that stale plan. A negative control validates only before acquiring pins
 and must fail by accepting the remap race. Linux additionally rejects a malformed suffix before
-materializing any cold chunk; the Linux checks are pending the next remote run.
+materializing any cold chunk; these Linux checks passed in the next remote run below.
 
 Run `38672294519` on `41c6ce4ac3` finished with the complete Linux production/regression job
 successful, including actual DMA/scheduler positive/negative controls and 24 candidate cases
@@ -72,10 +72,32 @@ successful, including actual DMA/scheduler positive/negative controls and 24 can
 capture shadow in the rejoined acknowledgement helper. Renamed its capture without changing
 ownership/cancellation semantics; this fix accompanies the new storage/plan slice.
 
+Run `38674435729` at `a6bc459af014e9b34542dd95df932c70b6a3567c` succeeded in both jobs:
+real Android arm64 production libraries and complete Linux production/unit/HostMemory/coherency/
+lifecycle validation. The Linux physical-pin tests include lazy cross-chunk publication, FD
+cleanup, malformed-plan rejection before cold publication and the post-pin race negative control.
+
+## GPU resolver adapter
+
+`MemoryManager::PinPhysicalRanges` now composes the actual GMMU snapshot resolver with
+`DeviceMemoryManager::PinGuestPhysicalRange` and `PhysicalAccessPlan::BuildWithPins`. The
+device provider checks the exact backing epoch before obtaining a real HostMemory pin; the plan
+builder checks returned epoch identity, physical offset and length, then validates the mapping
+snapshot after all pins. No remappable guest virtual pointer is retained in the result.
+
+`run_gpu_plan_tests.py` first runs the real pin/plan suite, then compiles the actual GPU map/unmap,
+translation, resolver and pin methods plus actual device snapshot/translation/pin methods against
+real HostMemory allocations. GPU/device PTE storage, manager shells, rasterizer notifications
+and submapped enumeration remain fixtures. Windows checks pass noncontiguous and partial ranges,
+real GMMU big-page translation, holes/empty requests, GPU remap at the post-pin checkpoint, device
+remap, and old physical storage surviving both manager/arena exits. Input hashes identify seams.
+This adapter has no active engine/cache consumer or data-admission privilege. Its new remote
+production and Linux regression results are pending the next dispatched main workflow.
+
 ## Remaining production adapters and acceptance gates
 
-1. Build immutable access/transfer plans with real allocation/representation pins, stable physical
-   footprints and read/write views. Resolution may not hold a mapping-use lease across a parked
+1. Physical backing plans and the GPU resolver adapter are implemented. Add representation pins
+   and the controlled CPU resolution adapter. Resolution may not hold a mapping-use lease across a parked
    channel. Revalidation cannot silently redirect an already accepted old plan to a new mapping.
 2. Derive supported engine footprints without effectful decode. Pending `method_sink` register
    writes must be projected by pure resolution or otherwise bounded safely; running ConsumeSink

@@ -19,6 +19,7 @@
 #include "video_core/host1x/gpu_device_memory_manager.h"
 #include "video_core/pte_kind.h"
 #include "video_core/physical_memory.h"
+#include "video_core/physical_access_plan.h"
 
 namespace VideoCore {
 class RasterizerInterface;
@@ -57,6 +58,11 @@ public:
     // Returned stamps can be validated safely after either manager is destroyed.
     [[nodiscard]] PhysicalResolveResult ResolvePhysicalRanges(
         GPUVAddr address, u64 size, PhysicalResolveTiming* timing = nullptr) const;
+
+    /// Caller retains GPU/device/HostMemory owners during resolution; call outside cache/PTE
+    /// locks. A remap during pinning rejects the plan. Success retains physical storage only.
+    [[nodiscard]] std::optional<PhysicalAccessPlan> PinPhysicalRanges(GPUVAddr address,
+                                                                   u64 size) const;
 
     [[nodiscard]] std::optional<DAddr> GpuToCpuAddress(GPUVAddr addr, std::size_t size) const;
 
