@@ -4,6 +4,30 @@ Handoff updated 2026-10-15 (Asia/Taipei). **The explicit controlled BufferCache/
 implemented; end-to-end acceptance and ordinary-game F2 repair are NOT complete. F2 remains open.**
 Native compilation and dispatch fixtures do not replace real driver/device evidence.
 
+## End-of-day handoff and next scope
+
+Stop development for today; this handoff update changes documentation only. The next stage is
+**M3B-F2 Production Write Transaction**. Its authoritative scope and acceptance gates are at the
+top of the [integration roadmap](PR375_PR380_INTEGRATION.md#next-stage-m3b-f2-production-write-transaction).
+Focus only on restricted ordinary `Memory::Write<u8/u16/u32/u64>`: single page, stable/provable
+physical identity, real BufferCache admission and GPU-dirty preservation. Do not expand DMA,
+Texture Cache, NCE or other peripheral work. NCE/JIT fastmem/cross-page/unknown producers remain
+on their original paths without new coherency claims; do not replace all writes.
+
+The complete transaction must prove GPU-dirty complement preservation before the store
+(`[99,99,99] -> [99,77,99]`, never `[10,77,10]`), exact post-store tracker publication that cannot
+be prematurely consumed by concurrent upload, and failure/partial-effect handling without dirty
+loss or early admission release. Reaching `WritePrepared*` or returning `NeedSlow` is insufficient.
+Retain both 77 interleavings, real tracker dirty/clean checks and the disabled-handshake 10 control.
+**F2 remains Open** pending ordinary caller integration, preservation/recovery, exclusion of
+uncontrolled producers and real-device evidence. Progress is descriptive, not a percentage.
+
+Latest tested source is `f00768b0e6cd988db2b3c411e04b48c35f9c7601`:
+[38741531093](https://github.com/Splaser/emulator/actions/runs/38741531093) passed both native
+jobs and all configured Linux regressions. This confirms compilation/regression evidence only;
+it does not establish ordinary-write safety across games. Personal `main` and
+`codex/issue-372-fixes` share that source before this documentation-only update.
+
 ## Actual BufferCache and Vulkan continuation from `dc1a839308`
 
 Native [38727690858](https://github.com/Splaser/emulator/actions/runs/38727690858) passed Android
@@ -16,7 +40,8 @@ The first native continuation run
 failed compilation: Linux diagnosed Result enum names after X11 declarations; Android diagnosed
 the new plan lambda's `size` parameter shadowing a field. The follow-up moves Memory's include
 before Vulkan/X11 and renames that parameter. Compiler warnings remain enabled. This failed run
-is not validation of the corrected source; match the replacement run to its exact SHA.
+is not validation of the corrected source. The corrected source is `f00768b0e6`, validated by
+successful replacement run [38741531093](https://github.com/Splaser/emulator/actions/runs/38741531093).
 
 - Cold `PhysicalAccessPlan::BuildDeviceRange` covers the actual complete rounded cache allocation,
   bounded to 64 physical pages. It snapshots device mappings, pins real HostMemory outside locks,

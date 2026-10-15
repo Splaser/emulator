@@ -1,5 +1,75 @@
 # PR #375 / #380 integration roadmap
 
+## Current handoff: 2026-10-15 end of day
+
+Development stops here for today. This update records progress and the next scope only;
+do not start implementation as part of this handoff. The current continuation branch is
+`codex/issue-372-fixes` in `Splaser/emulator`; personal `main` is kept at the same commit.
+The older integration-branch resume instructions below are historical and superseded.
+
+Latest tested production source: `f00768b0e6cd988db2b3c411e04b48c35f9c7601`.
+[CI 38741531093](https://github.com/Splaser/emulator/actions/runs/38741531093) passed Android
+arm64 production-library compilation, Linux CLI/shader/unit-test builds, production tests,
+Linux HostMemory/backing lifetime tests and coherency/lifecycle regressions. This establishes
+compilation and those regression results, not that ordinary writes are safe in every game or
+that the new protocol has been validated on real Android hardware.
+This documentation-only checkpoint does not change that production source and does not require
+another native CI dispatch.
+
+**F2 — CPU/GPU write coherency: Open.** Progress is an engineering description, not a measured
+completion percentage. Available groundwork includes physical pins, joint range admission,
+page writer gates, actual controlled BufferCache registration/upload, checked completion and
+deterministic positive/negative controls. Still open: ordinary CPU production callers,
+GPU-dirty preservation, failure recovery, exclusion of uncontrolled producers and device proof.
+Implementation/evidence details remain in
+[`M3B_CONTROLLED_FIRST_REGISTRATION_HANDOFF.md`](M3B_CONTROLLED_FIRST_REGISTRATION_HANDOFF.md)
+and [`M3B_PROGRESS.md`](../tools/physical_coherency_tests/M3B_PROGRESS.md).
+
+### Next stage: M3B-F2 Production Write Transaction
+
+Concentrate on actual ordinary CPU writes as one `preserve -> store -> publish` transaction
+under concurrent real GPU work. Stop expanding DMA and peripheral features. Do not use this
+stage to refactor DMA, Texture Cache or NCE, or to replace every write path at once. Controlling
+the change surface takes priority over adding more protocol-only tests.
+
+Initial eligibility is limited to ordinary `Memory::Write<u8/u16/u32/u64>` on a single page,
+with a stable mapping and provable physical identity, where the real BufferCache participates
+in both admission and preservation. Prove and enforce that eligibility before routing a write.
+Entering `WritePrepared*` alone is not transaction acceptance. NCE, JIT fastmem, cross-page
+writes and unknown producers keep their original paths and receive no new coherency guarantee.
+Uncontrolled producers must be excluded from any new guarantee, not assumed cooperative.
+
+Three mandatory proof boundaries:
+
+1. Preserve GPU-dirty contents **before** the CPU store, including untouched bytes. For GPU
+   contents `[99,99,99]`, a one-byte middle CPU store of 77 must finish as `[99,77,99]`;
+   `[10,77,10]` is a failure. Rejecting GPU-dirty pages is not proof of this preservation path.
+2. Publish the exact successful store extent to the real tracker while admission remains held.
+   A concurrent GPU upload must not consume/clear that publication prematurely. Prove the
+   transaction's ownership and ordering, not merely that a dirty bit was set once.
+3. Exceptions and partial failures during preservation, store or commit must not incorrectly
+   clear dirty state or release admission before the effects are understood. Retain the accepted
+   physical/resource owners and quarantine uncertain effects until trusted recovery; neither a
+   callback return nor failed preservation permits success publication or an unsafe fallback.
+
+Retain both registration interleavings and real tracker acceptance:
+
+- CPU writer wins the gate: registration waits for actual store77, then uploads77.
+- Registration closes first: fast `NeedSlow` is followed by an actual protected cached store77,
+  real tracker dirty publication, upload77 and clean tracker state after verified completion.
+- Protected accepted transactions finish with CPU backing77/cache77; a protected reader must
+  not observe stale10 after the store. Preserve the disabled-handshake ordinary-path control
+  `backing77/cache10` and its failing `--require-fixed` baseline until that route is repaired;
+  keep an explicit bypass control after introducing the protected production route.
+- Add the GPU-dirty complement acceptance above, with real GPU work, and failure/interleaving
+  evidence for all three boundaries. Existing controlled fixtures, compilation and green CI
+  remain necessary evidence but cannot alone close F2 or justify whole-game safety claims.
+
+Resume on `codex/issue-372-fixes`: inspect local changes, fetch, use `git pull --ff-only`, and
+match CI to its exact source SHA. Preserve unrelated work, active PR branches and the historical
+F2 branch. Tomorrow's implementation should start with the transaction/ownership boundary and
+the partial-write preservation case, rather than broadening producers.
+
 ## Baseline and scope
 
 - Integration branch: `codex/pr375-pr380-integration`.

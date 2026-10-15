@@ -1,12 +1,45 @@
 # M3B production integration progress
 
+## End-of-day checkpoint: 2026-10-15 — F2 Open
+
+Development is stopped for today; this checkpoint is documentation only. The next stage is
+**M3B-F2 Production Write Transaction**, defined in the
+[roadmap](../../docs/PR375_PR380_INTEGRATION.md#next-stage-m3b-f2-production-write-transaction).
+Stop expanding DMA/peripheral features. Restrict the next implementation to ordinary scalar
+`Memory::Write<u8/u16/u32/u64>` with a single stable page, proven physical identity and actual
+BufferCache admission/preservation. NCE, JIT fastmem, cross-page and unknown producers retain
+their original paths and have no newly claimed coherency guarantee.
+
+Prove the complete `preserve -> store -> publish` transaction against concurrent real GPU work:
+GPU-dirty untouched bytes survive (`[99,99,99] -> [99,77,99]`, not `[10,77,10]`); exact successful
+dirty publication cannot be prematurely consumed by upload; exceptions/partial failures retain
+dirty state, admission and resource ownership until certified completion or trusted recovery.
+Entering a prepared-write API alone is not acceptance. Keep both registration orderings, actual
+cached continuation after NeedSlow, real tracker dirty/clean checks, and backing77/cache10 as the
+disabled-handshake negative control. Add the GPU-dirty complement case as a production-entry gate.
+
+CI [38741531093](https://github.com/Splaser/emulator/actions/runs/38741531093) succeeded at
+`f00768b0e6cd988db2b3c411e04b48c35f9c7601`: Android arm64 production libraries, Linux production
+build/unit tests, actual Linux HostMemory/backing lifetime tests, and full coherency/lifecycle
+regressions. Both registration orderings passed ten repetitions, with backing77/upload77 and
+the real tracker sequence; disabled handshake still produced backing77/upload10. The extracted
+native pipeline and its completion/alias/visibility negative controls also passed ten positive
+repetitions and all negative controls; Vulkan dispatch/device execution remain fixtures.
+
+Available: physical pins, joint range admission, page writer gates, actual controlled cache
+registration/upload, checked completion and deterministic controls. Still open: ordinary CPU
+production callers, GPU-dirty preservation, failure recovery, exclusion of uncontrolled
+producers and real-device validation. This is descriptive progress, not a completion percentage.
+Green CI does not prove ordinary-write safety in every game and does not close F2.
+
 ## Actual BufferCache registration, immutable upload and checked completion: 2026-10-15
 
 Native run [38737867745](https://github.com/Splaser/emulator/actions/runs/38737867745) at
 `08ea7c0a98` exposed two compile-only issues: Linux X11/Result declaration order and Android's
 uncaptured-local shadow check on the new plan lambda. Follow-up corrects include order and the
 parameter name without disabling warnings or changing the admission/transfer behavior. The
-corrected source needs its own native CI result; F2 remains open.
+corrected source `f00768b0e6` passed replacement CI
+[38741531093](https://github.com/Splaser/emulator/actions/runs/38741531093); F2 remains open.
 
 CI [38727690858](https://github.com/Splaser/emulator/actions/runs/38727690858) passed both native
 jobs for `dc1a839308`. Continued on PR375 with an explicit real BufferCache/Rasterizer endpoint;
