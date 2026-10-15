@@ -268,6 +268,7 @@ void BufferCacheRuntime::EndGuestCpuAccess(const Buffer& buffer) {
 }
 
 BufferCacheRuntime::~BufferCacheRuntime() {
+    SealStagedPins();
 #ifdef __linux__
     for (const int fd : guest_cpu_access) {
         if (!SyncGuestDmaBuf(fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_RW)) {
@@ -302,14 +303,16 @@ Buffer::Buffer(BufferCacheRuntime& runtime, VideoCommon::NullBufferParams null_p
         return;
     }
     device = &runtime.device;
-    payload = std::make_shared<StagedBufferPayload>(runtime.CreateNullBuffer(), SizeBytes());
+    payload = std::make_shared<StagedBufferPayload>(runtime.CreateNullBuffer(), SizeBytes(),
+                                                   runtime.staged_pin_domain);
     is_null = true;
 }
 
 Buffer::Buffer(BufferCacheRuntime& runtime, DAddr cpu_addr_, u64 size_bytes_)
     : VideoCommon::BufferBase(cpu_addr_, size_bytes_), device{&runtime.device},
       payload{std::make_shared<StagedBufferPayload>(
-          CreateBuffer(*device, runtime.memory_allocator, SizeBytes()), SizeBytes())},
+          CreateBuffer(*device, runtime.memory_allocator, SizeBytes()), SizeBytes(),
+          runtime.staged_pin_domain)},
       tracker{SizeBytes()} {
     if (runtime.device.HasDebuggingToolAttached()) {
         payload->buffer.SetObjectNameEXT(fmt::format("Buffer 0x{:x}", CpuAddr()).c_str());

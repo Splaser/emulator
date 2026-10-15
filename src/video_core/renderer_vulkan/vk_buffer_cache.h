@@ -125,6 +125,9 @@ public:
 
     ~BufferCacheRuntime();
 
+    /// Called after renderer producer exclusion, before shutdown drains. No waits/resource frees.
+    void SealStagedPins() noexcept { staged_pin_domain->Seal(); }
+
     void TickFrame(Common::SlotVector<Buffer>& slot_buffers) noexcept;
 
     /// Tick of the command buffer being recorded; work recorded now completes at this tick.
@@ -231,6 +234,8 @@ public:
     }
 
 private:
+    std::shared_ptr<StagedBufferPinDomain> staged_pin_domain{
+        std::make_shared<StagedBufferPinDomain>()};
     void BindBuffer(VkBuffer buffer, u32 offset, u32 size) {
         guest_descriptor_queue.AddBuffer(buffer, offset, size);
     }

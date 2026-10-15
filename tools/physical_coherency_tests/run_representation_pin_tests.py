@@ -17,6 +17,7 @@ stub.mkdir(parents=True, exist_ok=True)
 (stub/'assert.h').write_text('#pragma once\n#include <cassert>\n')
 header = (root/'src/video_core/renderer_vulkan/vk_buffer_cache.h').read_text()
 buffer = header[header.index('class Buffer :'):header.index('\nclass QuadArrayIndexBuffer;')]
+seal = next(line.strip() for line in header.splitlines() if 'void SealStagedPins()' in line)
 direct = header[header.index('struct DirectGuestMapping {'):header.index('\nclass Buffer :')]
 wrapper = (root/'src/video_core/vulkan_common/vulkan_wrapper.cpp').read_text()
 release = wrapper[wrapper.index('void Buffer::Release()'):]
@@ -62,6 +63,9 @@ class BufferCacheRuntime;
 ''' + direct + buffer + r'''
 class BufferCacheRuntime {
 public:
+    std::shared_ptr<StagedBufferPinDomain> staged_pin_domain{
+        std::make_shared<StagedBufferPinDomain>()};
+''' + seal + r'''
     vk::DeviceDispatch dispatch;
     uintptr_t next=1;
     vk::Buffer Create() {
@@ -75,7 +79,7 @@ public:
 };
 Buffer::Buffer(BufferCacheRuntime& runtime,u64 address,u64 size)
     : VideoCommon::BufferBase{address,size},
-      payload{std::make_shared<StagedBufferPayload>(runtime.Create(),size)} {}
+      payload{std::make_shared<StagedBufferPayload>(runtime.Create(),size,runtime.staged_pin_domain)} {}
 Buffer::Buffer(BufferCacheRuntime&,VideoCommon::NullBufferParams params)
     : VideoCommon::BufferBase{params} {}
 }
@@ -94,7 +98,8 @@ int main() {
     assert(!cache[id].PinStagedRepresentation(1,~u64{}));
     assert(cache[id].PinStagedRepresentation(4095,1));
     assert(!Vulkan::StagedBufferPin::Build(
-        std::make_shared<Vulkan::StagedBufferPayload>(Vulkan::vk::Buffer{},4096),0,1));
+        std::make_shared<Vulkan::StagedBufferPayload>(
+            Vulkan::vk::Buffer{},4096,runtime.staged_pin_domain),0,1));
     auto duplicate=pin;
     auto moved=std::move(duplicate);
     assert(!duplicate->Handle() && moved->Handle()==handle);
@@ -117,6 +122,18 @@ int main() {
     staged.reset();assert(deaths[old]==1);
     Vulkan::Buffer empty{runtime,VideoCommon::NullBufferParams{}};
     assert(!empty.PinStagedRepresentation(0,1));
+    auto last=cache.insert(runtime,0x3000,4096);
+    auto cancelled=cache[last].PinStagedRepresentation(0,64);
+    const auto cancelled_handle=cancelled->Handle();
+    runtime.SealStagedPins();runtime.SealStagedPins();
+    if(cache[last].PinStagedRepresentation(0,1)) {
+        std::cerr<<"sealed domain accepted new pin\n";return 43;
+    }
+    assert(!cancelled->IsUsable() && !cancelled->Handle() && !deaths[cancelled_handle]);
+    auto cancelled_copy=cancelled;
+    cache.erase(last);assert(!deaths[cancelled_handle]);
+    cancelled.reset();assert(!deaths[cancelled_handle]);
+    cancelled_copy.reset();assert(deaths[cancelled_handle]==1);
     domain_alive=false; // All resource pins released BEFORE device/allocator domain retirement.
     std::cout<<"PASS actual staged payload and vk::Buffer Release: cache move/slot reuse, ring Tick/Flush, replacement, copied/moved pins, bounds, exactly-once final VMA release; direct pins excluded\n";
 }
@@ -144,6 +161,15 @@ result=subprocess.run([str(control)],capture_output=True,text=True,timeout=30)
 if result.returncode!=42 or 'payload released while pin retained' not in result.stderr:
     raise RuntimeError('Non-owning pin negative control did not expose premature destruction')
 print('PASS negative control: keeping only a raw payload identity loses resources at ring retirement')
+seal_store='sealed.store(true, std::memory_order_release);'
+if payload.count(seal_store)!=1:
+    raise RuntimeError('Cannot form missing-seal negative control')
+(negative/'vk_buffer_payload.h').write_text(payload.replace(seal_store,''))
+subprocess.run(cmd[:1]+['-I',str(out/'negative')]+cmd[1:]+[str(cpp),'-o',str(control)],check=True)
+result=subprocess.run([str(control)],capture_output=True,text=True,timeout=30)
+if result.returncode!=43 or 'sealed domain accepted new pin' not in result.stderr:
+    raise RuntimeError('Missing-seal negative control did not admit a pin after shutdown')
+print('PASS real runtime seal: reject new pins, disable handle lookup, retain old resources until last release; missing-seal negative control rejected')
 (out/'extraction.json').write_text(json.dumps({
     'sha256': {path:hashlib.sha256((root/path).read_bytes()).hexdigest() for path in [payload_path,
         'src/video_core/renderer_vulkan/vk_buffer_cache.h',

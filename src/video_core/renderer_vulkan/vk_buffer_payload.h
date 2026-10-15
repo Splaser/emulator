@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -12,18 +13,33 @@ namespace Vulkan {
 class Buffer;
 class StagedBufferPin;
 
+/// One-way cancellation boundary, not ownership of VkDevice/VMA or a completion fence.
+/// Sealing rejects new pins and disables handle lookup without dropping existing payloads.
+class StagedBufferPinDomain {
+public:
+    void Seal() noexcept { sealed.store(true, std::memory_order_release); }
+    [[nodiscard]] bool IsSealed() const noexcept {
+        return sealed.load(std::memory_order_acquire);
+    }
+
+private:
+    std::atomic_bool sealed{false};
+};
+
 /// Owns the actual VMA buffer/allocation used by staged DMA copies. This does not own the
 /// renderer's VkDevice/VMA allocator: callers must release all pins before those domains retire.
 class StagedBufferPayload {
 public:
-    StagedBufferPayload(vk::Buffer resource, u64 size_bytes)
-        : buffer{std::move(resource)}, size{size_bytes} {}
+    StagedBufferPayload(vk::Buffer resource, u64 size_bytes,
+                        std::shared_ptr<const StagedBufferPinDomain> pin_domain)
+        : buffer{std::move(resource)}, size{size_bytes}, domain{std::move(pin_domain)} {}
 
 private:
     friend class Buffer;
     friend class StagedBufferPin;
     vk::Buffer buffer;
     const u64 size;
+    const std::shared_ptr<const StagedBufferPinDomain> domain;
 };
 
 /// Immutable byte interval and real staged-buffer ownership. Not cache membership, physical
@@ -32,7 +48,11 @@ private:
 class StagedBufferPin {
 public:
     [[nodiscard]] VkBuffer Handle() const noexcept {
-        return payload ? *payload->buffer : VK_NULL_HANDLE;
+        return IsUsable() ? *payload->buffer : VK_NULL_HANDLE;
+    }
+    /// False after domain seal. This does not release resources or acknowledge device completion.
+    [[nodiscard]] bool IsUsable() const noexcept {
+        return payload && payload->domain && !payload->domain->IsSealed() && payload->buffer;
     }
     [[nodiscard]] u64 Offset() const noexcept { return offset; }
     [[nodiscard]] u64 Size() const noexcept { return size; }
@@ -40,7 +60,8 @@ public:
 
     [[nodiscard]] static std::optional<StagedBufferPin> Build(
         const std::shared_ptr<StagedBufferPayload>& owner, u64 offset_bytes, u64 size_bytes) {
-        if (!owner || !owner->buffer || !size_bytes || offset_bytes >= owner->size ||
+        if (!owner || !owner->domain || owner->domain->IsSealed() || !owner->buffer ||
+            !size_bytes || offset_bytes >= owner->size ||
             size_bytes > owner->size - offset_bytes) {
             return std::nullopt;
         }

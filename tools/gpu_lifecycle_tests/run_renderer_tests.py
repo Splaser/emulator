@@ -157,7 +157,19 @@ struct RasterizerVulkan {
             owner->shutdown_mutex.unlock_shared(); order.push_back("fencing");
         }
     } fence_manager{this};
-    struct Runtime { void Finish(){order.push_back("runtime_finish");} } buffer_cache_runtime,texture_cache_runtime;
+    struct Runtime {
+        RasterizerVulkan* owner;
+        void SealStagedPins() {
+            auto probe=std::async(std::launch::async,[&]{
+                bool available=owner->shutdown_mutex.try_lock_shared();
+                if(available) owner->shutdown_mutex.unlock_shared();
+                return available;
+            });
+            Require(!probe.get(),"pin domain sealed without renderer producer exclusion");
+            order.push_back("pin_seal");
+        }
+        void Finish(){order.push_back("runtime_finish");}
+    } buffer_cache_runtime{this},texture_cache_runtime{this};
     void Shutdown();
 };
 struct TurboLife { Event entered,release; std::atomic<bool> exited=false,idle=false,cleaned=false; };
@@ -215,7 +227,7 @@ struct RendererVulkan {
 tail=r'''
 void renderer_order() {
     order.clear(); {RendererVulkan renderer;}
-    const std::vector<std::string> expected={"pipelines","finish","fencing","runtime_finish","runtime_finish","recording","presentation_join","scheduler_join","detach_on_submit","turbo_join","device_idle","completion_join","imports"};
+    const std::vector<std::string> expected={"pin_seal","pipelines","finish","fencing","runtime_finish","runtime_finish","recording","presentation_join","scheduler_join","detach_on_submit","turbo_join","device_idle","completion_join","imports"};
     Require(order==expected,"renderer destroys resources or waits idle before host workers are joined");
 }
 void scheduler_drain() {

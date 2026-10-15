@@ -227,7 +227,34 @@ slice does not establish shutdown sealing or retain those domains. Physical/repr
 footprint matching, cache-content preservation, immutable submit ownership, checked completion/
 Unknown handling and cancellation remain activation blockers. A shared resource owner alone
 does not close those contracts. The original F2 gate still reports backing 77/cache 10 and exit 1.
-Remote Android/Linux compilation and regression evidence for this slice is pending.
+Run `38692337709` at `cc324dff81303649e9385c2dd271424be3604c31` passed Android arm64 production
+compilation and the full Linux production/regression job, including staged payload ownership
+and raw-identity negative controls. This is not a full device-domain lifetime proof or F2 repair.
+
+### Shutdown seal (after cc324dff81)
+
+Each runtime now prepares a monotonic `StagedBufferPinDomain` shared by its staged payloads.
+`RasterizerVulkan::Shutdown` seals that domain after taking exclusive producer exclusion and
+before releasing the shutdown guard for pipeline/fence/recording drains. Runtime destruction
+seals it again as a fallback. Seal performs no wait and releases no Vulkan resources. New pin
+acquisitions observing the seal reject; existing pins stop exposing a usable VkBuffer through
+Handle/IsUsable while retaining their payload until the final owner releases it. A creation
+racing seal may finish with an unusable pin if its acquisition check preceded seal.
+
+Windows tests pass the actual runtime seal method and payload domain, rejection after repeated
+seal, handle invalidation without early VMA destruction, and exactly-once final release. A
+missing-seal negative control explicitly accepts a post-shutdown pin and fails. Actual extracted
+renderer shutdown orchestration also passes its producer-exclusion/order assertion and existing
+recording, presentation, fence, turbo and completion-worker drain tests. Importer tests still pass.
+
+This is cancellation of future handle lookup, **not a complete device-domain lifetime proof**.
+Previously extracted handles and submitted commands are not revoked. No outstanding resource
+may outlive the real Device/VMA allocator; this slice does not enforce final-pin drainage or
+connect parked-plan cancellation/Unknown completion to that boundary. It deliberately does not
+force-free old payloads at seal or reinterpret callback return/unchecked WaitIdle as completion.
+There is still no active DMA admission consumer and the original F2 failure remains open.
+The cc324dff81 native run finished successfully before this slice was submitted. This slice's
+own remote Android/Linux compilation and regressions are pending.
 
 ### Required creation-to-execution order
 

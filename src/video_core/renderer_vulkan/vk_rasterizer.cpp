@@ -401,6 +401,7 @@ void RasterizerVulkan::Shutdown() {
         return;
     }
     std::unique_lock exclusive_guard{shutdown_mutex};
+    buffer_cache_runtime.SealStagedPins();
     if (physical_shadow) {
         // Texture copies/clears also use the cache mutex outside draw preparation.
         // Serialize final diagnostic reads and detach its pointer before teardown.
