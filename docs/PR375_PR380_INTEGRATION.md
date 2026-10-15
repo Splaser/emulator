@@ -73,7 +73,8 @@ build from extracted-source tests and from Linux/Android/device execution.
 
 Status (2026-10-15): conflict resolution, the complete Linux production/unit-test/HostMemory/
 coherency/lifecycle CI job and Android arm64 production library compilation passed at
-`4fc3f7e768`. Device validation remains outstanding. F2 remains isolated on its original branch.
+`4fc3f7e768`. The user accepted upstream device validation and promoted the result to main/#375;
+M3B continuation and its separate validation boundaries are recorded below.
 
 ## Handoff: 2026-10-14 (Asia/Taipei)
 
