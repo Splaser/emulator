@@ -109,6 +109,20 @@ ownership at `Record exact build inputs`; that step now trusts only `$GITHUB_WOR
 package; its explicit package list now requests `platform-tools`. Both fixes are workflow-only;
 production compilation remains unverified until a subsequent run passes.
 
+### Resume: 2026-10-15 (Asia/Singapore)
+
+- Synced the personal fork and resumed from `a4a7462944` on the integration branch.
+- Run `38577756839` reached Linux production compilation, then GCC rejected the GC-local
+  `PendingDownload` because it shadows the async download member added by #380. Renamed only
+  the GC-local type to `PendingGCDownload`; readback ownership and eviction behavior are unchanged.
+- The same run stopped Android configuration in Oaknut's `find_package(Catch2 3 REQUIRED)`.
+  The top-level CTest option defaults on even with `CITRON_TESTS=OFF`; CPM now passes
+  `BUILD_TESTING OFF` specifically to Oaknut, without disabling the project's Linux unit tests.
+- The extracted integration contracts pass again on Windows. No local Android production build
+  was attempted. Linux/Android production build and Linux runtime regression results remain
+  pending the next remote workflow; the failed run never reached those regression steps.
+- PR #375, personal main and F2 remain unchanged by these integration fixes.
+
 ### Resume on another computer
 
 ```powershell

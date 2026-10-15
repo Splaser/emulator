@@ -461,6 +461,7 @@ if (ARCHITECTURE_arm64 AND NOT TARGET merry::oaknut)
         NAME oaknut
         GITHUB_REPOSITORY yuzu-mirror/oaknut
         GIT_TAG 94c726ce0338b054eb8cb5ea91de8fe6c19f4392
+        OPTIONS "BUILD_TESTING OFF"
     )
 endif()
 
