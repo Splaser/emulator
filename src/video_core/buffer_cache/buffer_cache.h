@@ -248,6 +248,43 @@ void BufferCache<P>::WriteMemory(DAddr device_addr, u64 size) {
 }
 
 template <class P>
+template <typename Store>
+Core::Memory::PreparedCpuWriteResult
+BufferCache<P>::CommitControlledCpuWrite(Common::PhysicalRegistrationBundle::CachedWrite& write,
+                                         std::span<const DAddr> device_aliases, u64 size,
+                                         Store&& store) {
+    using Result = Core::Memory::PreparedCpuWriteResult;
+    if (!write.Granted() || !size || size > DEVICE_PAGESIZE || device_aliases.empty() ||
+        device_aliases.size() > Common::PhysicalRangeAdmission::MaxAccesses || scatter_busy ||
+        std::ranges::any_of(gather_buffers,
+                            [](const auto& item) { return item.second.scatter_pending; }))
+        return Result::NeedSlow;
+    for (const auto address : device_aliases) {
+        if (!IsRegionPageTableAddressable(address, size) ||
+            size > DEVICE_PAGESIZE - address % DEVICE_PAGESIZE ||
+            !IsRegionRegistered(address, size) || memory_tracker.IsRegionGpuModified(address, size))
+            return Result::NeedSlow;
+    }
+    try {
+        const auto result = store();
+        if (result != Result::Stored) return result;
+        // The real store has completed. Admission still excludes registration/uploads here.
+        // Never use pre-store dirty notification as proof of post-store publication.
+        for (const auto address : device_aliases) {
+            NotifyGatherWrite(address, size);
+            memory_tracker.MarkRegionAsCpuModified(address, size);
+        }
+    } catch (...) {
+        // Store or publication may already have effects. Catching the exception must not let
+        // a caller complete this obligation or expose an incompletely dirtied alias as clean.
+        (void)write.MarkUnknown();
+        throw;
+    }
+    // The caller may release only after observing Stored from this whole adapter.
+    return Result::Stored;
+}
+
+template <class P>
 u64 BufferCache<P>::WidenHotWrite(DAddr device_addr, u64 size) {
     // A write only says something about the guest when it landed on a page being watched
     if (memory_tracker.IsRegionCpuModified(device_addr, size)) {

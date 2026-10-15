@@ -11,6 +11,7 @@ namespace Common {
 
 enum class PhysicalStoreResult { Stored, CompareFailed, NeedSlow, Retired, Invalid };
 class PhysicalPageRegistration;
+class PhysicalRegistrationBundle;
 
 /// Prepared physical target, not CPU-VA resolution/admission. Preparation may allocate; the
 /// scalar methods use only this stable target, page-local atomics and stack state. Never fall
@@ -60,6 +61,7 @@ public:
 private:
     friend class HostMemory;
     friend class PhysicalPageRegistration;
+    friend class PhysicalRegistrationBundle;
     PreparedPhysicalCpuPage(PinnedPhysicalMemory pin, std::shared_ptr<PhysicalPageGates::Node> node)
         : storage{std::move(pin)}, gate{std::move(node)} {}
     struct Exit {

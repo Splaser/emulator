@@ -70,6 +70,7 @@ add_library(common STATIC
     physical_range_admission.h
     physical_page_gate.h
     physical_cpu_page.h
+    physical_registration_bundle.h
     mapping_lifetime.h
     input.h
     intrusive_red_black_tree.h

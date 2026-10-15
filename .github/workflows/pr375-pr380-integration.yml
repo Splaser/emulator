@@ -107,6 +107,7 @@ jobs:
           python tools/physical_coherency_tests/run_physical_admission_tests.py
           python tools/physical_coherency_tests/run_page_writer_tests.py
           python tools/physical_coherency_tests/run_cpu_mapping_tests.py
+          python tools/physical_coherency_tests/run_first_registration_tests.py --repeat 10
           python tools/physical_coherency_tests/run_m3b_candidate_tests.py --repeat 3
           python tools/dma_snapshot_tests/run_tests.py
           python tools/gather_buffer_tests/run_tests.py
@@ -131,6 +132,8 @@ jobs:
           name: pr375-pr380-validation-${{ github.sha }}
           path: |
             .diagnostics/pr375-pr380/*.txt
+            .diagnostics/m3b-first-registration/extraction.json
+            .diagnostics/m3b-first-registration/*.cpp
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn

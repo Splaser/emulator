@@ -16,6 +16,7 @@ namespace Common {
 
 class PreparedPhysicalCpuPage;
 class PhysicalPageRegistration;
+class PhysicalRegistrationBundle;
 
 /// Cold lookup registry, scoped to ONE backing epoch. Nodes hold metadata only, never VA keys,
 /// storage or a renderer. Prepared CPU pages retain the actual storage separately.
@@ -24,8 +25,8 @@ public:
     static constexpr u64 PageSize = 4096;
     static constexpr size_t MaxPages = 65536;
     /// Monotonic cumulative observation, not an owned dirty batch. No bit clearing or sequence
-    /// acknowledgement is provided. Snapshot currently requires closed fast entry and drainage;
-    /// extending publication to tracked writers requires a separately proved snapshot protocol.
+    /// acknowledgement is provided. Snapshot requires closed fast entry and drainage; explicit
+    /// tracked stores additionally exclude snapshots with a nonblocking observation guard.
     struct Publication {
         std::array<u64, PageSize / 64> modified_bytes{};
         u64 sequence{};
@@ -37,6 +38,7 @@ public:
         friend class PhysicalPageGates;
         friend class PreparedPhysicalCpuPage;
         friend class PhysicalPageRegistration;
+        friend class PhysicalRegistrationBundle;
         static constexpr u64 Tracked = 1, Closing = 2, One = 4;
         explicit Node(std::shared_ptr<std::atomic_bool> stop) : closed{std::move(stop)} {}
         bool TryEnter() noexcept {
@@ -81,6 +83,8 @@ public:
             published.fetch_add(1, std::memory_order_release);
         }
         std::optional<Publication> Snapshot() const noexcept {
+            if (observation.test_and_set(std::memory_order_acquire)) return std::nullopt;
+            ObservationExit observation_exit{&observation};
             const auto value = state.load(std::memory_order_acquire);
             if (closed->load(std::memory_order_acquire) || value / One ||
                 !(value & (Tracked | Closing))) return std::nullopt;
@@ -90,6 +94,13 @@ public:
             result.sequence = published.load(std::memory_order_acquire);
             return result;
         }
+        struct ObservationExit {
+            std::atomic_flag* flag;
+            ~ObservationExit() { flag->clear(std::memory_order_release); }
+        };
+        // Only snapshots and explicit tracked stores participate. Fast entry stays unchanged.
+        // Never spin: a concurrent observation makes the controlled cached store retry.
+        mutable std::atomic_flag observation = ATOMIC_FLAG_INIT;
         std::atomic<u64> state{};
         std::array<std::atomic<u64>, PageSize / 64> modified{};
         std::atomic<u64> published{};

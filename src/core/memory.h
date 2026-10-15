@@ -84,7 +84,8 @@ public:
 
     /// Explicit, bounded prepared-VA stores; no automatic activation in ordinary Write APIs.
     /// Refusals have no effects and MUST NOT fall back to legacy writes under admission.
-    /// Cached/debug pages require an unimplemented preservation/registration slow adapter.
+    /// This fast entry refuses cached/debug pages. The cached counterpart below additionally
+    /// requires qualified aliases, completed registration and any necessary preservation.
     [[nodiscard]] PreparedCpuWriteResult WritePrepared8(const PreparedCpuPage& page,
                                                         Common::ProcessAddress addr, u8 data);
     [[nodiscard]] PreparedCpuWriteResult WritePrepared16(const PreparedCpuPage& page,
@@ -93,6 +94,25 @@ public:
                                                          Common::ProcessAddress addr, u32 data);
     [[nodiscard]] PreparedCpuWriteResult WritePrepared64(const PreparedCpuPage& page,
                                                          Common::ProcessAddress addr, u64 data);
+
+    /// Explicit cached counterpart; the controlled cache owner supplies admission and must
+    /// publish the successful store to every qualified device alias before releasing it.
+    [[nodiscard]] PreparedCpuWriteResult
+    WritePreparedCached8(const PreparedCpuPage& page,
+                         Common::PhysicalRegistrationBundle::CachedWrite& write,
+                         Common::ProcessAddress addr, u8 data);
+    [[nodiscard]] PreparedCpuWriteResult
+    WritePreparedCached16(const PreparedCpuPage& page,
+                          Common::PhysicalRegistrationBundle::CachedWrite& write,
+                          Common::ProcessAddress addr, u16 data);
+    [[nodiscard]] PreparedCpuWriteResult
+    WritePreparedCached32(const PreparedCpuPage& page,
+                          Common::PhysicalRegistrationBundle::CachedWrite& write,
+                          Common::ProcessAddress addr, u32 data);
+    [[nodiscard]] PreparedCpuWriteResult
+    WritePreparedCached64(const PreparedCpuPage& page,
+                          Common::PhysicalRegistrationBundle::CachedWrite& write,
+                          Common::ProcessAddress addr, u64 data);
 
     /**
      * Maps an allocated buffer onto a region of the emulated process address space.

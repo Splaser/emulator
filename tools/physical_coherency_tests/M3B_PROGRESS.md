@@ -1,5 +1,39 @@
 # M3B production integration progress
 
+## Controlled first-registration ordering and cached continuation: 2026-10-15 evening
+
+Continued from `8ca6197c67` on `codex/issue-372-fixes`. The user's step-3 gate explicitly requires
+both orderings, final backing77/upload77, real tracker consistency, and a disabled-handshake
+backing77/upload10 control. Returning NeedSlow alone is not a passing registered-first case.
+
+The new physical registration bundle deduplicates aliases and enqueues one atomic bounded range
+request before closing every covered page. Entered writers on the second/last coarse page must
+drain before registration can run. Completed registration can issue a separate cached-write
+request, retained through the actual prepared Memory cached store and BufferCache post-store
+tracker publication. Snapshot and explicit tracked-store publication exclude each other without
+spinning; the ordinary prepared fast store retains its existing no-allocation/page-local path.
+
+Windows `run_first_registration_tests.py --repeat 10` passes both orderings with actual Memory
+Write/WriteCached, HostMemory/PageTable, BufferCache registration/upload bodies and real
+MemoryTrackerBase/WordManager. Registered-first proceeds through actual cached store77, real
+dirty publication for two device aliases, subsequent upload77 and clean tracker. The actual
+ordinary Write body with handshake disabled repeatedly produces backing77/cache10 with clean
+tracker. Removing the post-store tracker update fails (72), closing only the start page fails
+(71), and removing tracked-store/snapshot exclusion fails (75). Stale prepared permission and
+GPU-dirty refusal are checked before effects. The new suite is included in integration CI.
+Tracker-publication exceptions after an actual store explicitly mark the cached request Unknown;
+even a caller catching the exception cannot complete it, and conflicting readers remain parked.
+
+The existing GPU-plan, representation-pin, cache-representation, range-admission, page-writer
+and CPU-mapping suites also passed locally during this continuation. Full Android compilation
+and Linux native validation remain GitHub Workflow work, not local Android builds.
+
+**Scope remains controlled groundwork.** Complete footprint/owner discovery, qualified stable
+device aliases, physical-plan upload, GPU-dirty preservation and real checked Vulkan completion
+are not installed into ordinary production registration. The new test uses fixture device alias
+fanout, allocation and synchronous upload/completion; it is not native driver/device proof. No
+DMA/NCE/JIT/raw-pointer/image routing is enabled. F2 and the full end-to-end stage remain OPEN.
+
 ## Resumed baseline: 2026-10-15
 
 The user authorized merging the validated #380 integration into personal main and the #375

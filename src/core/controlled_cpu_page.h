@@ -3,6 +3,7 @@
 
 #include "common/page_table.h"
 #include "common/physical_cpu_page.h"
+#include "common/physical_registration_bundle.h"
 
 namespace Core::Memory {
 
@@ -44,12 +45,39 @@ struct PreparedCpuPage {
         requires(std::is_trivially_copyable_v<T> && sizeof(T) <= 16)
     [[nodiscard]] PreparedCpuWriteResult TryStore(const CpuAccessContext* caller,
                                                  u64 address, const T& value) const noexcept {
+        return TryStoreImpl(
+            caller, address, false, [&] { return physical.TryStore(address & 4095, value); },
+            sizeof(T));
+    }
+
+    /// Explicit controlled cached path only. The cache owner must retain this admission
+    /// through its post-store tracker update. GPU-dirty preservation/aliases must be qualified
+    /// before this bounded call; it never invokes callbacks or falls back to legacy memcpy.
+    template <typename T>
+        requires(std::is_trivially_copyable_v<T> && sizeof(T) <= 16)
+    [[nodiscard]] PreparedCpuWriteResult
+    TryStoreCached(const CpuAccessContext* caller, u64 address, const T& value,
+                   Common::PhysicalRegistrationBundle::CachedWrite& write) const noexcept {
+        return TryStoreImpl(
+            caller, address, true,
+            [&] {
+                return Common::PhysicalRegistrationBundle::StoreCached(write, physical,
+                                                                       address & 4095, value);
+            },
+            sizeof(T));
+    }
+
+private:
+    template <typename Store>
+    [[nodiscard]] PreparedCpuWriteResult TryStoreImpl(const CpuAccessContext* caller, u64 address,
+                                                      bool cached, Store&& store,
+                                                      size_t size) const noexcept {
         if (!context || context.get() != caller || !mapping.domain)
             return PreparedCpuWriteResult::Invalid;
         // Same AArch64 top-bit masking as the legacy pointer resolver.
         address &= 0xffffffffffffULL;
-        if ((address & ~u64{4095}) != mapping.virtual_page ||
-            sizeof(T) > 4096 - (address & 4095)) return PreparedCpuWriteResult::Invalid;
+        if ((address & ~u64{4095}) != mapping.virtual_page || size > 4096 - (address & 4095))
+            return PreparedCpuWriteResult::Invalid;
         std::shared_lock context_guard{context->mutex, std::try_to_lock};
         if (!context_guard.owns_lock()) return PreparedCpuWriteResult::Busy;
         if (!context->alive.load(std::memory_order_acquire)) return PreparedCpuWriteResult::Retired;
@@ -60,8 +88,10 @@ struct PreparedCpuPage {
         if (!mapping.IsCurrent()) return PreparedCpuWriteResult::Stale;
         // Debug/cached paths require the existing preservation/device-alias/OnCPUWrite work.
         // Never perform those callbacks while holding these short execution guards.
-        if (mapping.type != Common::PageType::Memory) return PreparedCpuWriteResult::NeedSlow;
-        switch (physical.TryStore(address & 4095, value)) {
+        if (mapping.type != Common::PageType::Memory &&
+            !(cached && mapping.type == Common::PageType::RasterizerCachedMemory))
+            return PreparedCpuWriteResult::NeedSlow;
+        switch (store()) {
         case Common::PhysicalStoreResult::Stored: return PreparedCpuWriteResult::Stored;
         case Common::PhysicalStoreResult::NeedSlow: return PreparedCpuWriteResult::NeedSlow;
         case Common::PhysicalStoreResult::Retired: return PreparedCpuWriteResult::Retired;

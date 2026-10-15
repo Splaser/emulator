@@ -4,6 +4,43 @@ Handoff updated 2026-10-15 (Asia/Singapore). **The end-to-end first-registration
 NOT implemented or accepted yet. F2 remains open.** This file is the home-machine roadmap,
 not a claim that prepared-store tests fixed production cache registration.
 
+### Evening continuation from `8ca6197c67`: roadmap step 3 ordering gate
+
+`PhysicalRegistrationBundle` reserves one bounded physical range request before closing every
+deduplicated page gate. A writer on the second/last page (including a CPU physical alias) keeps
+the entire registration Draining. It supplies owned pages and an external representation owner;
+the controlled caller still has to derive and qualify the actual complete cache footprint.
+
+After externally certified registration completion, a separate admitted `CachedWrite` can use
+actual `Memory::WritePreparedCached8/16/32/64`. `BufferCache::CommitControlledCpuWrite` invokes the
+store first and updates the real tracker for every supplied qualified device alias afterwards,
+while admission remains held. Stale CPU views and GPU-dirty/pending-scatter targets refuse without
+a legacy fallback. The alias list/stability and absence of required preservation are explicit
+caller prerequisites, NOT automatically proved by this adapter. No ordinary caller is installed.
+
+`run_first_registration_tests.py --repeat 10` composes actual Memory Write/WriteCached, HostMemory,
+PageTable, BufferCache Register/ChangeRegister and SynchronizeBuffer/UploadMemory/
+ImmediateUploadMemory with actual MemoryTrackerBase/WordManager. Its acceptance gates are:
+
+| Interleaving | Final backing | Final cache upload | Real tracker |
+| --- | --- | --- | --- |
+| CPU writer enters first; full registration waits for its actual store | 77 | 77 at both device aliases | clean after upload |
+| Registration closes first; NeedSlow is followed by an actual protected cached store | 77 | 77 at both device aliases | dirty after store, clean after upload |
+| Ordinary legacy Write with handshake disabled | 77 | 10 at both device aliases | clean, exposing the stale-cache defect |
+
+Removing post-store tracker publication fails with 72; closing only the first page fails with
+71; omitting snapshot/store exclusion fails with 75. Snapshot exclusion is nonblocking and does
+not add a range lookup, cold pin or allocation to the prepared fast store. Cumulative publication
+is still not a consumable dirty batch. Device mapping/tag fanout, cache allocation and synchronous
+upload completion in this suite are fixtures. This is controlled step-3 evidence, not Vulkan
+driver evidence or completion of the end-to-end stage. The original F2 witness remains required
+and failing; steps 1/2 footprint/owner preparation and steps 4-6 immutable upload, quarantine,
+checked real completion and production caller integration remain open.
+
+The earlier native run [38711873776](https://github.com/Splaser/emulator/actions/runs/38711873776)
+is now confirmed successful for both Android and Linux at `ecf9bb31e8`. That result predates
+this continuation. Current-slice Android/Linux validation must be matched to its own source SHA.
+
 ## Checkout and branch policy
 
 Work on `codex/issue-372-fixes` in the personal fork `Splaser/emulator`. Personal `main` is

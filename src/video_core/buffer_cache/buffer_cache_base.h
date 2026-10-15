@@ -18,6 +18,8 @@
 #include <vector>
 
 #include "common/common_types.h"
+#include "common/physical_registration_bundle.h"
+#include "core/controlled_cpu_page.h"
 #include "common/div_ceil.h"
 #include "common/literals.h"
 #include "common/lru_cache.h"
@@ -354,6 +356,16 @@ public:
 
     mutable std::recursive_mutex mutex;
     Runtime& runtime;
+
+    /// Controlled cache-owner entry only. Caller cold-qualifies the COMPLETE immutable device
+    /// alias list, keeps mappings/representations stable for this bounded execution, and binds
+    /// store to the real prepared Memory cached Write with this SAME admission. No waits,
+    /// preservation callbacks, normal-game activation or automatic legacy fallback are allowed.
+    /// GPU-dirty/pending scatter remains ineligible until its preservation adapter is proved.
+    template <typename Store>
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult
+    CommitControlledCpuWrite(Common::PhysicalRegistrationBundle::CachedWrite& write,
+                             std::span<const DAddr> device_aliases, u64 size, Store&& store);
 
 private:
     template <typename Func>

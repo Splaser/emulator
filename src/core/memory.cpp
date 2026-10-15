@@ -772,6 +772,15 @@ struct Memory::Impl {
     }
 
     template <typename T>
+    inline PreparedCpuWriteResult
+    WriteCached(const PreparedCpuPage& prepared,
+                Common::PhysicalRegistrationBundle::CachedWrite& write,
+                Common::ProcessAddress vaddr, const T data) noexcept {
+        return prepared.TryStoreCached(controlled_context.state.get(), GetInteger(vaddr), data,
+                                       write);
+    }
+
+    template <typename T>
     inline void Write(Common::ProcessAddress vaddr, const T data) noexcept requires(std::is_trivially_copyable_v<T>) {
         CITRON_PROFILE_MEM_SCOPE("Memory::Write");
         auto const addr_c1 = GetInteger(vaddr);
@@ -1096,6 +1105,34 @@ PreparedCpuWriteResult Memory::WritePrepared32(const PreparedCpuPage& page,
 PreparedCpuWriteResult Memory::WritePrepared64(const PreparedCpuPage& page,
                                               Common::ProcessAddress addr, u64 data) {
     return impl->Write<u64_le>(page, addr, data);
+}
+
+PreparedCpuWriteResult
+Memory::WritePreparedCached8(const PreparedCpuPage& page,
+                             Common::PhysicalRegistrationBundle::CachedWrite& write,
+                             Common::ProcessAddress addr, u8 data) {
+    return impl->WriteCached<u8>(page, write, addr, data);
+}
+
+PreparedCpuWriteResult
+Memory::WritePreparedCached16(const PreparedCpuPage& page,
+                              Common::PhysicalRegistrationBundle::CachedWrite& write,
+                              Common::ProcessAddress addr, u16 data) {
+    return impl->WriteCached<u16_le>(page, write, addr, data);
+}
+
+PreparedCpuWriteResult
+Memory::WritePreparedCached32(const PreparedCpuPage& page,
+                              Common::PhysicalRegistrationBundle::CachedWrite& write,
+                              Common::ProcessAddress addr, u32 data) {
+    return impl->WriteCached<u32_le>(page, write, addr, data);
+}
+
+PreparedCpuWriteResult
+Memory::WritePreparedCached64(const PreparedCpuPage& page,
+                              Common::PhysicalRegistrationBundle::CachedWrite& write,
+                              Common::ProcessAddress addr, u64 data) {
+    return impl->WriteCached<u64_le>(page, write, addr, data);
 }
 
 bool Memory::WriteExclusive8(Common::ProcessAddress addr, u8 data, u8 expected) {
