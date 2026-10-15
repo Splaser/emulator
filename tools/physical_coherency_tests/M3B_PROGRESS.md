@@ -131,8 +131,34 @@ Windows extraction tests compile the actual descriptor with the actual DMA regis
 pure projection. Tests pass flag rejection, source/destination bounds, exact 40-bit endpoint,
 32 MiB boundary, unchanged sink/Launch spy, and exhaustive offsets with cross-group permutation
 coverage. Launch remains a spy, not real DMA or driver execution. The execution-mask negative
-control still fails as required. Remote production compilation and Linux validation for this
-new descriptor are pending the next run. F2 remains unresolved.
+control still fails as required. Run `38680939033` at
+`5a072182e71107de384a38249ca0ebf8b7791fba` passed both Android arm64 production compilation and
+the complete Linux production/regression job, including descriptor/projection positive and
+negative controls. F2 remains unresolved.
+
+## Joint source/destination storage preparation
+
+`MemoryManager::PinPhysicalCopyRanges` resolves both extents, requires matching GPU/device/
+backing identities, builds real storage pins outside mapping locks, then revalidates BOTH
+snapshots under one GPU-then-device lock pair after all pins. A mapping change after either
+individual build rejects the entire pair. Accepted plans retain their original storage after
+later remaps; no mapping-use lease is retained, and their future use still requires admission.
+
+`MaxwellDMA::PrepareSingleLineStorage` composes the pure restricted description with this real
+pair adapter for its conservative source/destination coverage. It does not consume the sink,
+call Launch, preserve cache contents, acquire GPU representation ownership or authorize access.
+The returned logical length is distinct from synchronization coverage. PageKind/layout
+eligibility and exact publication remain unresolved; no execution callback is installed.
+
+The Windows real GMMU/HostMemory runner checks paired split/alias coverage, empty/hole rejection,
+GPU and device remaps after both individual pin builds, and old physical view retention. Removing
+the final joint validation produces the explicit `stale paired mapping accepted` negative control.
+The combined runner additionally compiles the actual DMA projection/description/storage adapter
+against those real extracted GPU/device resolver methods and real OS allocations; Launch is
+still a spy and PTE storage/manager shells are fixtures. The smaller engine test checks exact
+coverage arguments, unsupported-encoding rejection before resolution, failure propagation and
+unchanged sink/Launch count. This preparation is not an executable DMA plan or an F2 repair.
+Remote production compilation and Linux validation for this joint-plan slice are pending.
 
 ## Remaining production adapters and acceptance gates
 

@@ -51,20 +51,38 @@ for name,templated in [('GetEntry',True),('SetEntry',True),('IsBigPageContinuous
                        ('SetBigPageContinuous',False),('NotifyMappingChange',True),
                        ('PageTableOp',True),('BigPageTableOp',True),('Map',False),
                        ('Unmap',False),('GpuToCpuAddress',False),('ResolvePhysicalRanges',False),
-                       ('PinPhysicalRanges',False)]:
+                       ('PinPhysicalRanges',False),('PinPhysicalCopyRanges',False)]:
     parts.append(function(gpu,'MemoryManager::'+name+'(',templated))
 fixture = fixture.replace('/* GPU_FUNCTIONS */',''.join(parts))
 fixture = fixture.replace('    PhysicalResolveResult ResolvePhysicalRanges(',
+    '    std::optional<PhysicalCopyPlan> PinPhysicalCopyRanges(u64,u64,u64,u64) const;\n'
     '    std::optional<PhysicalAccessPlan> PinPhysicalRanges(u64,u64) const;\n    PhysicalResolveResult ResolvePhysicalRanges(')
+# Test-only rendezvous after BOTH real plans were pinned, before their final common check.
+copy_marker = '    const auto gpu_lock = std::unique_lock{stamp.gpu_address_space->mutex};'
+if fixture.count(copy_marker)!=1:
+    raise RuntimeError('Cannot instrument copy-plan common validation')
+fixture = fixture.replace(copy_marker,'    ObserveCopyReady();\n'+copy_marker)
 head = r'''
 #include <functional>
 #include "common/host_memory.h"
 #include "video_core/physical_access_plan.h"
+#include "video_core/engines/maxwell_dma.h"
+namespace Core {class System {};}
 namespace Tegra {
 std::function<void()> plan_ready;
+std::function<void()> copy_ready;
 void ObservePlanReady() {if(plan_ready) plan_ready();}
+void ObserveCopyReady() {if(copy_ready) copy_ready();}
 }
 '''
+dma = (root/'src/video_core/engines/maxwell_dma.cpp').read_text()
+engine = '''namespace Tegra::Engines {
+int launches=0;
+void MaxwellDMA::Launch() {++launches;}
+MaxwellDMA::~MaxwellDMA() = default;
+'''+''.join(function(dma,'MaxwellDMA::'+name+'(') for name in [
+    'MaxwellDMA','ConsumeSinkImpl','ProjectPendingState','DescribeSingleLineCopy',
+    'PrepareSingleLineStorage','CallMethod','CallMultiMethod'])+'}\n'
 tail = r'''
 int main() {
     constexpr u64 P=4096,G=0x10000,D=0x20000;
@@ -82,6 +100,41 @@ int main() {
         assert(dev.real_backing->BackingBasePointer()[10]==77);
         assert(!memory.PinPhysicalRanges(G+2*P,1));
         assert(!memory.PinPhysicalRanges(G,0));
+        auto pair=memory.PinPhysicalCopyRanges(G+10,P+10,G+P,20);
+        assert(pair && pair->source.Size()==P+10 && pair->destination.Size()==20);
+        assert(pair->source.Segments()[0].storage.PhysicalOffset()==10);
+        assert(pair->destination.Segments()[0].storage.PhysicalOffset()==3*P);
+        assert(!memory.PinPhysicalCopyRanges(G,1,G+2*P,1));
+        assert(!memory.PinPhysicalCopyRanges(G,0,G,1));
+        // GPU source remap AFTER both per-range builds: common validation must reject it.
+        Tegra::copy_ready=[&] {memory.Unmap(G,P);memory.Map(G,D+P,P);};
+        if(memory.PinPhysicalCopyRanges(G,20,G+P,20)) {
+            std::cerr<<"stale paired mapping accepted\n";return 42;
+        }
+        Tegra::copy_ready={};
+        assert(pair->source.Segments()[0].storage.PhysicalOffset()==10);
+        memory.Unmap(G,P);memory.Map(G,D,P);
+        // Device remap at the same boundary must also reject the entire pair.
+        Tegra::copy_ready=[&] {dev.Map(D+P,4*P);};
+        assert(!memory.PinPhysicalCopyRanges(G,20,G+P,20));
+        Tegra::copy_ready={};dev.Map(D+P,3*P);
+        Core::System system;
+        Tegra::Engines::MaxwellDMA dma{system,memory};
+        dma.method_sink={{0x100,0},{0x101,G+10},{0x102,0},{0x103,G+P+20},{0x106,30}};
+        const auto pending=dma.method_sink;
+        constexpr u32 launch=2U|(1U<<7)|(1U<<8);
+        auto transfer=dma.PrepareSingleLineStorage(launch);
+        assert(transfer && transfer->description.bytes==30);
+        assert(transfer->storage.source.Size()==512 && transfer->storage.destination.Size()==512);
+        assert(transfer->storage.source.Segments()[0].storage.PhysicalOffset()==0);
+        assert(transfer->storage.destination.Segments()[0].storage.PhysicalOffset()==3*P);
+        assert(dma.method_sink==pending && Tegra::Engines::launches==0);
+        Tegra::copy_ready=[&] {memory.Unmap(G,P);memory.Map(G,D+P,P);};
+        assert(!dma.PrepareSingleLineStorage(launch));
+        Tegra::copy_ready={};
+        assert(transfer->storage.source.Segments()[0].storage.PhysicalOffset()==0);
+        assert(dma.method_sink==pending && Tegra::Engines::launches==0);
+        memory.Unmap(G,P);memory.Map(G,D,P);
         bool changed=false;
         Tegra::plan_ready=[&] {
             memory.Unmap(G,2*P);memory.Map(G,D+P,P);changed=true;
@@ -106,11 +159,11 @@ int main() {
     assert(!retained->Segments()[0].storage.OwnerAlive());
     assert(retained->Segments()[0].storage.Bytes()[0]==77);
     retained.reset();
-    std::cout<<"PASS actual GPU plan resolver: noncontiguous/split/big-page translation, holes, GPU remap during pin, device remap, retained physical allocation after owner exit\n";
+    std::cout<<"PASS actual GPU plan resolver and DMA storage preparation: noncontiguous/split/big-page translation, joint source/destination validation, unchanged DMA sink/Launch, remap rejection and retained physical allocation\n";
 }
 '''
 cpp = out/'gpu_plan.cpp'
-cpp.write_text(head+fixture+tail)
+cpp.write_text(head+fixture+engine+tail)
 exe = out/('gpu_plan.exe' if os.name=='nt' else 'gpu_plan')
 cmd = [a.cxx,'-std=c++23','-O1','-pthread','-Wall','-Wextra','-Werror',
        '-Wno-unused-parameter','-Wno-missing-field-initializers',
@@ -122,12 +175,28 @@ if os.name=='nt':
     cmd += [str(root/'src/common/dynamic_library.cpp')]
 subprocess.run(cmd+[str(cpp),'-o',str(exe)],check=True)
 subprocess.run([str(exe)],check=True,timeout=30)
+check = '''    if (!Detail::MappingStampCurrentLocked(stamp) ||
+        !Detail::MappingStampCurrentLocked(destination_stamp)) {
+        return std::nullopt;
+    }'''
+if fixture.count(check)!=1:
+    raise RuntimeError('Cannot form common-copy-validation negative control')
+control_cpp=out/'gpu_plan_no_common_check.cpp'
+control_cpp.write_text(head+fixture.replace(check,'')+engine+tail)
+control=out/('gpu_plan_no_common_check.exe' if os.name=='nt' else 'gpu_plan_no_common_check')
+subprocess.run(cmd+[str(control_cpp),'-o',str(control)],check=True)
+result=subprocess.run([str(control)],capture_output=True,text=True,timeout=30)
+if result.returncode!=42 or 'stale paired mapping accepted' not in result.stderr:
+    raise RuntimeError('Copy-plan negative control did not expose stale paired mapping')
+print('PASS paired plans: common GPU/device validation, old storage retained; missing final check negative control rejected')
 (out/'gpu_plan_extraction.json').write_text(json.dumps({
     'sha256': {path:hashlib.sha256((root/path).read_bytes()).hexdigest() for path in [
         'src/video_core/memory_manager.cpp','src/video_core/memory_manager.h',
-        'src/core/device_memory_manager.h','src/video_core/physical_access_plan.h']},
+        'src/core/device_memory_manager.h','src/video_core/physical_access_plan.h',
+        'src/video_core/engines/maxwell_dma.h','src/video_core/engines/maxwell_dma.cpp']},
     'real': ['extracted GPU map/unmap/translation/resolver/pin methods',
-             'device translation/snapshot/physical pin methods', 'HostMemory/OS allocations'],
+             'device translation/snapshot/physical pin methods', 'HostMemory/OS allocations',
+             'actual DMA pure descriptor and storage-plan adapter'],
     'fixtures': ['GPU/device page-table storage and manager shells', 'rasterizer invalidation sink',
-                 'submapped range enumeration', 'post-pin mapping rendezvous'],
+                 'submapped range enumeration', 'post-pin mapping rendezvous', 'DMA Launch spy'],
 },indent=2))

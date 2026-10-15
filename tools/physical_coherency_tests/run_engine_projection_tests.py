@@ -24,14 +24,24 @@ head = r'''
 #include <iostream>
 #include "video_core/engines/maxwell_dma.h"
 namespace Core {class System {};}
-namespace Tegra {class MemoryManager {};}
+namespace Tegra {class MemoryManager {
+public:
+    std::array<u64,4> requested{};
+    u32 attempts{};
+    std::optional<PhysicalCopyPlan> PinPhysicalCopyRanges(u64 source,u64 source_size,
+                                                        u64 destination,u64 destination_size) {
+        requested={source,source_size,destination,destination_size};++attempts;
+        return std::nullopt; // Adapter failure is observable; real pins are tested separately.
+    }
+};}
 namespace Tegra::Engines {
 int launches=0;
 void MaxwellDMA::Launch() {++launches;}
 MaxwellDMA::~MaxwellDMA() = default;
 '''
 parts=''.join(method('MaxwellDMA::'+name+'(') for name in
-              ['MaxwellDMA','ConsumeSinkImpl','ProjectPendingState','DescribeSingleLineCopy','CallMethod','CallMultiMethod'])
+              ['MaxwellDMA','ConsumeSinkImpl','ProjectPendingState','DescribeSingleLineCopy',
+               'PrepareSingleLineStorage','CallMethod','CallMultiMethod'])
 tail = r'''
 }
 using Tegra::Engines::MaxwellDMA;
@@ -67,6 +77,10 @@ int main() {
     auto copy=engine.DescribeSingleLineCopy(launch);
     assert(copy && copy->source==0x1013 && copy->destination==0x5007 && copy->bytes==33);
     assert(copy->source_coverage.address==0x1000 && copy->source_coverage.size==512);
+    assert(engine.method_sink==saved && Tegra::Engines::launches==1);
+    assert(!engine.PrepareSingleLineStorage(launch));
+    assert(memory.attempts==1 && (memory.requested==std::array<u64,4>{0x1000,512,0x5000,512}));
+    assert(!engine.PrepareSingleLineStorage(launch | (1U<<10)) && memory.attempts==1);
     assert(engine.method_sink==saved && Tegra::Engines::launches==1);
     // Every unsupported bit, including reserved flags, fails without consuming pending state.
     for(u32 bit=0;bit<32;++bit) assert(!engine.DescribeSingleLineCopy(launch^(1U<<bit)));
@@ -130,6 +144,7 @@ print('PASS negative control: omitting execution classification accepts an effec
     'real': ['complete MaxwellDMA register layout and EngineInterface projection',
              'actual constructor, CallMethod/CallMultiMethod and ConsumeSinkImpl',
              'actual restricted single-line descriptor'],
-    'fixtures': ['System/MemoryManager shells', 'Launch side-effect spy'],
+    'fixtures': ['System/MemoryManager shells; storage adapter records arguments and rejects',
+                 'Launch side-effect spy'],
     'not_validated': ['DMA memory footprint/eligibility', 'Vulkan execution', 'physical admission'],
 },indent=2))

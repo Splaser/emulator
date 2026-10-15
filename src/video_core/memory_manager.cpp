@@ -85,6 +85,44 @@ std::optional<PhysicalAccessPlan> MemoryManager::PinPhysicalRanges(GPUVAddr addr
     });
 }
 
+std::optional<PhysicalCopyPlan> MemoryManager::PinPhysicalCopyRanges(
+    GPUVAddr source, u64 source_size, GPUVAddr destination, u64 destination_size) const {
+    const auto source_snapshot = ResolvePhysicalRanges(source, source_size);
+    const auto destination_snapshot = ResolvePhysicalRanges(destination, destination_size);
+    const auto& stamp = source_snapshot.stamp;
+    const auto& destination_stamp = destination_snapshot.stamp;
+    // A single GPU-then-device lock pair must protect both final validations. Reject unrelated
+    // owners rather than attempting a second lock order or mixing backing allocations.
+    if (stamp.gpu_address_space != destination_stamp.gpu_address_space ||
+        stamp.device_address_space != destination_stamp.device_address_space ||
+        stamp.backing != destination_stamp.backing) {
+        return std::nullopt;
+    }
+    auto source_plan = PhysicalAccessPlan::BuildWithPins(
+        source_snapshot, [this, &stamp](u64 offset, u64 length) {
+            return memory.PinGuestPhysicalRange(offset, length, stamp.backing);
+        });
+    if (!source_plan) {
+        return std::nullopt;
+    }
+    auto destination_plan = PhysicalAccessPlan::BuildWithPins(
+        destination_snapshot, [this, &destination_stamp](u64 offset, u64 length) {
+            return memory.PinGuestPhysicalRange(offset, length, destination_stamp.backing);
+        });
+    if (!destination_plan) {
+        return std::nullopt;
+    }
+    // Source may have changed while the destination was materialized. Check BOTH snapshots
+    // after all pins, with no callbacks/allocation under these locks. Pins retire after locks.
+    const auto gpu_lock = std::unique_lock{stamp.gpu_address_space->mutex};
+    const auto device_lock = std::unique_lock{stamp.device_address_space->mutex};
+    if (!Detail::MappingStampCurrentLocked(stamp) ||
+        !Detail::MappingStampCurrentLocked(destination_stamp)) {
+        return std::nullopt;
+    }
+    return PhysicalCopyPlan{std::move(*source_plan), std::move(*destination_plan)};
+}
+
 template <bool is_big_page>
 MemoryManager::EntryType MemoryManager::GetEntry(size_t position) const {
     if constexpr (is_big_page) {

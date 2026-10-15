@@ -64,6 +64,11 @@ public:
     [[nodiscard]] std::optional<PhysicalAccessPlan> PinPhysicalRanges(GPUVAddr address,
                                                                    u64 size) const;
 
+    /// Both storage plans must coexist at one mapping validation point. No lock/permission is
+    /// retained after return, and neither plan grants GPU representation or data admission.
+    [[nodiscard]] std::optional<PhysicalCopyPlan> PinPhysicalCopyRanges(
+        GPUVAddr source, u64 source_size, GPUVAddr destination, u64 destination_size) const;
+
     [[nodiscard]] std::optional<DAddr> GpuToCpuAddress(GPUVAddr addr, std::size_t size) const;
 
     template <typename T>

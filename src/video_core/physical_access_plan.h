@@ -92,4 +92,9 @@ private:
     u64 size{}, generation{};
 };
 
+struct PhysicalCopyPlan {
+    PhysicalAccessPlan source;
+    PhysicalAccessPlan destination;
+};
+
 } // namespace Tegra

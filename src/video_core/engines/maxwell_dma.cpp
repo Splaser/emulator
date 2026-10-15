@@ -82,6 +82,21 @@ std::optional<MaxwellDMA::SingleLineCopy> MaxwellDMA::DescribeSingleLineCopy(u32
     return SingleLineCopy{source, destination, bytes, coverage(source), coverage(destination)};
 }
 
+std::optional<MaxwellDMA::SingleLineStoragePlan> MaxwellDMA::PrepareSingleLineStorage(
+    u32 launch_word) const {
+    const auto description = DescribeSingleLineCopy(launch_word);
+    if (!description) {
+        return std::nullopt;
+    }
+    auto storage = memory_manager.PinPhysicalCopyRanges(
+        description->source_coverage.address, description->source_coverage.size,
+        description->destination_coverage.address, description->destination_coverage.size);
+    if (!storage) {
+        return std::nullopt;
+    }
+    return SingleLineStoragePlan{*description, std::move(*storage)};
+}
+
 void MaxwellDMA::CallMethod(u32 method, u32 method_argument, bool is_last_call) {
     assert(method < NUM_REGS && "Invalid MaxwellDMA register");
 
