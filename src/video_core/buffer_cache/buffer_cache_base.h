@@ -12,7 +12,9 @@
 #include <mutex>
 #include <numeric>
 #include <span>
+#include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "common/common_types.h"
@@ -282,6 +284,14 @@ public:
 
     void BindComputeTextureBuffer(size_t tbo_index, GPUVAddr gpu_addr, u32 size, PixelFormat format,
                                   bool is_written, bool is_image);
+
+    /// Pure existing-cache lookup plus current physical correspondence. Caller holds mutex on
+    /// the GPU/cache thread and retains device/backing/renderer owners. No creation, sync, dirty
+    /// publication or execution permission. Unsupported Buffer backends expose no pin method.
+    template <typename B = Buffer>
+    [[nodiscard]] auto PinExistingDmaRepresentation(
+        DAddr device_addr, const Tegra::PhysicalAccessPlan& physical)
+        -> decltype(std::declval<const B&>().PinStagedRepresentation(u64{}, u64{}));
 
     [[nodiscard]] std::pair<Buffer*, u32> ObtainBuffer(GPUVAddr gpu_addr, u32 size,
                                                        ObtainBufferSynchronize sync_info,

@@ -253,8 +253,47 @@ may outlive the real Device/VMA allocator; this slice does not enforce final-pin
 connect parked-plan cancellation/Unknown completion to that boundary. It deliberately does not
 force-free old payloads at seal or reinterpret callback return/unchecked WaitIdle as completion.
 There is still no active DMA admission consumer and the original F2 failure remains open.
-The cc324dff81 native run finished successfully before this slice was submitted. This slice's
-own remote Android/Linux compilation and regressions are pending.
+The cc324dff81 native run finished successfully before this slice was submitted. Run
+`38694742732` at `be4eb320115a9d4699d198270de8d3cc60b12344` passed both Android arm64 production
+compilation and complete Linux production/regressions, including seal/ownership negative controls
+and actual renderer shutdown/drain tests. The remaining activation gaps above are unchanged.
+
+### Existing-cache physical correspondence
+
+`BufferCache::PinExistingDmaRepresentation` now exposes a pure, existing-buffer-only preparation
+query for pin-capable backends. The caller retains the cache mutex and device/backing/renderer
+owners on the GPU/cache thread. It rejects empty/out-of-range requests, missing/null/stale cache
+ids, partial buffer coverage, inconsistent cache-page ids, active scatter and any pending gather
+scatter. It never invokes FindBuffer, creates/merges buffers, synchronizes contents, resolves
+scatter, publishes dirty state or issues GPU work. Direct/imported pins remain rejected by the
+actual Vulkan Buffer pin API; unsupported backend pin types are not instantiated.
+
+The pure `MatchesDevicePhysicalPlanLocked` compares EVERY relevant device page with the ordered
+physical spans retained in the supplied plan, including exact backing epoch identity and range
+bounds. Empty/moved-from plans cannot pass. After this device snapshot check, the query obtains
+the actual buffer-relative Vulkan resource pin outside the mapping lock, then checks the device
+epoch/generation again. A remap during resource acquisition rejects the query. Cache locking
+and mapping locks are not retained in the returned resource pin. An old GVA plan is compared
+against its original physical targets, not redirected by a later GVA retranslation.
+
+`run_cache_representation_tests.py` composes the preceding suites' hash-checked generated actual
+GMMU/device/HostMemory and Vulkan Buffer/payload/RAII inputs with the actual cache lookup/pin
+method and page-id checks. Cache/PTE table storage, registration, VMA/device services and the
+post-resource-pin rendezvous remain fixtures. Windows checks pass split-page physical matching,
+changed interior PTEs, different backing epochs, resource-acquisition remap, old GVA targets,
+missing/stale/reused cache slots, partial coverage, pending-scatter refusal, moved-from rejection,
+and domain seal. Removing the physical comparison explicitly accepts mismatched storage; removing
+the final generation check explicitly accepts the post-pin remap. Both negative controls fail
+as required. The workflow runs this suite after both input generators; stale source hashes reject.
+
+**This proves current address correspondence, not historical registration/content authority.**
+It does not prove the buffer was populated from this physical allocation, join first-registration
+epochs with CPU stores, preserve old contents across a mutator, establish layout eligibility,
+atomically admit source/destination, execute the pinned resource path, or drain the final pin at
+shutdown. The supplied physical plan and returned representation pin must remain paired by a
+future adapter with those contracts. No production admission consumer is installed, all ordinary
+DMA execution remains unchanged, and the original F2 gate still fails with backing 77/cache 10.
+Remote production/regression evidence for this correspondence slice is pending.
 
 ### Required creation-to-execution order
 

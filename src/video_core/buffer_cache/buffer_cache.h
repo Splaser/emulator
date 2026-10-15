@@ -693,6 +693,67 @@ bool BufferCache<P>::DMAClear(GPUVAddr dst_address, u64 amount, u32 value) {
 }
 
 template <class P>
+template <typename B>
+auto BufferCache<P>::PinExistingDmaRepresentation(
+    DAddr device_addr, const Tegra::PhysicalAccessPlan& physical)
+    -> decltype(std::declval<const B&>().PinStagedRepresentation(u64{}, u64{})) {
+    static_assert(std::is_same_v<B, Buffer>);
+    const u64 size = physical.Size();
+    if (!size || !IsRegionPageTableAddressable(device_addr, size) || scatter_busy ||
+        std::ranges::any_of(gather_buffers, [](const auto& item) {
+            return item.second.scatter_pending;
+        })) {
+        return std::nullopt;
+    }
+    const auto id = GetPageBufferId(device_addr >> CACHING_PAGEBITS);
+    if (!id || id == NULL_BUFFER_ID) {
+        return std::nullopt;
+    }
+    const auto& buffer = slot_buffers[id];
+    if (device_addr < buffer.CpuAddr() || device_addr - buffer.CpuAddr() >= buffer.SizeBytes() ||
+        size > buffer.SizeBytes() - (device_addr - buffer.CpuAddr())) {
+        return std::nullopt;
+    }
+    const auto last_page = (device_addr + size - 1) >> CACHING_PAGEBITS;
+    for (auto page = device_addr >> CACHING_PAGEBITS; page <= last_page; ++page) {
+        if (GetPageBufferId(page) != id) {
+            return std::nullopt;
+        }
+    }
+    std::shared_ptr<const Common::MappingEpoch> device_epoch;
+    u64 device_generation{};
+    const bool matches = device_memory.ReadPhysicalMappingSnapshot(
+        [&](auto epoch, u64 generation, auto backing, u64 backing_size, const auto& translate) {
+            if (!epoch || !epoch->alive.load(std::memory_order_acquire) || (generation & 1) ||
+                !Tegra::Detail::MatchesDevicePhysicalPlanLocked(
+                    physical, device_addr, Core::DEVICE_PAGESIZE, backing, backing_size, translate)) {
+                return false;
+            }
+            device_epoch = std::move(epoch);
+            device_generation = generation;
+            return true;
+        });
+    if (!matches) {
+        return std::nullopt;
+    }
+    // Acquire the real resource owner outside the device mapping lock. Never FindBuffer,
+    // synchronize contents or resolve pending scatter just to discover a representation.
+    auto pin = buffer.PinStagedRepresentation(device_addr - buffer.CpuAddr(), size);
+    if (!pin) {
+        return std::nullopt;
+    }
+    const bool current = device_memory.ReadPhysicalMappingSnapshot(
+        [&](auto epoch, u64 generation, auto, u64, const auto&) {
+            return epoch == device_epoch && generation == device_generation &&
+                   epoch->alive.load(std::memory_order_acquire);
+        });
+    if (!current) {
+        return std::nullopt;
+    }
+    return pin;
+}
+
+template <class P>
 std::pair<typename P::Buffer*, u32> BufferCache<P>::ObtainBuffer(GPUVAddr gpu_addr, u32 size,
                                                                  ObtainBufferSynchronize sync_info,
                                                                  ObtainBufferOperation post_op) {

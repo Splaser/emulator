@@ -49,7 +49,10 @@ namespace VideoCommon {
 struct NullBufferParams {};
 struct BufferBase {
     BufferBase(NullBufferParams) {}
-    BufferBase(u64,u64) {}
+    BufferBase(u64 address_,u64 size_) : address{address_},size{size_} {}
+    u64 CpuAddr() const {return address;}
+    u64 SizeBytes() const {return size;}
+    u64 address{},size{};
 };
 struct UsageTracker {
     bool IsUsed(u64,u64) const {return false;}

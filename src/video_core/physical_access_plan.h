@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 
+#include <algorithm>
+#include <bit>
+#include <limits>
 #include <optional>
 #include <span>
 #include <vector>
@@ -96,5 +99,46 @@ struct PhysicalCopyPlan {
     PhysicalAccessPlan source;
     PhysicalAccessPlan destination;
 };
+
+namespace Detail {
+/// Pure device-PTE comparison against already pinned storage. Caller holds the device mapping
+/// snapshot lock; no allocation, lazy backing materialization or cache callbacks are allowed.
+/// This proves current address correspondence only, not cache contents or execution admission.
+template <typename Translate>
+[[nodiscard]] bool MatchesDevicePhysicalPlanLocked(
+    const PhysicalAccessPlan& plan, u64 address, u64 device_page_size,
+    const std::shared_ptr<const Common::GuestBackingEpoch>& backing, u64 backing_size,
+    const Translate& translate) {
+    if (!plan.Size() || !std::has_single_bit(device_page_size) || !backing ||
+        !backing->alive.load(std::memory_order_acquire) ||
+        plan.Size() > std::numeric_limits<u64>::max() - address) {
+        return false;
+    }
+    u64 covered = 0;
+    for (const auto& segment : plan.Segments()) {
+        const auto& pin = segment.storage;
+        if (!pin || pin.Epoch() != backing || !pin.OwnerAlive() || pin.Bytes().empty() ||
+            segment.logical_offset != covered || covered > plan.Size() ||
+            pin.Bytes().size() > plan.Size() - covered || pin.PhysicalOffset() >= backing_size ||
+            pin.Bytes().size() > backing_size - pin.PhysicalOffset()) {
+            return false;
+        }
+        u64 consumed = 0;
+        while (consumed < pin.Bytes().size()) {
+            const auto cursor = address + segment.logical_offset + consumed;
+            const auto length = std::min<u64>(pin.Bytes().size() - consumed,
+                                             device_page_size - cursor % device_page_size);
+            const auto physical = translate(cursor);
+            if (!physical || *physical != pin.PhysicalOffset() + consumed ||
+                *physical >= backing_size || length > backing_size - *physical) {
+                return false;
+            }
+            consumed += length;
+        }
+        covered += pin.Bytes().size();
+    }
+    return covered == plan.Size();
+}
+} // namespace Detail
 
 } // namespace Tegra
