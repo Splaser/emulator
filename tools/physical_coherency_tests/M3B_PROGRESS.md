@@ -108,9 +108,31 @@ Windows `run_engine_projection_tests.py` compiles the actual DMA register layout
 CallMethod/CallMultiMethod/ConsumeSinkImpl and projection. Launch is a side-effect spy; System
 and MemoryManager are shells. Last-write ordering, idempotence, unchanged committed registers,
 retained sink, equivalence with later real sink consumption, and execution/out-of-bounds rejection
-pass. Omitting the execution mask produces an explicit failing negative control. This slice is
-submitted after run `38676646541` completed; its own remote build and Linux regression results
-are pending. No active engine admission callback is installed, and production F2 remains unresolved.
+pass. Omitting the execution mask produces an explicit failing negative control. Run `38678613933`
+at `0eaedb5eb2e3f8d7b0aaa94f90400493cd61cd77` passed Android arm64 production compilation and the
+complete Linux production/regression job, including this projection test and its negative control.
+No active engine admission callback is installed, and production F2 remains unresolved.
+
+## Restricted single-line DMA description
+
+`MaxwellDMA::DescribeSingleLineCopy` projects pending registers without consuming the sink and
+accepts exactly one non-pipelined, virtual-addressed, single-line launch encoding. Additional
+semaphore, interrupt, remap, physical-address, multiline, reduction and reserved bits are rejected.
+Zero lengths, extents above 32 MiB, upper address bits beyond 40 bits and overflowing extents are
+ineligible. The limit bounds future page-plan construction; it does not limit existing execution.
+
+The description carries logical addresses/length and conservative 512-byte group coverage for
+both plain copies and Launch's pitch/block-linear 16-byte block permutation. This coverage is
+for synchronization only, never exact dirty publication. PageKind/layout eligibility, mapping
+stability and GPU representation ownership still need separate proof. This API neither installs
+an admission callback nor changes Launch behavior, and does not describe a whole NI batch.
+
+Windows extraction tests compile the actual descriptor with the actual DMA register layout and
+pure projection. Tests pass flag rejection, source/destination bounds, exact 40-bit endpoint,
+32 MiB boundary, unchanged sink/Launch spy, and exhaustive offsets with cross-group permutation
+coverage. Launch remains a spy, not real DMA or driver execution. The execution-mask negative
+control still fails as required. Remote production compilation and Linux validation for this
+new descriptor are pending the next run. F2 remains unresolved.
 
 ## Remaining production adapters and acceptance gates
 

@@ -31,7 +31,7 @@ void MaxwellDMA::Launch() {++launches;}
 MaxwellDMA::~MaxwellDMA() = default;
 '''
 parts=''.join(method('MaxwellDMA::'+name+'(') for name in
-              ['MaxwellDMA','ConsumeSinkImpl','ProjectPendingState','CallMethod','CallMultiMethod'])
+              ['MaxwellDMA','ConsumeSinkImpl','ProjectPendingState','DescribeSingleLineCopy','CallMethod','CallMultiMethod'])
 tail = r'''
 }
 using Tegra::Engines::MaxwellDMA;
@@ -61,7 +61,47 @@ int main() {
     engine.method_sink.clear();engine.CallMethod(0xc0,0,true);
     assert(Tegra::Engines::launches==1);
     assert(engine.ProjectPendingState() && Tegra::Engines::launches==1);
+    constexpr u32 launch=2U | (1U<<7) | (1U<<8);
+    engine.method_sink={{0x100,0},{0x101,0x1013},{0x102,0},{0x103,0x5007},{0x106,33}};
+    const auto saved=engine.method_sink;
+    auto copy=engine.DescribeSingleLineCopy(launch);
+    assert(copy && copy->source==0x1013 && copy->destination==0x5007 && copy->bytes==33);
+    assert(copy->source_coverage.address==0x1000 && copy->source_coverage.size==512);
+    assert(engine.method_sink==saved && Tegra::Engines::launches==1);
+    // Every unsupported bit, including reserved flags, fails without consuming pending state.
+    for(u32 bit=0;bit<32;++bit) assert(!engine.DescribeSingleLineCopy(launch^(1U<<bit)));
+    engine.method_sink={{0x106,0}};assert(!engine.DescribeSingleLineCopy(launch));
+    engine.method_sink={{0x106,32U*1024*1024+1}};assert(!engine.DescribeSingleLineCopy(launch));
+    engine.method_sink={{0x100,0x100},{0x106,1}};assert(!engine.DescribeSingleLineCopy(launch));
+    engine.method_sink={{0x100,0xff},{0x101,0xffffffff},{0x106,2}};
+    assert(!engine.DescribeSingleLineCopy(launch));
+    engine.method_sink={{0x102,0x100},{0x106,1}};assert(!engine.DescribeSingleLineCopy(launch));
+    engine.method_sink={{0x102,0xff},{0x103,0xffffffff},{0x106,2}};
+    assert(!engine.DescribeSingleLineCopy(launch));
+    engine.method_sink={{0x100,0xff},{0x101,0xffffffff},{0x102,0xff},{0x103,0xffffffff},{0x106,1}};
+    auto edge=engine.DescribeSingleLineCopy(launch);assert(edge);
+    assert(edge->source_coverage.address+edge->source_coverage.size==(1ULL<<40));
+    engine.method_sink={{0x100,0},{0x101,0},{0x102,0},{0x103,0},{0x106,32U*1024*1024}};
+    assert(engine.DescribeSingleLineCopy(launch)->bytes==32U*1024*1024);
+    // Verify coverage for the concrete 16-byte address permutation used by Launch, all offsets
+    // in a group and several lengths crossing group boundaries. Layout eligibility stays open.
+    for(u32 offset=0;offset<512;++offset) for(u32 count:{1U,16U,33U,512U,513U,528U,1024U}) {
+        engine.method_sink={{0x100,0},{0x101,0x1000+offset},{0x102,0},{0x103,0x5000+offset},{0x106,count}};
+        auto bounded=engine.DescribeSingleLineCopy(launch);assert(bounded);
+        for(u32 n=0;n<count;n+=16) {
+            const u64 address=bounded->source+n;
+            const auto permuted=(address & ~0x1f0ULL) | ((address & 0x40)>>2) |
+                ((address & 0x10)<<1) | ((address & 0x180)>>1) | ((address & 0x20)<<3);
+            // The mismatch execution path requires 16-byte aligned extents. Its valid cases
+            // must fit wholly; unaligned copies are not authorized by this description.
+            if((offset%16)==0 && (count%16)==0) {
+                assert(permuted>=bounded->source_coverage.address);
+                assert(permuted+16<=bounded->source_coverage.address+bounded->source_coverage.size);
+            }
+        }
+    }
     std::cout<<"PASS actual DMA register projection: sink order, no consume/effects, committed state unchanged, execution/out-of-range rejection\n";
+    std::cout<<"PASS restricted DMA description: flags, bounds, pending registers and conservative permutation coverage; no admission enabled\n";
 }
 '''
 cpp=out/'engine_projection.cpp'
@@ -88,7 +128,8 @@ print('PASS negative control: omitting execution classification accepts an effec
         'src/video_core/engines/engine_interface.h','src/video_core/engines/maxwell_dma.h',
         'src/video_core/engines/maxwell_dma.cpp']},
     'real': ['complete MaxwellDMA register layout and EngineInterface projection',
-             'actual constructor, CallMethod/CallMultiMethod and ConsumeSinkImpl'],
+             'actual constructor, CallMethod/CallMultiMethod and ConsumeSinkImpl',
+             'actual restricted single-line descriptor'],
     'fixtures': ['System/MemoryManager shells', 'Launch side-effect spy'],
     'not_validated': ['DMA memory footprint/eligibility', 'Vulkan execution', 'physical admission'],
 },indent=2))

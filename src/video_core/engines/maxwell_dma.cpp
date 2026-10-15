@@ -44,6 +44,44 @@ std::optional<std::array<u32, MaxwellDMA::NUM_REGS>> MaxwellDMA::ProjectPendingS
     return ProjectPendingRegisters(regs.reg_array);
 }
 
+std::optional<MaxwellDMA::SingleLineCopy> MaxwellDMA::DescribeSingleLineCopy(u32 launch_word) const {
+    // Only NON_PIPELINED, virtual, one-dimensional, no-remap/no-semaphore launches with both
+    // layout bits set. Unknown/reserved flags are ineligible rather than silently ignored.
+    constexpr u32 supported_launch = 2U | (1U << 7) | (1U << 8);
+    if (launch_word != supported_launch) {
+        return std::nullopt;
+    }
+    const auto state = ProjectPendingState();
+    if (!state) {
+        return std::nullopt;
+    }
+    const auto& words = *state;
+    constexpr auto source_index = offsetof(Regs, offset_in) / sizeof(u32);
+    constexpr auto destination_index = offsetof(Regs, offset_out) / sizeof(u32);
+    const u32 bytes = words[offsetof(Regs, line_length_in) / sizeof(u32)];
+    constexpr u32 max_bytes = 32U * 1024 * 1024; // Bound the first preflight's page-plan size.
+    if (!bytes || bytes > max_bytes || (words[source_index] & ~0xffU) ||
+        (words[destination_index] & ~0xffU)) {
+        return std::nullopt;
+    }
+    const GPUVAddr source = (u64{words[source_index]} << 32) | words[source_index + 1];
+    const GPUVAddr destination =
+        (u64{words[destination_index]} << 32) | words[destination_index + 1];
+    constexpr GPUVAddr limit = 1ULL << 40;
+    if (bytes > limit - source || bytes > limit - destination) {
+        return std::nullopt;
+    }
+    const auto coverage = [bytes](GPUVAddr address) -> AccessRange {
+        // Launch's pitch/block-linear mismatch permutes bits 4..8 of each 16-byte block.
+        // Cover complete 512-byte groups for either permutation and the plain-copy path.
+        constexpr GPUVAddr mask = 511;
+        const auto begin = address & ~mask;
+        const auto end = (address + bytes + mask) & ~mask;
+        return {begin, end - begin};
+    };
+    return SingleLineCopy{source, destination, bytes, coverage(source), coverage(destination)};
+}
+
 void MaxwellDMA::CallMethod(u32 method, u32 method_argument, bool is_last_call) {
     assert(method < NUM_REGS && "Invalid MaxwellDMA register");
 

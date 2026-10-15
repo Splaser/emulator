@@ -103,6 +103,19 @@ public:
     /// Pure register projection for preflight. This does not describe/authorize a memory access;
     /// page kinds, launch effects, semaphore writes and remap/layout rules still require checks.
     [[nodiscard]] std::optional<std::array<u32, NUM_REGS>> ProjectPendingState() const;
+    struct AccessRange {
+        GPUVAddr address;
+        u64 size;
+    };
+    struct SingleLineCopy {
+        GPUVAddr source, destination;
+        u32 bytes;
+        // Conservative synchronization coverage, NOT exact write/publication extents.
+        AccessRange source_coverage, destination_coverage;
+    };
+    /// One launch word only; not a whole NI batch. Rejects additional launch semantics.
+    /// Storage plans, layout eligibility and completion/admission are separate prerequisites.
+    [[nodiscard]] std::optional<SingleLineCopy> DescribeSingleLineCopy(u32 launch_word) const;
     struct PackedGPUVAddr {
         u32 upper;
         u32 lower;
