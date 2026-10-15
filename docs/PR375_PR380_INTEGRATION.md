@@ -71,9 +71,9 @@ build from extracted-source tests and from Linux/Android/device execution.
   existing coherency/lifecycle regressions, and cross-compiles real arm64 production libraries
   with NDK r29 through CPM. It does not publish a release.
 
-Status (2026-10-15): conflict resolution, Linux production compilation/unit tests and Linux
-HostMemory regressions passed. Android production compilation and the remaining Linux regression
-steps are still pending after the follow-up fixes below. F2 remains isolated on its original branch.
+Status (2026-10-15): conflict resolution, the complete Linux production/unit-test/HostMemory/
+coherency/lifecycle CI job and Android arm64 production library compilation passed at
+`4fc3f7e768`. Device validation remains outstanding. F2 remains isolated on its original branch.
 
 ## Handoff: 2026-10-14 (Asia/Taipei)
 
@@ -161,6 +161,25 @@ Remote follow-up on `463702d541`, run `38666031080`:
   Android production compilation, remaining Linux regression results and device validation
   remain pending; these Linux successes do not establish NCE signal or Vulkan-driver behavior.
 
+Remote follow-up on `4fc3f7e768867e6cc5a8474843ad32e68ec73dc0`, run `38668008146`:
+
+- Linux job `116204276049` succeeded: real CLI/shader/unit-test builds, production CTest target,
+  all four HostMemory/export/backing-lifetime/cold-resolution runners, integration contracts,
+  Release ASLR positive/negative controls, DMA snapshots, nine gather-buffer runners, physical
+  resolver/shadow, chunk-import mocks and all four GPU lifecycle runners passed.
+- Android job `116204275783` succeeded: all 1547 Ninja actions completed through CPM with NDK
+  `29.0.14206865`, arm64-v8a/API 30, Release and precompiled headers disabled. The real `core`,
+  `video_core` and `shader_recompiler` static libraries linked, including NCE/interpreter/patcher
+  and HostMemory compilation. This is not an APK build, device execution or driver validation.
+- Both jobs and the complete workflow succeeded:
+  https://github.com/Splaser/emulator/actions/runs/38668008146 . The final evidence update changes
+  documentation only and uses `[skip ci]`; the tested production source remains `4fc3f7e768`.
+- Rechecked the seven conflict resolutions against the merge parents and the subsequent CI
+  fixes. Both #375 head `3de1870c78` and #380 merge `57b1925f51` are ancestors; F2 snapshot
+  `80c4f4d7f7` is not. No conflict markers remain in project sources/docs/tests, and the diff
+  passes whitespace checks. Preserved DMA snapshots, CPU-access handoff, physical-shadow scope,
+  shutdown lock ordering, independent translation fields and the lazy-remapping validation gate.
+
 ### Resume on another computer
 
 ```powershell
@@ -171,19 +190,18 @@ gh run list --repo Splaser/emulator --branch codex/pr375-pr380-integration --lim
 ```
 
 If that local branch already exists, use `git switch codex/pr375-pr380-integration` instead of
-creating it again. Inspect the first failing compiler/configure error in the latest run and fix
-it on this branch. Keep Linux HostMemory tests and actual Android/NCE/device validation distinct.
+creating it again. The successful validation source is `4fc3f7e768`, run `38668008146`; compare
+any later changes against it. Keep Linux HostMemory tests and actual Android/NCE/device validation distinct.
 
 Remaining work, in order:
 
-1. Finish real Linux CLI/shader/tests and Android arm64 library compilation; repair actual
-   integration errors and rerun only the relevant checks.
-2. Finish Linux HostMemory/export/import and all existing coherency/lifecycle regression jobs.
-3. Keep HostMemory high risk: lazy alias remapping stays disabled pending target validation.
+1. Remote production compilation and Linux regression gates are complete at the revision above.
+   Do not repeat them for this documentation-only evidence commit.
+2. Keep HostMemory high risk: lazy alias remapping stays disabled pending target validation.
    Run NCE compatibility cases on a device; Windows instruction fixtures are not signal tests.
-4. Review the final integrated diff before synchronizing PR #375 or personal main. Neither
-   branch has been updated by this integration work.
-5. Only then return to F2. Its separate snapshot is `codex/fix-cpu-gpu-write-coherency` at
+3. The conflict-resolution diff review is complete. Synchronizing PR #375 or personal main is a
+   separate next step; neither branch has been updated by this integration work.
+4. Only then return to F2. Its separate snapshot is `codex/fix-cpu-gpu-write-coherency` at
    `80c4f4d7f7` (eight commits beyond #375). No F2 commits were merged here. Candidate admission
    remains test-only, and production F1/F2 remain unresolved.
 
