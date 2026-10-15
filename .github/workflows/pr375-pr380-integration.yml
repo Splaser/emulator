@@ -100,6 +100,7 @@ jobs:
           python tools/physical_coherency_tests/run_copy_block_tests.py
           python tools/physical_coherency_tests/run_preservation_callback_tests.py --repeat 3
           python tools/physical_coherency_tests/run_dma_admission_tests.py
+          python tools/physical_coherency_tests/run_engine_projection_tests.py
           python tools/physical_coherency_tests/run_gpu_plan_tests.py
           python tools/physical_coherency_tests/run_m3b_candidate_tests.py --repeat 3
           python tools/dma_snapshot_tests/run_tests.py

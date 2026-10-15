@@ -91,8 +91,26 @@ real HostMemory allocations. GPU/device PTE storage, manager shells, rasterizer 
 and submapped enumeration remain fixtures. Windows checks pass noncontiguous and partial ranges,
 real GMMU big-page translation, holes/empty requests, GPU remap at the post-pin checkpoint, device
 remap, and old physical storage surviving both manager/arena exits. Input hashes identify seams.
-This adapter has no active engine/cache consumer or data-admission privilege. Its new remote
-production and Linux regression results are pending the next dispatched main workflow.
+This adapter has no active engine/cache consumer or data-admission privilege. Run `38676646541`
+at `d6c593e4dfce3ae88f25b0e6d5a187caf3c314bb` passed both real Android arm64 production compilation
+and the complete Linux production/unit/HostMemory/coherency/lifecycle suite, including the new
+actual GPU-plan resolver tests and the pin/plan positive/negative controls.
+
+## Engine register projection
+
+`EngineInterface::ProjectPendingRegisters` validates the whole pending sink against register
+bounds and the execution mask, then applies ordered writes to a register-array copy. It never
+calls CallMethod/ConsumeSink, mutates committed state or drains the pending queue. MaxwellDMA's
+`ProjectPendingState` exposes this projection for future footprint calculation; it does not
+authorize the launch or infer page kind, memory layout, semaphore or remap effects.
+
+Windows `run_engine_projection_tests.py` compiles the actual DMA register layout, constructor,
+CallMethod/CallMultiMethod/ConsumeSinkImpl and projection. Launch is a side-effect spy; System
+and MemoryManager are shells. Last-write ordering, idempotence, unchanged committed registers,
+retained sink, equivalence with later real sink consumption, and execution/out-of-bounds rejection
+pass. Omitting the execution mask produces an explicit failing negative control. This slice is
+submitted after run `38676646541` completed; its own remote build and Linux regression results
+are pending. No active engine admission callback is installed, and production F2 remains unresolved.
 
 ## Remaining production adapters and acceptance gates
 

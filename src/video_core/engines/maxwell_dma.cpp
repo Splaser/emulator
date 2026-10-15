@@ -40,6 +40,10 @@ void MaxwellDMA::ConsumeSinkImpl() {
     method_sink.clear();
 }
 
+std::optional<std::array<u32, MaxwellDMA::NUM_REGS>> MaxwellDMA::ProjectPendingState() const {
+    return ProjectPendingRegisters(regs.reg_array);
+}
+
 void MaxwellDMA::CallMethod(u32 method, u32 method_argument, bool is_last_call) {
     assert(method < NUM_REGS && "Invalid MaxwellDMA register");
 

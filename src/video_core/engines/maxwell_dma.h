@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -98,6 +99,10 @@ public:
 
 class MaxwellDMA final : public EngineInterface {
 public:
+    static constexpr std::size_t NUM_REGS = 0x800;
+    /// Pure register projection for preflight. This does not describe/authorize a memory access;
+    /// page kinds, launch effects, semaphore writes and remap/layout rules still require checks.
+    [[nodiscard]] std::optional<std::array<u32, NUM_REGS>> ProjectPendingState() const;
     struct PackedGPUVAddr {
         u32 upper;
         u32 lower;
@@ -306,7 +311,6 @@ private:
     Common::ScratchBuffer<u8> write_buffer;
     Common::ScratchBuffer<u8> intermediate_buffer;
 
-    static constexpr std::size_t NUM_REGS = 0x800;
     struct Regs {
         union {
             struct {
