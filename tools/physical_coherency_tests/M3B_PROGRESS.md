@@ -458,6 +458,35 @@ failure transitions and their deterministic negative controls remain activation 
 
 ## Remaining production adapters and acceptance gates
 
+### Pending explicit prepared CPU Write execution (not ordinary-path activation)
+
+The next local adapter adds an explicit prepared-view overload of actual `Memory::Impl::Write`,
+exposed through result-returning `WritePrepared8/16/32/64`. Ordinary Write wrappers and their
+original body remain unchanged. Cold preparation captures a Memory-owned active-context epoch;
+actual `SetCurrentPageTable` advances it even when switching away and back to the same table.
+The view retains immutable mapping/physical/context fields. A prepared write checks caller
+context identity, canonical 48-bit VA/page bounds, then takes nonblocking shared context/PTE
+try-locks, validates the epochs/tag, enters the physical page writer, performs the actual store
+and publishes before releasing that writer and the short execution guards. No callbacks,
+suspension, registry lookup, physical pin creation or shared-owner copy occurs in this hot call.
+
+Busy, stale, retired, wrong-context/cross-page, tracked/closing and cached/debug targets refuse
+with a result and no effects; there is no fallback to legacy memcpy. In particular cached/debug
+rejection does NOT replace preservation/device-alias/OnCPUWrite handling. This API is an inert
+explicit entry with no ordinary caller installed, not a repair of the normal CPU path. Two
+shared try-locks and byte publication are correctness groundwork, not a throughput claim.
+
+The actual extracted prepared Write, SetCurrentPageTable, cold factory and actual page/physical
+implementations pass Windows tests for context switch away/back, top-bit VA masking, wrong-page
+and cross-page refusal, remap/tag invalidation, Busy under a mapping mutator and shared physical
+alias gates. An independently released actual prepared writer races first-registration gate
+closure: registration reports Draining until its exact store publication, and a later alias
+writer refuses. Resource ownership supplied to this registration is a fixture, not a real
+BufferCache upload. 2,000 prepared Memory writes perform zero measured hot allocations and no
+range enqueue. Removing hot active-context validation fails explicitly (54); missing cold
+post-pin validation remains control 51. The full Memory::Write -> real BufferCache first
+registration/preservation/cached-slow-path integration is STILL REQUIRED. DMA remains disabled.
+
 ### CPU VA cold-resolution dependency
 
 Native [38704560296](https://github.com/Splaser/emulator/actions/runs/38704560296) passed both

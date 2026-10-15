@@ -56,6 +56,7 @@ struct Memory::Impl {
     }
 
     void SetCurrentPageTable(Kernel::KProcess& process) {
+        const auto context_change = controlled_context.Change();
         current_page_table = &process.GetPageTable().GetImpl();
 
         if (process.IsApplication() && Settings::IsFastmemEnabled()) {
@@ -68,17 +69,25 @@ struct Memory::Impl {
 
     std::optional<PreparedCpuPage> PrepareControlledCpuPage(
         Common::ProcessAddress page_address) const {
+        const auto context = controlled_context.state;
+        std::shared_lock context_guard{context->mutex};
+        const auto context_generation = context->generation.load(std::memory_order_acquire);
         const auto* table = current_page_table;
         if (!table || system.IsShuttingDown()) return std::nullopt;
-        auto mapping = table->SnapshotMapping(GetInteger(page_address));
+        auto mapping = table->SnapshotMapping(GetInteger(page_address) & 0xffffffffffffULL);
         if (!mapping || mapping->physical_page < DramMemoryMap::Base) return std::nullopt;
+        context_guard.unlock();
         // Snapshot lock is already released: materialization/registry preparation is cold and
         // may allocate. Never carry a PTE lock into HostMemory preparation or GPU callbacks.
         auto physical = system.DeviceMemory().buffer.PreparePhysicalCpuPage(
             mapping->physical_page - DramMemoryMap::Base);
-        if (!physical || current_page_table != table || !mapping->IsCurrent())
+        context_guard.lock();
+        if (!physical || current_page_table != table || !mapping->IsCurrent() ||
+            !context->alive.load(std::memory_order_acquire) ||
+            context->generation.load(std::memory_order_acquire) != context_generation)
             return std::nullopt;
-        return PreparedCpuPage{std::move(*mapping), std::move(*physical)};
+        return PreparedCpuPage{std::move(*mapping), std::move(*physical), context,
+                               context_generation};
     }
 
     void MapMemoryRegion(Common::PageTable& page_table, Common::ProcessAddress base, u64 size,
@@ -754,6 +763,15 @@ struct Memory::Impl {
     /// @param vaddr The virtual address to write the data type to.
     /// @tparam T The data type to write to memory.
     template <typename T>
+    inline PreparedCpuWriteResult Write(const PreparedCpuPage& prepared,
+                                        Common::ProcessAddress vaddr, const T data) noexcept
+        requires(std::is_trivially_copyable_v<T>) {
+        // Explicit opt-in only: a refusal is returned without any legacy pointer lookup,
+        // callbacks, store or bypass. Normal Write8/16/32/64 do not supply a prepared view.
+        return prepared.TryStore(controlled_context.state.get(), GetInteger(vaddr), data);
+    }
+
+    template <typename T>
     inline void Write(Common::ProcessAddress vaddr, const T data) noexcept requires(std::is_trivially_copyable_v<T>) {
         CITRON_PROFILE_MEM_SCOPE("Memory::Write");
         auto const addr_c1 = GetInteger(vaddr);
@@ -914,6 +932,7 @@ struct Memory::Impl {
     Core::System& system;
     Tegra::MaxwellDeviceMemoryManager* gpu_device_memory{};
     Common::PageTable* current_page_table = nullptr;
+    CpuAccessContextOwner controlled_context;
 
     // Number of threads to use for parallel memory operations
     unsigned int thread_count = 2;
@@ -1057,6 +1076,26 @@ void Memory::Write32(Common::ProcessAddress addr, u32 data) {
 
 void Memory::Write64(Common::ProcessAddress addr, u64 data) {
     impl->Write<u64_le>(addr, data);
+}
+
+PreparedCpuWriteResult Memory::WritePrepared8(const PreparedCpuPage& page,
+                                             Common::ProcessAddress addr, u8 data) {
+    return impl->Write<u8>(page, addr, data);
+}
+
+PreparedCpuWriteResult Memory::WritePrepared16(const PreparedCpuPage& page,
+                                              Common::ProcessAddress addr, u16 data) {
+    return impl->Write<u16_le>(page, addr, data);
+}
+
+PreparedCpuWriteResult Memory::WritePrepared32(const PreparedCpuPage& page,
+                                              Common::ProcessAddress addr, u32 data) {
+    return impl->Write<u32_le>(page, addr, data);
+}
+
+PreparedCpuWriteResult Memory::WritePrepared64(const PreparedCpuPage& page,
+                                              Common::ProcessAddress addr, u64 data) {
+    return impl->Write<u64_le>(page, addr, data);
 }
 
 bool Memory::WriteExclusive8(Common::ProcessAddress addr, u8 data, u8 expected) {
