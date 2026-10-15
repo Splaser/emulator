@@ -96,6 +96,7 @@ jobs:
       - name: Run coherency and lifecycle integration regressions
         run: |
           python tools/pr375_pr380_tests/run_tests.py
+          python tools/pr375_pr380_tests/run_free_area_tests.py
           python tools/dma_snapshot_tests/run_tests.py
           python tools/gather_buffer_tests/run_tests.py
           python tools/gather_buffer_tests/run_binding_alias_tests.py
@@ -107,7 +108,7 @@ jobs:
           python tools/gather_buffer_tests/run_unmap_alias_tests.py
           python tools/gather_buffer_tests/run_vulkan_import_tests.py
           python tools/physical_resolver_tests/run_tests.py
-          python tools/physical_shadow_tests/run_tests.py --fmt-include /usr/include
+          python tools/physical_shadow_tests/run_tests.py
           python tools/chunk_import_tests/run_tests.py
           python tools/gpu_lifecycle_tests/run_tests.py
           python tools/gpu_lifecycle_tests/run_thread_tests.py

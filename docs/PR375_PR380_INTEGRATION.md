@@ -71,8 +71,9 @@ build from extracted-source tests and from Linux/Android/device execution.
   existing coherency/lifecycle regressions, and cross-compiles real arm64 production libraries
   with NDK r29 through CPM. It does not publish a release.
 
-Status: conflict resolution and Windows focused regressions completed; native CI compilation
-and Linux regression validation pending. F2 remains isolated on its original branch.
+Status (2026-10-15): conflict resolution, Linux production compilation/unit tests and Linux
+HostMemory regressions passed. Android production compilation and the remaining Linux regression
+steps are still pending after the follow-up fixes below. F2 remains isolated on its original branch.
 
 ## Handoff: 2026-10-14 (Asia/Taipei)
 
@@ -136,6 +137,29 @@ Remote follow-up on `583cef2834`, run `38664784880`:
   are now skipped explicitly, retaining the assertion and successful-query path.
 - Windows DMA snapshot, renderer orchestration and GPU-write coordination regressions passed
   again while waiting for Linux CI. These remain distinct from native Linux and device results.
+- `tools/pr375_pr380_tests/run_free_area_tests.py` compiles the actual `FindFreeArea` body and
+  `R_ASSERT` macro with `-O3 -DNDEBUG`. Mocked queries verify success, retry after failure,
+  all-failed fallback and ASLR disabled; a negative control removes the guard and must fail.
+  The Windows run passed. This covers candidate selection, not a real kernel memory-block tree.
+
+Remote follow-up on `463702d541`, run `38666031080`:
+
+- Real Linux CLI, shader tool and unit-test compilation passed; CTest passed its production
+  test target. All four Linux HostMemory/export/backing-lifetime/cold-resolution runners passed.
+  Export tests use a fake Vulkan driver with real Linux mappings, not a real dma-buf device.
+- Integration contracts, DMA snapshot, all nine gather-buffer runners and physical resolver
+  regressions passed on Linux. The physical-shadow runner then failed before its tests because
+  explicitly adding `/usr/include` as `-isystem` reordered GCC 16's system search and broke
+  `#include_next <stdlib.h>`. CI now uses the installed fmt headers via default compiler search.
+  Chunk-import mocks and four lifecycle runners after that step did not run in this revision.
+- Android's complete error list identified missing `<cassert>` in `path_util.cpp`, `<span>` in
+  the interpreter header, `<atomic>`/`core/memory.h` in the interpreter implementation, and
+  complete thread/memory definitions in the patcher. Added those direct includes for no-PCH builds.
+- Renamed the moved fence lambda capture in GPU composite requests to avoid Clang's
+  `-Wshadow-uncaptured-local`, preserving callback ownership and fence ordering.
+- The Release ASLR regression runner and its CI invocation are included with these fixes.
+  Android production compilation, remaining Linux regression results and device validation
+  remain pending; these Linux successes do not establish NCE signal or Vulkan-driver behavior.
 
 ### Resume on another computer
 

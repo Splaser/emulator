@@ -373,7 +373,8 @@ struct GPU::Impl {
         auto state = composite_state;
         auto& syncpoint_manager = host1x.GetSyncpointManager();
         const auto wait_fence =
-            RequestSyncOperation([state, request, fences = std::move(fences), &syncpoint_manager] {
+            RequestSyncOperation([state, request, pending_fences = std::move(fences),
+                                  &syncpoint_manager] {
                 const auto present = [state, request] {
                     std::scoped_lock lock{state->mutex};
                     if (!state->renderer) {
@@ -384,10 +385,10 @@ struct GPU::Impl {
                     }
                     state->renderer->Composite(request->layers);
                 };
-                if (fences.empty()) {
+                if (pending_fences.empty()) {
                     present();
                 }
-                for (const auto& fence : fences) {
+                for (const auto& fence : pending_fences) {
                     syncpoint_manager.RegisterGuestAction(fence.id, fence.value, present);
                 }
             });
