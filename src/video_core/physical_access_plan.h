@@ -43,12 +43,13 @@ public:
         std::array<u64, 64> offsets{};
         std::shared_ptr<const Common::GuestBackingEpoch> backing;
         const bool captured = memory.ReadPhysicalMappingSnapshot(
-            [&](auto epoch, u64 stamp, auto owner, u64 size, const auto& translate) {
+            [&](auto epoch, u64 stamp, auto owner, u64 backing_size, const auto& translate) {
                 if (!epoch || !owner || (stamp & 1) || !epoch->alive.load() || !owner->alive.load())
                     return false;
                 for (u64 i = 0; i < length / Page; ++i) {
                     const auto offset = translate(address + i * Page);
-                    if (!offset || *offset % Page || *offset >= size || Page > size - *offset)
+                    if (!offset || *offset % Page || *offset >= backing_size ||
+                        Page > backing_size - *offset)
                         return false;
                     offsets[i] = *offset;
                 }

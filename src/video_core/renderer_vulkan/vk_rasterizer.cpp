@@ -14,6 +14,8 @@
 #include <mutex>
 #include <vector>
 
+// Declare Result modules before Vulkan's X11 typedefs to preserve -Wshadow checking.
+#include "core/memory.h"
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 
 #include "citron/util/title_ids.h"
@@ -21,7 +23,6 @@
 #include "common/logging.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
-#include "core/memory.h"
 #include "video_core/acknowledged_callback.h"
 #include "video_core/arm64_register_guard.h"
 #include "video_core/buffer_cache/buffer_cache.h"

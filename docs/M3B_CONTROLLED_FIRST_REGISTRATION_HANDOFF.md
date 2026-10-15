@@ -11,6 +11,13 @@ and Linux at `dc1a839308`. The next implementation adds explicit GPU-owner Raste
 for first registration, polling, cached Write8/16/32/64 and refresh. Ordinary game callers are
 still unenrolled; no NCE/JIT/raw-pointer/DMA/image activation is included.
 
+The first native continuation run
+[38737867745](https://github.com/Splaser/emulator/actions/runs/38737867745) at `08ea7c0a98`
+failed compilation: Linux diagnosed Result enum names after X11 declarations; Android diagnosed
+the new plan lambda's `size` parameter shadowing a field. The follow-up moves Memory's include
+before Vulkan/X11 and renames that parameter. Compiler warnings remain enabled. This failed run
+is not validation of the corrected source; match the replacement run to its exact SHA.
+
 - Cold `PhysicalAccessPlan::BuildDeviceRange` covers the actual complete rounded cache allocation,
   bounded to 64 physical pages. It snapshots device mappings, pins real HostMemory outside locks,
   then rejects a post-pin remap. Holes, overlaps/overlap expansion, retired backing, missing CPU

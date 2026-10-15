@@ -2,6 +2,12 @@
 
 ## Actual BufferCache registration, immutable upload and checked completion: 2026-10-15
 
+Native run [38737867745](https://github.com/Splaser/emulator/actions/runs/38737867745) at
+`08ea7c0a98` exposed two compile-only issues: Linux X11/Result declaration order and Android's
+uncaptured-local shadow check on the new plan lambda. Follow-up corrects include order and the
+parameter name without disabling warnings or changing the admission/transfer behavior. The
+corrected source needs its own native CI result; F2 remains open.
+
 CI [38727690858](https://github.com/Splaser/emulator/actions/runs/38727690858) passed both native
 jobs for `dc1a839308`. Continued on PR375 with an explicit real BufferCache/Rasterizer endpoint;
 ordinary game access remains unenrolled and F2 remains OPEN.
