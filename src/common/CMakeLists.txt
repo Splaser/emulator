@@ -65,6 +65,7 @@ add_library(common STATIC
     hex_util.h
     host_memory.cpp
     host_memory.h
+    pinned_physical_memory.h
     published_guest_chunk.h
     mapping_lifetime.h
     input.h

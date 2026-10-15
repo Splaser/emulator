@@ -1441,6 +1441,21 @@ void HostMemory::EnsureBackingRange(size_t offset, size_t length) const {
 #endif
 }
 
+std::optional<PinnedPhysicalMemory> HostMemory::PinPhysicalRange(size_t offset, size_t length) const {
+    if (!impl || length == 0 || offset >= backing_size || length > backing_size - offset) {
+        return std::nullopt;
+    }
+    const auto epoch = backing_lifetime.Get();
+    if (!epoch || !epoch->alive.load(std::memory_order_acquire)) {
+        return std::nullopt;
+    }
+    const auto owner = impl;
+#if defined(__linux__) || defined(__FreeBSD__)
+    owner->EnsureBackingRange(offset, length);
+#endif
+    return PinnedPhysicalMemory{owner, epoch, {owner->backing_base + offset, length}, offset};
+}
+
 BackingStats HostMemory::GetBackingStats() const {
 #if defined(__linux__) || defined(__FreeBSD__)
     return impl->GetBackingStats();

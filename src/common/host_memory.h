@@ -11,6 +11,7 @@
 #include <string_view>
 #include "common/common_funcs.h"
 #include "common/common_types.h"
+#include "common/pinned_physical_memory.h"
 #include "common/published_guest_chunk.h"
 #include "common/virtual_buffer.h"
 
@@ -145,6 +146,12 @@ public:
     // Materialize the complete physical range before exposing a pointer or CPU alias.
     // Does not change an already materialized chunk, its contents, or its mappings.
     void EnsureBackingRange(size_t physical_offset, size_t length) const;
+    /// Materializes and pins a physical extent, never a remappable virtual alias.
+    /// Resolution must keep this HostMemory object alive and exclude its move/replacement.
+    /// After return the view pins Impl independently; it does not retain a mapping-use lock.
+    /// Invalid/empty extents return nullopt; materialization failures propagate before exposure.
+    [[nodiscard]] std::optional<PinnedPhysicalMemory> PinPhysicalRange(size_t offset,
+                                                                    size_t length) const;
     [[nodiscard]] BackingStats GetBackingStats() const;
     [[nodiscard]] bool IsLazyBacking() const noexcept { return lazy_backing_enabled; }
     // Query only: never materializes cold chunks. Leases are not direct GPU mappings.

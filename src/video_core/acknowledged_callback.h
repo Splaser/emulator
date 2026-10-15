@@ -24,13 +24,13 @@ CallbackOutcome RunAcknowledgedCallback(Dispatch&& dispatch, std::function<void(
     };
     auto request = std::make_shared<Request>();
     auto completion = request->completion.get_future();
-    dispatch([request, action = std::move(action)] {
+    dispatch([request, callback_action = std::move(action)] {
         auto expected = Request::Admission::Pending;
         if (!request->admission.compare_exchange_strong(expected, Request::Admission::Running)) {
             return; // cancellation won; never touch the callback's receiver
         }
         try {
-            action();
+            callback_action();
             request->completion.set_value();
         } catch (...) {
             request->completion.set_exception(std::current_exception());

@@ -34,6 +34,44 @@ installation and semaphore continuation compatibility. A control bypassing admis
 because the blocked method executes. The extracted-source manifest records the real inputs.
 No actual driver, real physical admission, transfer visibility or production mapping pin is tested.
 
+## Next prepared boundary: pinned physical backing views
+
+`HostMemory::PinPhysicalRange` materializes a complete bounded physical extent and returns a
+`PinnedPhysicalMemory` retaining the actual shared Impl and backing epoch. The immutable extent
+uses `backing_base`, never a remappable virtual alias. A retired epoch rejects new obligations
+elsewhere, while already accepted views keep storage allocated; `OwnerAlive` and storage lifetime
+are deliberately distinct. Moves/replacement of the HostMemory object must be excluded during
+resolution by its owner; this API does not make concurrent destruction of a borrowed object safe.
+Invalid/empty/overflowing extents return no view, and materialization failure precedes exposure.
+
+Windows GCC standalone execution of the actual HostMemory implementation passes alias remap,
+cross-page extent, moved owner/view, epoch retirement, backing replacement and final release
+checks using real OS mappings. Only logging/assert formatting and unused dynamic-library filename
+formatting are stubbed. The same runner additionally checks real lazy cross-chunk creation and
+FD cleanup on Linux; those new checks have not run yet. No production consumer, CPU lookup epoch,
+device/GPU representation pin or physical admission is connected by this change.
+
+The prepared `PhysicalAccessPlan::Build` composes existing resolver snapshots with these real
+pins. It validates exact ordered coverage, holes, extent bounds and backing identity before
+materialization, then rechecks the snapshot under GPU-then-device mapping locks. Pin acquisition
+runs outside those locks. If a mapping generation changed, the plan is rejected; an accepted
+plan retains its original physical targets rather than re-resolving after a remap. Plans contain
+no mapping-use lock. Resource owners retire after temporary validation locks, including rejection.
+Windows tests use fixture mapping stamps with real allocations and exercise stale/retired stamps,
+backing mismatch, invalid coverage/hole/overflow and retained split views. This does not yet join
+the production GPU resolver, engine footprint adapter or CPU first-registration handshake.
+
+The post-pin validation checkpoint also permits a controlled mapping change after pin acquisition.
+Its Windows test rejects that stale plan. A negative control validates only before acquiring pins
+and must fail by accepting the remap race. Linux additionally rejects a malformed suffix before
+materializing any cold chunk; the Linux checks are pending the next remote run.
+
+Run `38672294519` on `41c6ce4ac3` finished with the complete Linux production/regression job
+successful, including actual DMA/scheduler positive/negative controls and 24 candidate cases
+(three repetitions). Android's complete compile error list contained one strict Clang lambda
+capture shadow in the rejoined acknowledgement helper. Renamed its capture without changing
+ownership/cancellation semantics; this fix accompanies the new storage/plan slice.
+
 ## Remaining production adapters and acceptance gates
 
 1. Build immutable access/transfer plans with real allocation/representation pins, stable physical
