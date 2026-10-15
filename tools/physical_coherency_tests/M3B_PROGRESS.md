@@ -421,7 +421,76 @@ the admission object is not recovery. The original F2 gate was rechecked and sti
 `expected=77 observed=10 backing=77`, with `require-fixed` exit 1. No DMA activation or eligibility
 expansion is included in this slice.
 
+### Publication consumption and failed registration activation gates
+
+The user's next implementation priority is the controlled CPU VA store adapter; DMA admission
+must remain disabled. Its required chain is `Memory::Write -> stable VA/physical resolution ->
+page writer qualification -> actual store -> exact publication`. Preparation must occur cold
+and hot accesses must reuse an owned stable page view, with explicit invalidation on CPU mapping,
+address-space and backing changes. Calling `PreparePhysicalCpuPage` for each scalar access is
+not an acceptable implementation. Writer qualification must precede first cache registration
+even for an initially uncached page; cached-PTE checks alone cannot provide that ordering.
+
+Current source audit: `GetPointerImpl` returns a nonzero PTE pointer without the rasterizer
+callback; `MapPages` writes the atomic tagged pointer and plain `backing_addr` separately.
+Thus pointer/tag sampling or a generation retry around unsynchronized `backing_addr` does not
+yet provide a legal stable physical snapshot. Map/unmap, debug/cached tag changes, table resize,
+current-process switch and destruction must be included in the prepared-view lifetime audit.
+The existing `Write` scalar/cross-page branches, `WriteExclusive`/128, `WriteBlockImpl`,
+`HandleRasterizerWrite` device-alias fanout/OnCPUWrite/dirty collection and uncached behavior
+must retain their semantics until their individual controlled counterparts are proved. The
+physical memcpy tests are not evidence for replacing those ordinary paths.
+
+`Published()` is cumulative observation, not a consumable dirty queue. There is no clear or
+incremental acknowledgement API. The current snapshot requires fast entry closed and writers
+drained. A future consumer or tracked-writer extension must prove concurrent snapshot/sequence
+validation and incremental acknowledgement without dropping writes during cleanup; it may not
+clear the observed bitmap and assume it owns those modifications.
+
+`PublishTracked()` means only that fast entry remains disabled. It is not registration-ready,
+content-valid or upload-success state. The future adapter must separately track representation
+validity and real upload visibility/completion. After uncertain/partial upload failure it must
+mark Unknown and retain the ticket/resources, preventing dependent CPU/GPU access. A certified
+no-effect failure may release its reservation only while the failed/uninitialized representation
+remains inaccessible; such release never turns Tracked into valid content. Callback return,
+Tracked state and a readable cumulative bitmap are insufficient completion evidence. These
+failure transitions and their deterministic negative controls remain activation prerequisites.
+
 ## Remaining production adapters and acceptance gates
+
+### CPU VA cold-resolution dependency
+
+Native [38704560296](https://github.com/Splaser/emulator/actions/runs/38704560296) passed both
+Android production and the complete Linux production/regressions for `0ed92c3efd`, including
+the real page writer suite. This does not close F2 or activate any new ordinary access path.
+
+`PageTable::SnapshotMapping` now samples the tag and plain backing address together under a
+short shared metadata guard. The actual `Memory::Impl::MapPages` and debug/cached tag mutators
+take the corresponding exclusive guard; `Resize` invalidates snapshots under that same guard.
+The domain generation invalidates prior snapshots conservatively for the entire table. Owner
+retirement marks retained tokens dead even when their domain remains owned by old snapshots.
+Existing raw/JIT/page-table readers are not converted into this snapshot protocol.
+
+Actual `Memory::PrepareControlledCpuPage` takes this cold snapshot, drops the PTE guard, prepares
+the real HostMemory physical page, then rechecks the table and mapping generation. The returned
+view pairs the mapping token with owned physical storage and canonical page gate. It performs
+no CPU store, callbacks, registration or data admission. Callers must keep the process/PageTable/
+HostMemory alive and use the memory-owner thread. The token does not own the process or detect
+an address-space switch away and back; future hot access needs an explicit active-context
+qualification and bounded mapping-use protocol. `IsCurrent` alone is not execution permission.
+Table-wide invalidation is correctness groundwork, not a hot-path performance claim. No physical
+pin, shared view creation or registry lookup has been inserted into scalar `Memory::Write`.
+
+Windows `run_cpu_mapping_tests.py` uses the actual PageTable implementation/VirtualBuffer and
+HostMemory plus extracted actual Memory cold-preparation and MapPages bodies. System/device
+collaborators, logging/formatting and controlled rendezvous remain fixtures. It checks same-page
+physical aliases, remap during cold preparation, tag/unmap/resize/destruction invalidation and
+mutator exclusion of snapshot reads between field writes. Removing the post-pin validation
+accepts the remap and fails explicitly (51). Candidate and unsafe-insertion tests retain their
+fixture PTEs and original failure semantics; their new metadata guards do not certify production
+CPU writes. Next work must connect reusable views and full writer qualification to actual
+Memory::Write and real first registration, preserving OnCPUWrite/device alias checks and all
+unconverted paths. DMA admission stays disabled.
 
 1. Physical backing plans and the GPU resolver adapter are implemented. Add representation pins
    and the controlled CPU resolution adapter. Resolution may not hold a mapping-use lease across a parked

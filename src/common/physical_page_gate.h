@@ -23,6 +23,9 @@ class PhysicalPageGates {
 public:
     static constexpr u64 PageSize = 4096;
     static constexpr size_t MaxPages = 65536;
+    /// Monotonic cumulative observation, not an owned dirty batch. No bit clearing or sequence
+    /// acknowledgement is provided. Snapshot currently requires closed fast entry and drainage;
+    /// extending publication to tracked writers requires a separately proved snapshot protocol.
     struct Publication {
         std::array<u64, PageSize / 64> modified_bytes{};
         u64 sequence{};

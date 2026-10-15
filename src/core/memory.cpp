@@ -66,6 +66,21 @@ struct Memory::Impl {
         buffer = std::addressof(system.DeviceMemory().buffer);
     }
 
+    std::optional<PreparedCpuPage> PrepareControlledCpuPage(
+        Common::ProcessAddress page_address) const {
+        const auto* table = current_page_table;
+        if (!table || system.IsShuttingDown()) return std::nullopt;
+        auto mapping = table->SnapshotMapping(GetInteger(page_address));
+        if (!mapping || mapping->physical_page < DramMemoryMap::Base) return std::nullopt;
+        // Snapshot lock is already released: materialization/registry preparation is cold and
+        // may allocate. Never carry a PTE lock into HostMemory preparation or GPU callbacks.
+        auto physical = system.DeviceMemory().buffer.PreparePhysicalCpuPage(
+            mapping->physical_page - DramMemoryMap::Base);
+        if (!physical || current_page_table != table || !mapping->IsCurrent())
+            return std::nullopt;
+        return PreparedCpuPage{std::move(*mapping), std::move(*physical)};
+    }
+
     void MapMemoryRegion(Common::PageTable& page_table, Common::ProcessAddress base, u64 size,
                          Common::PhysicalAddress target, Common::MemoryPermission perms,
                          bool separate_heap) {
@@ -448,6 +463,7 @@ struct Memory::Impl {
             buffer->Protect(vaddr, size, perm);
         }
 
+        const auto mutation = current_page_table->MutateMappings();
         // Iterate over a contiguous CPU address space, marking/unmarking the region.
         // The region is at a granularity of CPU pages.
 
@@ -519,6 +535,7 @@ struct Memory::Impl {
             buffer->Protect(vaddr, size, perm);
         }
 
+        const auto mutation = current_page_table->MutateMappings();
         // Iterate over a contiguous CPU address space, which corresponds to the specified GPU
         // address space, marking the region as un/cached. The region is marked un/cached at a
         // granularity of CPU pages, hence why we iterate on a CPU page basis (note: GPU page size
@@ -586,6 +603,7 @@ struct Memory::Impl {
      */
     void MapPages(Common::PageTable& page_table, Common::ProcessAddress base_address, u64 size,
                   Common::PhysicalAddress target, Common::PageType type) {
+        const auto mutation = page_table.MutateMappings();
         auto base = GetInteger(base_address);
 
         LOG_DEBUG(HW_Memory, "Mapping {:016X} onto {:016X}-{:016X}", GetInteger(target),
@@ -913,6 +931,11 @@ struct Memory::Impl {
 
 Memory::Memory(Core::System& system_) : system{system_} {
     Reset();
+}
+
+std::optional<PreparedCpuPage> Memory::PrepareControlledCpuPage(
+    Common::ProcessAddress page_address) const {
+    return impl->PrepareControlledCpuPage(page_address);
 }
 
 Memory::~Memory() = default;

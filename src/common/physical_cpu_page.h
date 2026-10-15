@@ -23,6 +23,8 @@ public:
     [[nodiscard]] u64 PublicationSequence() const noexcept {
         return gate->published.load(std::memory_order_acquire);
     }
+    /// Cumulative observation only: no consume, clear or acknowledgement semantics. A future
+    /// incremental consumer needs a separate sequence/ack protocol that cannot lose writes.
     [[nodiscard]] std::optional<PhysicalPageGates::Publication> Published() const noexcept {
         return gate->Snapshot();
     }
@@ -106,12 +108,16 @@ public:
         }
     }
     /// Marks tracking only; does not complete the range obligation or certify an upload.
+    /// Tracked is NOT registration-ready/content-valid. An uncertain upload after this call
+    /// must retain the ticket/resources as Unknown, never complete as a successful registration.
     [[nodiscard]] bool PublishTracked() {
         return domain->StateOf(ticket) == PhysicalRangeAdmission::Phase::Running &&
                gate->PublishTracked();
     }
     /// Requires REAL visibility/completion or no-effect evidence from the production adapter.
     /// Callback return alone is insufficient. This helper cannot validate that evidence.
+    /// No-effect release does not make a tracked representation valid; the adapter must keep
+    /// failed/uninitialized content inaccessible. Partial/uncertain effects require Unknown.
     [[nodiscard]] bool CompleteWithExternalEvidence() { return domain->Complete(ticket); }
     [[nodiscard]] bool MarkUnknown() { return domain->MarkUnknown(ticket); }
 

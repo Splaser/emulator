@@ -65,6 +65,8 @@ enum class PageType {Memory=0,DebugMemory=1,Unmapped=2,RasterizerCachedMemory=3}
 enum class MemoryPermission {Read=1,Write=2};
 MemoryPermission& operator|=(MemoryPermission& a,MemoryPermission b) {a=MemoryPermission(int(a)|int(b));return a;}
 struct PageTable {
+    std::mutex mapping_mutex;
+    auto MutateMappings() {return std::unique_lock{mapping_mutex};}
     struct PageInfo {
         std::atomic<uintptr_t> raw{2};
         std::function<void()> after_load=[] {};

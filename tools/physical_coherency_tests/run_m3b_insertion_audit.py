@@ -133,6 +133,7 @@ def method(marker):
 fast_source = r'''
 #include <array>
 #include <atomic>
+#include <mutex>
 #include <bit>
 #include <cassert>
 #include <cstdint>
@@ -156,6 +157,8 @@ MemoryPermission& operator|=(MemoryPermission& a,MemoryPermission b) {
     a=MemoryPermission(int(a)|int(b));return a;
 }
 struct PageTable {
+    std::mutex mapping_mutex;
+    auto MutateMappings() {return std::unique_lock{mapping_mutex};}
     struct PageInfo {
         std::atomic<uintptr_t> raw{};
         std::function<void()> after_load=[] {};

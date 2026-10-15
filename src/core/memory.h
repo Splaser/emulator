@@ -13,6 +13,7 @@
 #include "common/scratch_buffer.h"
 #include "common/typed_address.h"
 #include "core/guest_memory.h"
+#include "core/controlled_cpu_page.h"
 #include "core/hle/result.h"
 
 namespace Common {
@@ -75,6 +76,11 @@ public:
      * @param process The process to use the page table of.
      */
     void SetCurrentPageTable(Kernel::KProcess& process);
+
+    /// Cold preparation only, on the process/memory owner thread with process, PageTable and
+    /// HostMemory alive. No store, callbacks, registration or DMA admission is activated.
+    [[nodiscard]] std::optional<PreparedCpuPage> PrepareControlledCpuPage(
+        Common::ProcessAddress page_address) const;
 
     /**
      * Maps an allocated buffer onto a region of the emulated process address space.
