@@ -458,9 +458,9 @@ failure transitions and their deterministic negative controls remain activation 
 
 ## Remaining production adapters and acceptance gates
 
-### Pending explicit prepared CPU Write execution (not ordinary-path activation)
+### Explicit prepared CPU Write execution (not ordinary-path activation)
 
-The next local adapter adds an explicit prepared-view overload of actual `Memory::Impl::Write`,
+`ecf9bb31e8` adds an explicit prepared-view overload of actual `Memory::Impl::Write`,
 exposed through result-returning `WritePrepared8/16/32/64`. Ordinary Write wrappers and their
 original body remain unchanged. Cold preparation captures a Memory-owned active-context epoch;
 actual `SetCurrentPageTable` advances it even when switching away and back to the same table.
@@ -486,6 +486,15 @@ BufferCache upload. 2,000 prepared Memory writes perform zero measured hot alloc
 range enqueue. Removing hot active-context validation fails explicitly (54); missing cold
 post-pin validation remains control 51. The full Memory::Write -> real BufferCache first
 registration/preservation/cached-slow-path integration is STILL REQUIRED. DMA remains disabled.
+
+Native run 38708541040 passed both jobs for its parent `06408b9ce5`. New native
+[38711873776](https://github.com/Splaser/emulator/actions/runs/38711873776) verifies
+`ecf9bb31e8`; its result is pending at this handoff. The next stage is **M3B - Controlled First
+Registration Integration**, whose scope, real source edges, whole-coarse-range coverage,
+completion/Unknown gates and home-machine commands are saved in
+[`docs/M3B_CONTROLLED_FIRST_REGISTRATION_HANDOFF.md`](../../docs/M3B_CONTROLLED_FIRST_REGISTRATION_HANDOFF.md).
+That controlled BufferCache end-to-end stage is not implemented yet; none of the prepared
+Write passes closes the original backing77/cache10 failure.
 
 ### CPU VA cold-resolution dependency
 

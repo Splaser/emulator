@@ -28,6 +28,11 @@ source SHA; read all failed jobs' full logs only for the latest applicable run.
 
 ## Saved implementation and evidence
 
+Latest prepared-write production source: `ecf9bb31e8`. Remote validation was dispatched as
+[38711873776](https://github.com/Splaser/emulator/actions/runs/38711873776); its result was
+not yet available at handoff. Any subsequent evidence-only commit changes documentation,
+not the production source tested by that run.
+
 - `0ed92c3efd`: real HostMemory physical-page storage, backing-canonical page writer gates,
   successful post-store byte publication, failed CAS without publication, nonblocking
   first-registration page drain. Native run 38704560296 passed Android and full Linux jobs.
