@@ -31,6 +31,10 @@ assert body.count('state.cv.wait(lk);') == 1
 body = body.replace('state.cv.wait(lk);', 'if(queue_wait) { queue_wait->Set(); }\n        state.cv.wait(lk);')
 assert body.count('thread.request_stop();') == 1
 body = body.replace('thread.request_stop();', 'thread.request_stop(); if(stop_requested) stop_requested->Set();')
+callback_header = (root/'src/video_core/acknowledged_callback.h').read_text()
+assert callback_header.count('completion.get();') == 1
+(shim/'acknowledged_callback.h').write_text(callback_header.replace(
+    'completion.get();', 'if(callback_wait) { callback_wait->Set(); }\n        completion.get();'))
 head = r'''
 #include <atomic>
 #include <cassert>
@@ -62,6 +66,8 @@ template<class T> T Ready(std::future<T>& f) {
 }
 Event* queue_wait=nullptr;
 Event* stop_requested=nullptr;
+Event* callback_wait=nullptr;
+#include "video_core/acknowledged_callback.h"
 namespace Common {
 enum class ThreadPriority { Critical };
 void SetCurrentThreadName(const char*) {}
@@ -152,9 +158,44 @@ void execution_and_ownership(bool async) {
     Require(calls==1 && !manager.IsGpuThread(),"nested callback self-wait or incorrect identity");
     manager.Stop(); manager.RunOnGpuThread([&] { ++calls; }); Require(calls==1,"stop admitted callback");
 }
+void acknowledged_preservation() {
+    using VideoCommon::CallbackOutcome;
+    Core::System system; VideoCore::RendererBase renderer;
+    Core::Frontend::GraphicsContext context; Tegra::Control::Scheduler scheduler;
+    ThreadManager manager{system,true};
+    auto dispatch=[&](auto callback) { manager.RunOnGpuThread(std::move(callback)); };
+    Require(VideoCommon::RunAcknowledgedCallback(dispatch,[] {})==CallbackOutcome::Cancelled,"pre-start success");
+    manager.StartThread(renderer,context,scheduler);
+    Require(VideoCommon::RunAcknowledgedCallback(dispatch,[] {})==CallbackOutcome::Completed,"normal callback not acknowledged");
+    Event entered,release,stopping,wait;
+    stop_requested=&stopping;callback_wait=&wait;
+    auto request=std::async(std::launch::async,[&] {
+        return VideoCommon::RunAcknowledgedCallback(dispatch,[&] {entered.Set();release.Wait();});
+    });
+    entered.Wait();auto stop=std::async(std::launch::async,[&] {manager.Stop();});
+    stopping.Wait();wait.Wait();
+    Require(request.wait_for(0ms)!=std::future_status::ready,"active callback prematurely acknowledged");
+    release.Set();Require(Ready(request)==CallbackOutcome::Completed,"active callback lost completion");
+    Ready(stop);stop_requested=nullptr;callback_wait=nullptr;
+    Require(VideoCommon::RunAcknowledgedCallback(dispatch,[] {})==CallbackOutcome::Cancelled,"post-stop success");
+}
+void failed_worker_acknowledgement() {
+    using VideoCommon::CallbackOutcome;
+    Core::System system;VideoCore::RendererBase renderer;
+    Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler scheduler;
+    ThreadManager manager{system,true};manager.StartThread(renderer,context,scheduler);
+    auto dispatch=[&](auto callback) {manager.RunOnGpuThread(std::move(callback));};
+    auto failed=VideoCommon::RunAcknowledgedCallback(dispatch,[] {throw VideoCommon::UnsupportedGatherMapping("injected");});
+    Require(failed==CallbackOutcome::Failed,"preservation exception reported success");
+    int calls=0;
+    Require(VideoCommon::RunAcknowledgedCallback(dispatch,[&] {++calls;})==CallbackOutcome::Cancelled,
+            "failed-mode queue fence reported preservation success");
+    Require(calls==0,"failed worker executed preservation");manager.Stop();
+}
 int main() {
     try {
         full_queue_stop(); suspended_stop(); execution_and_ownership(true); execution_and_ownership(false);
+        acknowledged_preservation();failed_worker_acknowledgement();
         std::cout<<"PASS actual ThreadManager: full-queue cancellation, active join, suspended retry, sync/async inline, pre/post-start rejection\n";
     } catch(const std::exception& e) { std::cerr<<"FAIL "<<e.what()<<"\n"; return 1; }
 }
@@ -168,7 +209,8 @@ if args.sanitize:
 subprocess.run(flags+[str(cpp),'-o',str(exe)],check=True)
 (out/'thread-extraction.json').write_text(json.dumps({
     'source_sha256': hashlib.sha256(production.encode()).hexdigest(),
-    'instrumentation': ['signal immediately before queue-space wait', 'signal after request_stop'],
+    'instrumentation': ['signal immediately before queue-space wait', 'signal after request_stop',
+                        'signal before acknowledged callback future wait'],
     'production': ['ThreadManager class', 'RunThread and all ThreadManager definitions', 'MPSCQueue/SPSCQueue', 'stop-token wait'],
     'fixtures': ['renderer/engine/scheduler/platform/Core/System'],
 },indent=2))

@@ -3399,7 +3399,7 @@ Result KPageTableBase::ReadIoMemoryImpl(KProcessAddress dst_addr, KPhysicalAddre
 
     // Read the memory.
     const KProcessAddress read_addr = io_addr + (GetInteger(phys_addr) & (PageSize - 1));
-    dst_memory.CopyBlock(dst_addr, read_addr, size);
+    R_UNLESS(dst_memory.CopyBlock(dst_addr, read_addr, size), ResultInvalidPointer);
 
     R_SUCCEED();
 }

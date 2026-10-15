@@ -180,6 +180,20 @@ Remote follow-up on `4fc3f7e768867e6cc5a8474843ad32e68ec73dc0`, run `38668008146
   passes whitespace checks. Preserved DMA snapshots, CPU-access handoff, physical-shadow scope,
   shutdown lock ordering, independent translation fields and the lazy-remapping validation gate.
 
+### Promotion and M3B continuation: 2026-10-15
+
+The user accepted #380's author's Android device validation for this integration and explicitly
+requested promotion. Personal `main` and PR #375's `codex/issue-372-fixes` were fast-forwarded
+and pushed to `105779d2c4`. No additional local Android build or device run is required here.
+This accepts upstream #380 evidence; it does not certify the new M3B/F2 protocol on a device.
+
+To resume yesterday's M3B work, the previous `80c4f4d7f7` branch is being rejoined on main:
+CPU CopyBlock snapshots, explicit host callback acknowledgement, negative insertion audits and
+the candidate protocol remain distinct from a completed production F2 fix. The one test-fixture
+merge conflict keeps both the #380 logging stub and acknowledged-callback header. CopyBlock,
+preservation acknowledgement, 24 candidate cases (three repetitions) and unmap preservation
+regressions passed after the merge. Production admission remains disabled pending its adapters.
+
 ### Resume on another computer
 
 ```powershell

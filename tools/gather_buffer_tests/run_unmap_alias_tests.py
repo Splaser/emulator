@@ -25,7 +25,7 @@ def extract(path, marker, template=False):
     return source[start:source.index('\n}\n', pos) + 3]
 
 fixture = Path(__file__).with_name('run_tests.py')
-head = '#include <thread>\n#include <cassert>\n#define LOG_WARNING(...) ((void)0)\n' + literal(fixture, 'head')
+head = '#include <thread>\n#include <cassert>\n#include "video_core/acknowledged_callback.h"\n#define LOG_WARNING(...) ((void)0)\n' + literal(fixture, 'head')
 head = head.replace('gpu.erase(d + i);', '/* CPU and GPU flags are separate in WordManager. */')
 head = head.replace('if (gpu.contains(d + i))', 'if (gpu.contains(d + i) && !cpu.contains(d + i))')
 head = head.replace('struct Tracker {', '''struct Tracker {
@@ -119,11 +119,14 @@ struct RasterizerVulkan {
     ThreadManager gpu; BufferCache<int>& buffer_cache;
     TextureCache texture_cache; PipelineCache pipeline_cache;
     bool RunBufferCacheCpuWrite(DAddr,u64,bool=false,bool=false);
+    std::optional<bool> TryRunBufferCacheCpuWrite(DAddr,u64,bool,bool);
     void UnmapMemory(DAddr,u64);
 };
 '''
 body += extract(root / 'src/video_core/renderer_vulkan/vk_rasterizer.cpp',
                 'bool RasterizerVulkan::RunBufferCacheCpuWrite(')
+body += extract(root / 'src/video_core/renderer_vulkan/vk_rasterizer.cpp',
+                'std::optional<bool> RasterizerVulkan::TryRunBufferCacheCpuWrite(')
 body += extract(root / 'src/video_core/renderer_vulkan/vk_rasterizer.cpp',
                 'void RasterizerVulkan::UnmapMemory(')
 tail = r'''
