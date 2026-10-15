@@ -1575,8 +1575,12 @@ KProcessAddress KPageTableBase::FindFreeArea(KProcessAddress region_start, size_
 
                 KMemoryInfo info;
                 Svc::PageInfo page_info;
-                R_ASSERT(this->QueryInfoImpl(std::addressof(info), std::addressof(page_info),
-                                             candidate));
+                const auto query_result = this->QueryInfoImpl(
+                    std::addressof(info), std::addressof(page_info), candidate);
+                R_ASSERT(query_result);
+                if (R_FAILED(query_result)) {
+                    continue;
+                }
 
                 if (info.m_state != KMemoryState::Free) {
                     continue;

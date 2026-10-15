@@ -123,6 +123,20 @@ production compilation remains unverified until a subsequent run passes.
   pending the next remote workflow; the failed run never reached those regression steps.
 - PR #375, personal main and F2 remain unchanged by these integration fixes.
 
+Remote follow-up on `583cef2834`, run `38664784880`:
+
+- Android configuration passed, including Oaknut; real arm64 compilation then exposed a missing
+  `<cassert>` include in `src/common/fs/file.cpp` with precompiled headers disabled. Added the
+  direct include for its content-URI assertion.
+- Both Ninja build steps now use `-k 0` to collect independent compilation errors in one run.
+  They still fail on compiler errors; this does not relax warnings or skip production targets.
+- Linux passed the previous GC compilation failure, then GCC rejected possibly uninitialized
+  `KMemoryInfo` in `FindFreeArea`. `QueryInfoImpl` can fail without filling its outputs; the
+  debug-only success assertion did not guard their use in Release. Failed random candidates
+  are now skipped explicitly, retaining the assertion and successful-query path.
+- Windows DMA snapshot, renderer orchestration and GPU-write coordination regressions passed
+  again while waiting for Linux CI. These remain distinct from native Linux and device results.
+
 ### Resume on another computer
 
 ```powershell

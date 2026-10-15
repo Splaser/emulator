@@ -41,7 +41,8 @@ jobs:
             -DCITRON_ROOM=OFF -DCITRON_TESTS=OFF -DCITRON_USE_BUNDLED_FFMPEG=ON \
             -DCITRON_ENABLE_LTO=OFF -DCITRON_USE_PRECOMPILED_HEADERS=OFF
       - name: Compile real NCE, HostMemory, Vulkan and shader libraries
-        run: cmake --build build-android-integration --target core video_core shader_recompiler --parallel 3
+        # Gather independent compiler errors in one remote run; Ninja still exits nonzero.
+        run: cmake --build build-android-integration --target core video_core shader_recompiler --parallel 3 -- -k 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -83,7 +84,7 @@ jobs:
             -DENABLE_CUBEB=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_LIBUSB=OFF \
             -DCITRON_ROOM=OFF -DCITRON_TESTS=ON -DCITRON_CRASH_DUMPS=OFF
       - name: Build CLI, shader tool and unit tests
-        run: cmake --build build-integration --target citron-cmd shader_tool tests --parallel 3
+        run: cmake --build build-integration --target citron-cmd shader_tool tests --parallel 3 -- -k 0
       - name: Run production unit tests
         run: ctest --test-dir build-integration --output-on-failure --timeout 180
       - name: Exercise real Linux HostMemory and backing import lifetime
