@@ -158,7 +158,72 @@ against those real extracted GPU/device resolver methods and real OS allocations
 still a spy and PTE storage/manager shells are fixtures. The smaller engine test checks exact
 coverage arguments, unsupported-encoding rejection before resolution, failure propagation and
 unchanged sink/Launch count. This preparation is not an executable DMA plan or an F2 repair.
-Remote production compilation and Linux validation for this joint-plan slice are pending.
+Run `38683254478` at `8a0914f6ec054115b422e02753fbd4932b407dbd` passed both Android arm64
+production compilation and the full Linux production/regression job, including combined DMA
+storage preparation and the joint-validation negative control. This does not close F2.
+
+## Next focus: DMA admission activation prerequisites
+
+The user's 2026-10-15 review narrows the next activation milestone to the restricted single-line
+DMA path. These are blockers for **activating admission**, not automatic merge blockers for inert
+or test-only infrastructure. Current production execution remains unchanged for every unproved
+path; no broader DMA eligibility is implied by storage-plan success.
+
+| Risk | Current assessment | Priority |
+| --- | --- | --- |
+| Joint source/destination snapshot validation | Reasonable point-in-time design; not execution permission | Low |
+| Remap after plan return, before execution | Requires old-plan/mutator admission contract | High |
+| Physical coverage differs from representation footprint | No production representation admission established | High |
+| Direct JIT/NCE bypasses controlled access | Still explicitly excluded | High |
+| F2 first-cache-registration race | Not repaired in production | High |
+| Shutdown lifecycle | Existing lock-order fixes retained; new pin/cancellation lifetime still needs proof | Medium |
+
+### Representation ownership audit and required evidence
+
+The actual Vulkan `Buffer` owns staged storage (`vk::Buffer`, views) and an optional
+`unique_ptr<DirectGuestMapping>` containing the imported VkBuffer, memory and guest backing.
+`BufferCache::DeleteBuffer` unregisters the representation, moves it from `slot_buffers` into
+`DelayedDestructionRing`, and erases its slot. `DelayedDestructionRing::Tick` clears a ring slot;
+`Flush` clears every slot. `BufferCacheRuntime::CopyBuffer` records raw source/destination
+VkBuffer handles and copy geometry. Neither a BufferId, a captured raw VkBuffer, nor the current
+HostMemory pin establishes ownership of a parked DMA representation. The existing destruction
+ring is not evidence for an arbitrarily long parked-plan lifetime. This is a gap in the new
+activation proof, not a claim that existing submitted-work lifetime management is broken.
+
+The next implementation must provide real source/destination payload ownership across cache
+replacement/unregistration, slot reuse, queued recording, submit, checked device completion and
+Partial/Unknown/exit cancellation. Resource identity, physical-to-representation footprint and
+generation must be immutable. A parked plan cannot keep a cache mutex, mapping-use lease or
+whole-owner reservation; a reference-counted wrapper alone does not prove footprint/visibility.
+Unknown completion must not release resources as if an exact successful tick had been observed.
+
+### Required creation-to-execution order
+
+1. Purely classify one supported launch and project pending registers without consuming effects.
+2. Resolve/pin both physical storage ranges and validate them jointly; establish immutable,
+   matching representation ownership and footprints. No data-access authority exists yet.
+3. Order mapping-mutator intent and the old-plan request in the same admission domain. A mutator
+   winning before plan acceptance must reject/reprepare the unexecuted plan; after acceptance,
+   execution must use the accepted pinned targets with the required preservation ordering.
+   Re-resolving current VA inside the existing Launch is not execution of the old plan.
+4. Atomically TryStart source-read and destination-write ranges as one request, including physical
+   aliases/overlap. Never retain a granted source while parking for its destination. CPU first
+   registration and controlled stores must share this ordering domain to close the F2 gap.
+5. On conflict park the unexecuted single-line method in the actual channel scheduler and return
+   the GPU worker; independent preservation/release work must run. Retry the retained immutable
+   request without replaying earlier effects or silently granting admission to legacy Launch.
+6. Execute only the proved representation path, publish exact successful write extents, and
+   retain resources/reservations until the defined visibility/completion or cancellation outcome.
+
+Required deterministic production-adapter tests cover mutator-before-accept, remap-after-return,
+mutator-during-park, representation replacement/slot reuse while parked, same-allocation
+source/destination overlap, other-channel CPU dependency progress, no effected-prefix replay,
+and shutdown/Unknown while parked or submitted. Existing real DmaPusher/Control::Scheduler
+boundary tests are a prerequisite, not proof that this physical adapter is active. Use actual
+mapping mutator methods and independently released CPU stores; keep explicit negative controls.
+
+Keep the original F2 `backing=77`, `cache=10` failure assertion and its failing `--require-fixed`
+gate. New infrastructure, candidate or scheduler-boundary passes cannot close that witness.
 
 ## Remaining production adapters and acceptance gates
 
