@@ -104,6 +104,7 @@ jobs:
           python tools/physical_coherency_tests/run_gpu_plan_tests.py
           python tools/physical_coherency_tests/run_representation_pin_tests.py
           python tools/physical_coherency_tests/run_cache_representation_tests.py
+          python tools/physical_coherency_tests/run_physical_admission_tests.py
           python tools/physical_coherency_tests/run_m3b_candidate_tests.py --repeat 3
           python tools/dma_snapshot_tests/run_tests.py
           python tools/gather_buffer_tests/run_tests.py

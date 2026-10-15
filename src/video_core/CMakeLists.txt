@@ -23,6 +23,7 @@ add_library(video_core STATIC
     cache_types.h
     physical_memory.h
     physical_access_plan.h
+    physical_copy_admission.h
     physical_shadow.h
     capture.h
     cdma_pusher.cpp

@@ -293,7 +293,58 @@ atomically admit source/destination, execute the pinned resource path, or drain 
 shutdown. The supplied physical plan and returned representation pin must remain paired by a
 future adapter with those contracts. No production admission consumer is installed, all ordinary
 DMA execution remains unchanged, and the original F2 gate still fails with backing 77/cache 10.
-Remote production/regression evidence for this correspondence slice is pending.
+Run `38698088610` at `f1cd4d870169ad865820ad1e9c31353626ec9f2e` passed both Android arm64
+production compilation and the full Linux production/regression job, including correspondence
+and post-resource-pin remap positive/negative controls. The content/registration gap remains open.
+
+### Backing-owned range ordering groundwork
+
+The next slice gives each real `GuestBackingEpoch` one `PhysicalRangeAdmission` metadata domain.
+Arena retirement seals that domain before marking the epoch dead. Ordinary CPU/GPU access does
+not enqueue requests yet, so this does not change existing access eligibility or close F2.
+The domain is shared by the actual allocation identity, not a cache slot, VA or test dispatcher.
+
+Ready logical segments enqueue bounded immutable read/write intervals and retained resources
+outside cache/PTE locks. `TryStart` grants ALL intervals atomically or parks with NONE granted.
+Earlier conflicting pending requests order later ones; shared readers and disjoint scopes can
+proceed. Inline conflicts are rejected through an explicit execution-scope chain, including an
+outer same-domain scope hidden beneath a different nested domain. Tickets retain domain identity
+to avoid stale-owner ABA. There are no worker threads, queue pumps, GPU waits or owner-wide leases.
+Only ready segments may enqueue: pending requests must not conceal unresolved external dependencies.
+Preparation/capacity/seal failure is never authorization to fall through to an unguarded access.
+
+`EnqueuePhysicalCopyAdmission` prepares a real physical-copy bundle on its exact backing domain:
+source segments read, destination segments write, with actual source/destination storage and the
+supplied GPU representation owners retained together. It rejects empty/moved/mixed-backing plans,
+dead epochs, missing representation ownership and unsupported fragmentation (64 intervals maximum).
+The metadata queue is bounded to 256 requests. It does not certify representation contents or
+match that opaque owner to its physical footprint; the real adapter must supply that proof.
+
+Pending requests can cancel; seal cancels them without releasing resource owners under the
+metadata mutex. Running/Unknown obligations retain resources. Unknown conservatively quarantines
+the request's physical footprint, including readers, while permitting disjoint work. No recovery
+API pretends to supply device quiescence: Unknown cannot be completed/cancelled by this slice,
+and its unresolved resources intentionally remain retained. `Complete` is an explicit caller
+obligation after real completion/visibility or proof of no effects, not a Vulkan completion signal.
+
+Windows `run_physical_admission_tests.py` composes the actual domain, actual physical-copy builder,
+HostMemory and preceding GMMU/cache/Vulkan-owner fixture inputs. It passes atomic source/destination
+parking, opposite-copy concurrent TryStart, ordered readers/writers, real storage bytes with an
+independently released CPU producer, aliases, nested reentry, foreign identities, bounds/capacity,
+resource-destructor reentry after unlock, arena retirement and Unknown quarantine. CPU store,
+registration and memcpy executor participation in this suite remain fixtures, not Memory::Write,
+BufferCache first-registration or a live scheduler adapter. Bypassing pending-writer order and
+bypassing conflict checks each produce explicit failing negative controls. Cross-platform actual
+HostMemory/GPU-plan regressions also pass. The additional chunk-backing runner requires Linux;
+its Windows attempt cannot compile Linux mmap headers, so its evidence awaits the remote Linux job.
+
+**No activation:** initially uncached Memory::Write/WriteBlock/CAS still do not join this domain;
+first-cache-registration/upload also does not join. CPU lookup can still bypass notification after
+cached marking. Before activation, implement stable controlled CPU resolution, preservation-before-
+store and exact successful-store publication, registration epoch/content provenance, mapping-mutator
+ordering, real scheduler park/resume and checked completion/Unknown/final-pin drainage. The original
+F2 correctness gate still reports backing 77/cache 10 and exits 1. Native evidence for this new
+range-ordering slice is pending.
 
 ### Required creation-to-execution order
 

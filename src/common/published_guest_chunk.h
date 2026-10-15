@@ -7,6 +7,7 @@
 #include <optional>
 #include <utility>
 #include "common/common_types.h"
+#include "common/physical_range_admission.h"
 
 namespace Common {
 
@@ -25,6 +26,7 @@ struct GuestBackingEpoch {
     inline static std::atomic<u64> next{1};
     const u64 generation{next.fetch_add(1, std::memory_order_relaxed)};
     std::atomic<bool> alive{true};
+    const std::shared_ptr<PhysicalRangeAdmission> ranges{std::make_shared<PhysicalRangeAdmission>()};
 };
 
 // Invalidate even if an import lease pins the low-level arena. Moves transfer ownership.
@@ -48,8 +50,10 @@ public:
 
 private:
     void Invalidate() {
-        if (epoch)
+        if (epoch) {
+            epoch->ranges->Seal();
             epoch->alive.store(false, std::memory_order_release);
+        }
     }
     std::shared_ptr<GuestBackingEpoch> epoch;
 };
