@@ -1456,6 +1456,16 @@ std::optional<PinnedPhysicalMemory> HostMemory::PinPhysicalRange(size_t offset, 
     return PinnedPhysicalMemory{owner, epoch, {owner->backing_base + offset, length}, offset};
 }
 
+std::optional<PreparedPhysicalCpuPage> HostMemory::PreparePhysicalCpuPage(
+    size_t physical_page_offset) const {
+    if (physical_page_offset % PhysicalPageGates::PageSize) return std::nullopt;
+    auto pin = PinPhysicalRange(physical_page_offset, PhysicalPageGates::PageSize);
+    if (!pin) return std::nullopt;
+    auto gate = pin->Epoch()->pages->Prepare(physical_page_offset);
+    if (!gate || !pin->OwnerAlive()) return std::nullopt;
+    return PreparedPhysicalCpuPage{std::move(*pin), std::move(gate)};
+}
+
 BackingStats HostMemory::GetBackingStats() const {
 #if defined(__linux__) || defined(__FreeBSD__)
     return impl->GetBackingStats();

@@ -374,6 +374,53 @@ mapping mutator methods and independently released CPU stores; keep explicit neg
 Keep the original F2 `backing=77`, `cache=10` failure assertion and its failing `--require-fixed`
 gate. New infrastructure, candidate or scheduler-boundary passes cannot close that witness.
 
+## Prepared physical-page writer and registration boundary (inert)
+
+Native run [38700231751](https://github.com/Splaser/emulator/actions/runs/38700231751)
+passed Android production and the complete Linux production/regression jobs for `80bf2b85f3`.
+The completed PR380 integration branch was subsequently deleted locally and remotely after
+checking ancestry; development now continues on `codex/issue-372-fixes`, synchronized with main.
+
+`HostMemory::PreparePhysicalCpuPage` now prepares a real pinned physical page and its canonical
+`GuestBackingEpoch::pages` gate. Different GPU/device virtual aliases of the same backing page
+obtain the same gate; different physical pages or backing epochs do not. Cold preparation uses
+a bounded registry (65,536 pages); it can allocate. Prepared scalar stores do not query that
+registry, allocate a range ticket, copy a shared owner, or acquire cache/PTE locks.
+
+The prepared physical interface executes actual bounded memcpy or aligned unsigned CAS and
+publishes cumulative exact modified-byte bits and a release sequence AFTER a successful store,
+before releasing its page-local writer count. Failed CAS publishes nothing. Closing or tracked
+pages return `NeedSlow` without storing; no fallback is authorized. This is not CPU-VA resolution,
+a cache dirty-bit consumer, or support for cross-page stores, u128 CAS or registered-page writes.
+Concurrent conflicting CPU operations still need their normal language/memory-access contract;
+the writer count orders registration, not overlapping scalar writes against each other.
+
+First-registration preparation enqueues its whole-page write intent before atomically closing
+fast writer entry. Nonblocking `TryStart` reports `Draining` until already entered writers have
+published and exited, then attempts the backing range ticket. The returned registration retains
+actual storage and the supplied representation owner. `PublishTracked` changes only gate state;
+it neither certifies an upload nor completes the ticket. `CompleteWithExternalEvidence` still
+requires the caller's real visibility/completion or no-effect proof. Destruction cancels pending
+work or marks running work Unknown; cancellation never silently reopens the gate.
+
+Windows `run_page_writer_tests.py` composes actual HostMemory, GPU/device translation, existing
+cache representation lookup and Vulkan payload owners (creation/PTE/cache storage remain fixtures).
+It checks aliases, a deterministically paused real store versus registration, exact byte publication,
+failed/successful CAS, bounds, retirement and fail-closed cancellation. An independent releaser
+unblocks the writer. 2,000 prepared byte stores perform zero measured hot allocations and do not
+advance range-domain enqueue progress. Negative controls explicitly fail for ignoring writer drain
+(49) and publishing before the store (50). This is bounded correctness evidence, not a performance
+benchmark or normal Memory::Write/BufferCache::Register production routing.
+
+**Activation remains blocked.** Normal CPU VA stores and actual first cache creation/upload do
+not call these adapters. Preservation, stable CPU resolution, cache-content provenance, registered
+slow writes and DMA participation must join this SAME handshake before use. Range admission alone
+does not exclude these fast writers. Unknown retains resources intentionally; a trusted quiescence/
+recovery owner and final-pin drainage before device/VMA destruction remain required. Destroying
+the admission object is not recovery. The original F2 gate was rechecked and still reports
+`expected=77 observed=10 backing=77`, with `require-fixed` exit 1. No DMA activation or eligibility
+expansion is included in this slice.
+
 ## Remaining production adapters and acceptance gates
 
 1. Physical backing plans and the GPU resolver adapter are implemented. Add representation pins

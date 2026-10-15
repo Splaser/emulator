@@ -68,6 +68,8 @@ add_library(common STATIC
     pinned_physical_memory.h
     published_guest_chunk.h
     physical_range_admission.h
+    physical_page_gate.h
+    physical_cpu_page.h
     mapping_lifetime.h
     input.h
     intrusive_red_black_tree.h

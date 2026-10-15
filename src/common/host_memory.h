@@ -12,6 +12,7 @@
 #include "common/common_funcs.h"
 #include "common/common_types.h"
 #include "common/pinned_physical_memory.h"
+#include "common/physical_cpu_page.h"
 #include "common/published_guest_chunk.h"
 #include "common/virtual_buffer.h"
 
@@ -152,6 +153,10 @@ public:
     /// Invalid/empty extents return nullopt; materialization failures propagate before exposure.
     [[nodiscard]] std::optional<PinnedPhysicalMemory> PinPhysicalRange(size_t offset,
                                                                     size_t length) const;
+    /// Cold preparation of a canonical physical-page writer/registration gate. No VA lookup
+    /// or access activation; caller protects this HostMemory object during resolution.
+    [[nodiscard]] std::optional<PreparedPhysicalCpuPage> PreparePhysicalCpuPage(
+        size_t physical_page_offset) const;
     [[nodiscard]] BackingStats GetBackingStats() const;
     [[nodiscard]] bool IsLazyBacking() const noexcept { return lazy_backing_enabled; }
     // Query only: never materializes cold chunks. Leases are not direct GPU mappings.

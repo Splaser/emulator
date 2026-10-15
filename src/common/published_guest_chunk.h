@@ -8,6 +8,7 @@
 #include <utility>
 #include "common/common_types.h"
 #include "common/physical_range_admission.h"
+#include "common/physical_page_gate.h"
 
 namespace Common {
 
@@ -27,6 +28,7 @@ struct GuestBackingEpoch {
     const u64 generation{next.fetch_add(1, std::memory_order_relaxed)};
     std::atomic<bool> alive{true};
     const std::shared_ptr<PhysicalRangeAdmission> ranges{std::make_shared<PhysicalRangeAdmission>()};
+    const std::shared_ptr<PhysicalPageGates> pages{std::make_shared<PhysicalPageGates>()};
 };
 
 // Invalidate even if an import lease pins the low-level arena. Moves transfer ownership.
@@ -51,6 +53,7 @@ public:
 private:
     void Invalidate() {
         if (epoch) {
+            epoch->pages->Seal();
             epoch->ranges->Seal();
             epoch->alive.store(false, std::memory_order_release);
         }
