@@ -180,7 +180,7 @@ path; no broader DMA eligibility is implied by storage-plan success.
 
 ### Representation ownership audit and required evidence
 
-The actual Vulkan `Buffer` owns staged storage (`vk::Buffer`, views) and an optional
+At `8a0914f6ec`, the actual Vulkan `Buffer` owns staged storage (`vk::Buffer`, views) and an optional
 `unique_ptr<DirectGuestMapping>` containing the imported VkBuffer, memory and guest backing.
 `BufferCache::DeleteBuffer` unregisters the representation, moves it from `slot_buffers` into
 `DelayedDestructionRing`, and erases its slot. `DelayedDestructionRing::Tick` clears a ring slot;
@@ -196,6 +196,38 @@ Partial/Unknown/exit cancellation. Resource identity, physical-to-representation
 generation must be immutable. A parked plan cannot keep a cache mutex, mapping-use lease or
 whole-owner reservation; a reference-counted wrapper alone does not prove footprint/visibility.
 Unknown completion must not release resources as if an exact successful tick had been observed.
+
+### Staged Vulkan payload retention slice
+
+The next production slice moves the real staged `vk::Buffer`/VMA allocation into
+`StagedBufferPayload`; `Buffer` retains its ordinary owner through a shared pointer. A bounded
+`StagedBufferPin` independently holds that same payload and immutable buffer-relative offset/
+length. Pin construction rejects empty, absent and out-of-bounds extents. Live payload identity
+is independent of a cache slot id. Moving a cache Buffer into the existing destruction ring,
+erasing/reusing its slot, or clearing the ring cannot destroy that allocation while a pin exists.
+The final owner runs the existing actual `vk::Buffer::Release` exactly once.
+
+Only non-direct buffers expose this pin; direct/imported representations remain ineligible.
+Conversion to direct storage clears old views and releases the cache's staged owner, while an
+existing staged pin keeps its original VkBuffer. No texel-view ownership is promised: this pin
+is scoped to DMA's VkBuffer payload, not arbitrary shader/image views. Existing Buffer lookup,
+execution, cache registration, delayed retirement and submission policy stay in place; there
+is no DMA activation or new pin consumer yet.
+
+Windows `run_representation_pin_tests.py` passes actual owning Buffer fields/pin/implicit moves,
+actual SlotVector and DelayedDestructionRing, actual payload and actual Vulkan RAII/Release,
+with fake creation/device services and a fake VMA destruction callback. It checks slot reuse,
+Tick/Flush, replacement, copies/moves, bounds and exactly-once final resource release. A negative
+control retaining only the raw payload identity fails explicitly at ring retirement. This is
+resource-owner retention evidence with a fake driver, not device execution/completion evidence.
+The real production importer extraction also passes its success/failure/FD-ownership tests.
+
+**Lifecycle proof remains partial.** Device/VMA allocator domains must outlive every pin; this
+slice does not establish shutdown sealing or retain those domains. Physical/representation
+footprint matching, cache-content preservation, immutable submit ownership, checked completion/
+Unknown handling and cancellation remain activation blockers. A shared resource owner alone
+does not close those contracts. The original F2 gate still reports backing 77/cache 10 and exit 1.
+Remote Android/Linux compilation and regression evidence for this slice is pending.
 
 ### Required creation-to-execution order
 

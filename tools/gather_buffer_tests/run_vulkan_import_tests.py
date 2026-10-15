@@ -119,7 +119,8 @@ struct DirectGuestMapping {
 };
 struct Buffer {
     std::unique_ptr<DirectGuestMapping> direct;
-    struct Scratch { void reset() {} } buffer;
+    struct Scratch { void reset() {} } payload;
+    struct Views { void clear() {} } views;
     u64 SizeBytes() const { return 64; }
     bool IsDirectGuest() const { return direct != nullptr; }
     const Common::GuestBackingRange* DirectBacking() const {

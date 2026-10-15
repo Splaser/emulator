@@ -11,6 +11,7 @@
 #include "video_core/buffer_cache/usage_tracker.h"
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/renderer_vulkan/vk_compute_pass.h"
+#include "video_core/renderer_vulkan/vk_buffer_payload.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/renderer_vulkan/vk_update_descriptor.h"
 #include "video_core/surface.h"
@@ -44,7 +45,7 @@ public:
     [[nodiscard]] VkBufferView View(u32 offset, u32 size, VideoCore::Surface::PixelFormat format);
 
     [[nodiscard]] VkBuffer Handle() const noexcept {
-        return direct ? *direct->buffer : *buffer;
+        return direct ? *direct->buffer : payload ? *payload->buffer : VK_NULL_HANDLE;
     }
 
     [[nodiscard]] bool IsDirectGuest() const { return direct != nullptr; }
@@ -54,7 +55,14 @@ public:
 
     /// Host mapping of a unified memory buffer, empty for staged buffers.
     [[nodiscard]] std::span<u8> Mapped() noexcept {
-        return buffer.Mapped();
+        return payload ? payload->buffer.Mapped() : std::span<u8>{};
+    }
+
+    /// Staged DMA resource ownership only, under a live renderer/device/allocator domain.
+    /// The caller must independently prove physical footprint and acquire data admission.
+    [[nodiscard]] std::optional<StagedBufferPin> PinStagedRepresentation(u64 offset,
+                                                                      u64 size) const {
+        return direct ? std::nullopt : StagedBufferPin::Build(payload, offset, size);
     }
 
     /// Whether work recorded for the submission `tick` uses the range. Work of earlier
@@ -91,7 +99,7 @@ private:
     friend BufferCacheRuntime;
     std::unique_ptr<DirectGuestMapping> direct;
     const Device* device{};
-    vk::Buffer buffer;
+    std::shared_ptr<StagedBufferPayload> payload;
     std::vector<BufferView> views;
     VideoCommon::UsageTracker tracker;
     /// Submission the usage in tracker belongs to.

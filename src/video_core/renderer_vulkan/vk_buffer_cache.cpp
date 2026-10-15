@@ -219,7 +219,8 @@ bool BufferCacheRuntime::TryDirectGuestBuffer(Buffer& target, Common::GuestBacki
     guest_cpu_access.insert(backing.fd);
     mapping->backing = backing;
     mapping->properties = properties.memoryTypes[type].propertyFlags;
-    target.buffer.reset();
+    target.views.clear();
+    target.payload.reset();
     target.direct = std::move(mapping);
     return true;
 #else
@@ -301,15 +302,17 @@ Buffer::Buffer(BufferCacheRuntime& runtime, VideoCommon::NullBufferParams null_p
         return;
     }
     device = &runtime.device;
-    buffer = runtime.CreateNullBuffer();
+    payload = std::make_shared<StagedBufferPayload>(runtime.CreateNullBuffer(), SizeBytes());
     is_null = true;
 }
 
 Buffer::Buffer(BufferCacheRuntime& runtime, DAddr cpu_addr_, u64 size_bytes_)
     : VideoCommon::BufferBase(cpu_addr_, size_bytes_), device{&runtime.device},
-      buffer{CreateBuffer(*device, runtime.memory_allocator, SizeBytes())}, tracker{SizeBytes()} {
+      payload{std::make_shared<StagedBufferPayload>(
+          CreateBuffer(*device, runtime.memory_allocator, SizeBytes()), SizeBytes())},
+      tracker{SizeBytes()} {
     if (runtime.device.HasDebuggingToolAttached()) {
-        buffer.SetObjectNameEXT(fmt::format("Buffer 0x{:x}", CpuAddr()).c_str());
+        payload->buffer.SetObjectNameEXT(fmt::format("Buffer 0x{:x}", CpuAddr()).c_str());
     }
 }
 
