@@ -539,7 +539,10 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     EndThread(keeper);
 }
 TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
-          "[f3][native][known-defect]") {
+          "[.][f3][native][known-defect]") {
+    // KernelCore's host dummy KThread is thread_local and retains its first Kernel.
+    // Run this complete System lifetime in a separate process (CTest explicitly
+    // selects [f3]); the default invocation retains the original scheduler suite.
     Settings::values.use_multi_core.SetValue(true);
     Settings::values.use_asynchronous_gpu_emulation.SetValue(true);
     Settings::values.use_uma_zero_copy.SetValue(false);

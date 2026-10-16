@@ -51,6 +51,10 @@ target_link_libraries(controlled_cpu_scheduler_tests PRIVATE common core Vulkan:
     ${PLATFORM_LIBRARIES} Catch2::Catch2WithMain Threads::Threads)
 add_test(NAME controlled_cpu_scheduler_tests COMMAND controlled_cpu_scheduler_tests)
 set_tests_properties(controlled_cpu_scheduler_tests PROPERTIES TIMEOUT 180)
+# A new System in the same host thread would reuse KernelCore's TLS dummy KThread
+# from the first System. Keep both native owners intact and isolate their processes.
+add_test(NAME native_f3_witness COMMAND controlled_cpu_scheduler_tests "[f3]")
+set_tests_properties(native_f3_witness PROPERTIES TIMEOUT 30)
 
 if (CITRON_USE_PRECOMPILED_HEADERS)
     target_precompile_headers(tests PRIVATE precompiled_headers.h)
