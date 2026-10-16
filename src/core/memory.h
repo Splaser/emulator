@@ -114,6 +114,22 @@ public:
                           Common::PhysicalRegistrationBundle::CachedWrite& write,
                           Common::ProcessAddress addr, u64 data);
 
+    /// GPU-owner continuation only, AFTER preservation and admission. Invokes the actual
+    /// ordinary Write8/16/32/64 with one bounded thread-local capability; every refusal is
+    /// returned without legacy callbacks/fallback. Caller retains admission through publication.
+    [[nodiscard]] PreparedCpuWriteResult WriteOrdinaryControlled8(
+        const PreparedCpuPage&, Common::PhysicalRegistrationBundle::CachedWrite&,
+        Common::ProcessAddress, u8);
+    [[nodiscard]] PreparedCpuWriteResult WriteOrdinaryControlled16(
+        const PreparedCpuPage&, Common::PhysicalRegistrationBundle::CachedWrite&,
+        Common::ProcessAddress, u16);
+    [[nodiscard]] PreparedCpuWriteResult WriteOrdinaryControlled32(
+        const PreparedCpuPage&, Common::PhysicalRegistrationBundle::CachedWrite&,
+        Common::ProcessAddress, u32);
+    [[nodiscard]] PreparedCpuWriteResult WriteOrdinaryControlled64(
+        const PreparedCpuPage&, Common::PhysicalRegistrationBundle::CachedWrite&,
+        Common::ProcessAddress, u64);
+
     /**
      * Maps an allocated buffer onto a region of the emulated process address space.
      *

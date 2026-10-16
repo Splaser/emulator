@@ -34,7 +34,7 @@ struct CpuAccessContextOwner {
 };
 
 /// Cold prepared CPU-VA target. Owns physical storage, not the process/PageTable object.
-/// Only the explicit prepared Write entry consumes this view. Ordinary writes remain legacy.
+/// Explicit prepared stores and an owner-bound ordinary scalar write can consume this view.
 struct PreparedCpuPage {
     const Common::PageTable::MappingSnapshot mapping;
     const Common::PreparedPhysicalCpuPage physical;
@@ -109,6 +109,67 @@ private:
         default: return PreparedCpuWriteResult::Invalid;
         }
     }
+};
+
+/// A single synchronous ordinary Write invocation inside an already preserved/admitted cache
+/// transaction. Thread-local binding never enrolls another CPU thread or Memory instance.
+/// This owns the expected scalar bytes; all physical/native owners remain in the transaction.
+/// Never retain this scope across suspension, callbacks or a GPU wait.
+class ScopedCpuWrite {
+public:
+    template <typename T>
+        requires(std::is_trivially_copyable_v<T> && sizeof(T) <= 8)
+    ScopedCpuWrite(const PreparedCpuPage& page_,
+                   Common::PhysicalRegistrationBundle::CachedWrite& write_,
+                   const CpuAccessContext* context_, u64 address_, const T& value)
+        : previous{current}, page{page_}, write{write_}, context{context_},
+          address{address_ & 0xffffffffffffULL}, size{sizeof(T)} {
+        std::memcpy(bytes.data(), &value, sizeof(T));
+        current = this;
+    }
+    ScopedCpuWrite(const ScopedCpuWrite&) = delete;
+    ScopedCpuWrite& operator=(const ScopedCpuWrite&) = delete;
+    ~ScopedCpuWrite() { current = previous; }
+
+    [[nodiscard]] static ScopedCpuWrite* Current() noexcept { return current; }
+    [[nodiscard]] PreparedCpuWriteResult Outcome() const noexcept { return outcome; }
+
+    template <typename T>
+    void Store(const CpuAccessContext* caller, u64 target, const T& value) noexcept {
+        if (attempted) {
+            // A second ordinary call is not permission to replay or change an effected store.
+            outcome = PreparedCpuWriteResult::Invalid;
+            return;
+        }
+        attempted = true;
+        if (previous) {
+            outcome = PreparedCpuWriteResult::Busy;
+            return;
+        }
+        if constexpr (sizeof(T) != 1 && sizeof(T) != 2 && sizeof(T) != 4 && sizeof(T) != 8) {
+            outcome = PreparedCpuWriteResult::Invalid;
+        } else {
+            if (caller != context || sizeof(T) != size ||
+                (target & 0xffffffffffffULL) != address ||
+                std::memcmp(bytes.data(), &value, sizeof(T)) != 0) {
+                outcome = PreparedCpuWriteResult::Invalid;
+                return;
+            }
+            outcome = page.TryStoreCached(caller, target, value, write);
+        }
+    }
+
+private:
+    inline static thread_local ScopedCpuWrite* current{};
+    ScopedCpuWrite* previous;
+    const PreparedCpuPage& page;
+    Common::PhysicalRegistrationBundle::CachedWrite& write;
+    const CpuAccessContext* context;
+    u64 address;
+    size_t size;
+    std::array<u8, 8> bytes{};
+    bool attempted{};
+    PreparedCpuWriteResult outcome{PreparedCpuWriteResult::NeedSlow};
 };
 
 } // namespace Core::Memory

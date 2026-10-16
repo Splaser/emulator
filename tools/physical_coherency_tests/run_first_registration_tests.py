@@ -70,20 +70,50 @@ def method(path, marker, closing='\n    }'):
 tree = ast.parse(read('tools/physical_coherency_tests/run_cpu_mapping_tests.py'))
 head = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
             and any(isinstance(t, ast.Name) and t.id == 'head' for t in n.targets))
-cpu = head
+cpu = '#include <bit>\n#include "common/swap.h"\n#define LOG_ERROR(...) ((void)0)\n#define CITRON_PROFILE_MEM_SCOPE(...) ((void)0)\n' + head.replace(
+    'using Core::Memory::PreparedCpuPage;', 'using Core::Memory::PreparedCpuPage;\nusing Core::Memory::ScopedCpuWrite;')
+cpu += r'''
+    size_t legacy_pointer_lookups=0,legacy_callbacks=0;
+    template<class Unmapped,class Cached> u8* GetPointerImpl(u64 address,Unmapped,Cached cached) {
+        if(Core::Memory::ScopedCpuWrite::Current()) {
+            std::cerr<<"bound ordinary Write bypassed its transaction\n";std::exit(88);
+        }
+        ++legacy_pointer_lookups;
+        const auto mapping=current_page_table->SnapshotMapping(address&~u64{4095});assert(mapping);
+        if(mapping->type==Common::PageType::RasterizerCachedMemory) cached();
+        return system.device.buffer.BackingBasePointer()+mapping->physical_page-DramMemoryMap::Base+(address&4095);
+    }
+    void HandleRasterizerWrite(u64,u64) {++legacy_callbacks;}
+'''
 for marker in ['    void SetCurrentPageTable(',
                '    std::optional<PreparedCpuPage> PrepareControlledCpuPage(',
                '    void MapPages(',
                '    template <typename T>\n    inline PreparedCpuWriteResult Write(',
-               '    template <typename T>\n    inline PreparedCpuWriteResult\n    WriteCached(']:
+               '    template <typename T>\n    inline PreparedCpuWriteResult\n    WriteCached(',
+               '    template <typename T>\n    [[nodiscard]] bool TryBoundCpuWrite(',
+               '    template <typename T>\n    inline void Write(']:
     cpu += method('src/core/memory.cpp', marker) + '\n'
 cpu += '};\n'
+cpu += '''
+namespace Core::Memory {
+struct Memory {
+    Cpu* impl;
+'''
+for bits in [8, 16, 32, 64]:
+    cpu += f'    void Write{bits}(Common::ProcessAddress,u{bits});\n'
+    cpu += f'    PreparedCpuWriteResult WriteOrdinaryControlled{bits}(const PreparedCpuPage&,Common::PhysicalRegistrationBundle::CachedWrite&,Common::ProcessAddress,u{bits});\n'
+cpu += '};\n'
+for bits in [8, 16, 32, 64]:
+    cpu += method('src/core/memory.cpp', f'void Memory::Write{bits}(', closing='\n}') + '\n'
+    cpu += method('src/core/memory.cpp', f'PreparedCpuWriteResult Memory::WriteOrdinaryControlled{bits}(', closing='\n}') + '\n'
+cpu += '}\n'
 legacy = r'''
 #include <bit>
 #define LOG_ERROR(...) ((void)0)
 #define CITRON_PROFILE_MEM_SCOPE(...) ((void)0)
 struct LegacyCpu {
     Cpu& cpu;
+    template<class T> bool TryBoundCpuWrite(Common::ProcessAddress,const T&) {return false;} // Binding disabled for the defect control.
     template<class Unmapped,class Cached> u8* GetPointerImpl(u64 address,Unmapped,Cached cached) {
         // Resolver collaborator: retain the initially uncached target, then pause immediately
         // before the actual ordinary Memory::Write memcpy. It holds no prepared execution guard.

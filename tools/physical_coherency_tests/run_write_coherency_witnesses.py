@@ -61,6 +61,7 @@ template<class T> bool AtomicCompareAndSwap(T* p,T data,T expected) {
 }
 u64 GetInteger(u64 v) { return v; }
 struct ControlledStore {
+    template<class T> bool TryBoundCpuWrite(u64,const T&) {return false;} // Explicit binding remains disabled here.
     std::function<u8*(u64)> pointer;
     std::function<void(u64,u64)> notify;
     std::function<void()> before_store=[] {};

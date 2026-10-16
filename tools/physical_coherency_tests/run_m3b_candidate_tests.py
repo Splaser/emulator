@@ -93,6 +93,7 @@ struct CandidateValues {CandidateFlag use_reactive_flushing;} values;
 // This is a PINNED IMMUTABLE ACCESS VIEW adapter, not the live process table.
 // GetPointerImpl and the actual stores below are production function bodies.
 struct CpuMemory {
+    template<class T> bool TryBoundCpuWrite(u64,const T&) {return false;} // Candidate has no ordinary binding.
     std::shared_ptr<M3BCandidate::Allocation> storage;
     Common::PageTable table;Common::PageTable* current_page_table=&table;
     struct System {bool IsShuttingDown() const {return false;}} system;

@@ -174,6 +174,14 @@ result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout
 if result.returncode != 87 or 'transaction omitted real tracker publication' not in result.stderr:
     raise RuntimeError(f'Missing transaction publication control failed incorrectly: {result.returncode} {result.stderr}')
 print('PASS negative control: transaction must publish each physical device alias after store (87)')
+hook = 'if (TryBoundCpuWrite(vaddr, data)) [[unlikely]] return;'
+assert source.count(hook) == 2  # Actual ordinary CPU body plus disabled-handshake legacy witness.
+control.write_text(source.replace(hook, '/* deliberately bypass bound ordinary routing */', 1))
+subprocess.run(cmd + [str(control), '-o', str(exe)], check=True)
+result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout=60)
+if result.returncode != 88 or 'bound ordinary Write bypassed its transaction' not in result.stderr:
+    raise RuntimeError(f'Ordinary routing bypass control failed incorrectly: {result.returncode} {result.stderr}')
+print('PASS negative control: bypassing the actual ordinary Write transaction branch fails (88)')
 inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
                'src/video_core/buffer_cache/controlled_transfer.h', 'src/video_core/physical_access_plan.h',
                'src/video_core/renderer_vulkan/vk_buffer_payload.h'])
@@ -182,7 +190,8 @@ inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled
     'real': ['cold device physical plan and HostMemory pins', 'actual BufferCache controlled registration/refresh/poll and Register',
              'actual controlled Vulkan upload/readback and cache buffer pin ownership',
              'actual Scheduler checked submit/poll and MasterSemaphore timeline submission/poll bodies',
-             'actual CPU stores and MemoryTrackerBase/WordManager'],
+             'actual ordinary Memory::Write8/16/32/64, scoped ordinary binding and CPU stores',
+             'actual MemoryTrackerBase/WordManager'],
     'fixtures': ['device mapping snapshot and CPU cached-tag fanout', 'Vulkan dispatch, allocation and command/device execution',
                  'cache binding teardown and usage stamping'],
     'acceptance': 'Neither this fixture suite nor native compilation closes ordinary-game F2',

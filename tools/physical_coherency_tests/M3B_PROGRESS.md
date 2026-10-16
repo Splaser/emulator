@@ -1,5 +1,59 @@
 # M3B production integration progress
 
+## Ordinary scalar body binding: 2026-10-16 — automatic producer enrollment pending
+
+Native [38835727709](https://github.com/Splaser/emulator/actions/runs/38835727709) passed Android
+production-library compilation and the full Linux production/unit/coherency/lifecycle jobs at
+`17f1e65977fb8a4573afb0aa87b24e903792bdde`. That validates the preceding preservation slice,
+not device execution or the new continuation below.
+
+The typed Vulkan transaction commits now call `Memory::WriteOrdinaryControlled8/16/32/64`.
+Each installs a synchronous, thread-local, one-attempt binding and invokes the **real ordinary
+public Write8/16/32/64**, including their existing little-endian conversion. The actual ordinary
+`Memory::Impl::Write` checks the binding before any legacy pointer resolution or rasterizer
+callback. The binding qualifies the Memory context, normalized VA, width and owned scalar bytes,
+then uses the admitted physical store. Its explicit result returns to BufferCache, which still
+owns preservation, admission and every post-store alias publication. Stored is not reported
+until that complete outer transaction succeeds.
+
+Every bound refusal returns through the ordinary branch without legacy fallback. The scope
+does not survive a wait or callback; it owns expected scalar bytes and borrows owners which the
+outer transaction retains. It cannot be copied/moved or accidentally bind another CPU thread.
+Nested bindings refuse Busy without hiding the earlier scope; wrong context/VA/width/value,
+cross-page/unsupported-width, stale mapping and busy mapping guards refuse. A second ordinary
+call in one scope refuses rather than replaying a store. Scope teardown restores its predecessor.
+
+The pipeline extraction now includes actual public ordinary Write wrappers and bound wrappers,
+as well as the ordinary Impl body and real scoped binding. All four scalar widths run through
+GPU work -> checked preservation -> ordinary Write -> real tracker publication -> checked refresh.
+Backing/cache retain 99 around the exact 77 store bytes; physical publication is checked byte by
+byte. The prior two 77 registration orderings and controls remain. Bypassing the ordinary routing
+branch must fail explicitly with 88 instead of letting the fixture resolver silently write.
+The fixture also checks refusals, cross-thread isolation, nested scope restoration and duplicate
+attempts. Actual driver/device work and full producer exclusion remain outside its evidence.
+
+Windows validation passed: first-registration and registration-pipeline suites each with
+`--repeat 10`, all existing negative controls and new ordinary-routing control 88. The pipeline
+executes all four widths per repetition. Candidate admission passed 24 cases x 3 with ordinary
+binding deliberately inactive. The insertion audit reproduced its three rejected baselines
+with `--repeat 3`. The unchanged original F2 `--require-fixed` run failed as required with
+`expected=77 observed=10 backing=77`; its unmap/preservation prerequisites passed. Native
+Android/Linux validation for this new source must use a new exact-source workflow run.
+
+**Automatic ordinary CPU producer enrollment is still pending.** This is a real ordinary-body
+integration on the existing isolated GPU-owner continuation, not a new CPU-to-GPU dispatcher.
+No game CPU thread automatically creates a registration or waits for preservation. The legacy
+HandleRasterizerWrite sys-core lock and command-queue dependencies cannot enclose that wait.
+Unbound ordinary writes retain their legacy behavior (plus the inactive binding check), and the
+disabled-binding original F2 witness must still report backing77/cache10. Candidate/insertion
+witness collaborators explicitly keep binding inactive; they do not establish the new route.
+
+Next: prepare immutable ordinary CPU write requests before effects, connect caller suspension/
+completion ownership without retaining sys-core/PTE/cache guards or blocking required producers,
+and enforce GPU/GC/download/mapping/unknown-producer exclusion before automatic activation.
+Trusted Unknown recovery and exact-source real-device evidence remain necessary. F2 is **Open**.
+No local Android build, DMA, Texture Cache or NCE expansion is included.
+
 ## Write-transaction ownership and GPU preservation slice: 2026-10-16 — F2 Open
 
 Resumed from `89665bef71`, fast-forwarding the clean home checkout from `8ca6197c67`.

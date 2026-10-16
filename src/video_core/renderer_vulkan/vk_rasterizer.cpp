@@ -1077,7 +1077,7 @@ Core::Memory::PreparedCpuWriteResult RasterizerVulkan::CommitControlledCpuWrite8
     const ControlledCpuWritePtr& transaction, Core::Memory::Memory& memory, u8 value) {
     return buffer_cache.CommitControlledCpuTransaction(transaction, sizeof(value),
         [&](const auto& view, auto& write, u64 address) {
-            return memory.WritePreparedCached8(view, write, Common::ProcessAddress{address}, value);
+            return memory.WriteOrdinaryControlled8(view, write, Common::ProcessAddress{address}, value);
         });
 }
 
@@ -1085,7 +1085,7 @@ Core::Memory::PreparedCpuWriteResult RasterizerVulkan::CommitControlledCpuWrite1
     const ControlledCpuWritePtr& transaction, Core::Memory::Memory& memory, u16 value) {
     return buffer_cache.CommitControlledCpuTransaction(transaction, sizeof(value),
         [&](const auto& view, auto& write, u64 address) {
-            return memory.WritePreparedCached16(view, write, Common::ProcessAddress{address}, value);
+            return memory.WriteOrdinaryControlled16(view, write, Common::ProcessAddress{address}, value);
         });
 }
 
@@ -1093,7 +1093,7 @@ Core::Memory::PreparedCpuWriteResult RasterizerVulkan::CommitControlledCpuWrite3
     const ControlledCpuWritePtr& transaction, Core::Memory::Memory& memory, u32 value) {
     return buffer_cache.CommitControlledCpuTransaction(transaction, sizeof(value),
         [&](const auto& view, auto& write, u64 address) {
-            return memory.WritePreparedCached32(view, write, Common::ProcessAddress{address}, value);
+            return memory.WriteOrdinaryControlled32(view, write, Common::ProcessAddress{address}, value);
         });
 }
 
@@ -1101,7 +1101,7 @@ Core::Memory::PreparedCpuWriteResult RasterizerVulkan::CommitControlledCpuWrite6
     const ControlledCpuWritePtr& transaction, Core::Memory::Memory& memory, u64 value) {
     return buffer_cache.CommitControlledCpuTransaction(transaction, sizeof(value),
         [&](const auto& view, auto& write, u64 address) {
-            return memory.WritePreparedCached64(view, write, Common::ProcessAddress{address}, value);
+            return memory.WriteOrdinaryControlled64(view, write, Common::ProcessAddress{address}, value);
         });
 }
 

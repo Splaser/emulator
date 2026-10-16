@@ -1,6 +1,21 @@
 # PR #375 / #380 integration roadmap
 
-## Current continuation: 2026-10-16 — transaction boundary implemented, ordinary caller pending
+## Current continuation: 2026-10-16 — ordinary body bound, automatic enrollment pending
+
+Native [38835727709](https://github.com/Splaser/emulator/actions/runs/38835727709) passed both
+jobs and all configured regressions at `17f1e65977`. The continuation now makes typed transaction
+commits invoke the actual ordinary Memory::Write8/16/32/64 through a single-attempt thread-local
+binding. Context/VA/width/value qualification and every refusal precede legacy pointer lookup;
+the enclosing cache transaction still owns preservation and post-store tracker publication.
+See the [current progress entry](../tools/physical_coherency_tests/M3B_PROGRESS.md).
+
+This installs an ordinary-body participant on the explicit isolated GPU-owner continuation.
+It does **not** automatically enroll game CPU callers, create registrations for them or add a
+CPU-to-GPU wait. Caller suspension, full producer exclusion, recovery and device evidence remain
+open. Unbound ordinary writes and their backing77/cache10 defect control remain unchanged in
+behavior. F2 stays Open; the next-stage gates below are not satisfied by this binding alone.
+
+### Earlier continuation: transaction boundary implemented, ordinary caller pending
 
 The home checkout has resumed from `89665bef71`. The first slice of the next stage below adds
 an owned cache-side scalar write transaction, checked Vulkan GPU-dirty preservation, exact

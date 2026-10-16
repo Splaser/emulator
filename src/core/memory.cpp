@@ -781,8 +781,18 @@ struct Memory::Impl {
     }
 
     template <typename T>
+    [[nodiscard]] bool TryBoundCpuWrite(Common::ProcessAddress vaddr, const T& data) noexcept {
+        if (auto* transaction = ScopedCpuWrite::Current()) [[unlikely]] {
+            transaction->Store(controlled_context.state.get(), GetInteger(vaddr), data);
+            return true; // Includes every refusal: never continue into legacy pointer lookup.
+        }
+        return false;
+    }
+
+    template <typename T>
     inline void Write(Common::ProcessAddress vaddr, const T data) noexcept requires(std::is_trivially_copyable_v<T>) {
         CITRON_PROFILE_MEM_SCOPE("Memory::Write");
+        if (TryBoundCpuWrite(vaddr, data)) [[unlikely]] return;
         auto const addr_c1 = GetInteger(vaddr);
         if constexpr (sizeof(T) <= 1) {
             if (auto const ptr_c1 = GetPointerImpl(addr_c1, [addr_c1] {
@@ -1133,6 +1143,38 @@ Memory::WritePreparedCached64(const PreparedCpuPage& page,
                               Common::PhysicalRegistrationBundle::CachedWrite& write,
                               Common::ProcessAddress addr, u64 data) {
     return impl->WriteCached<u64_le>(page, write, addr, data);
+}
+
+PreparedCpuWriteResult Memory::WriteOrdinaryControlled8(
+    const PreparedCpuPage& page, Common::PhysicalRegistrationBundle::CachedWrite& write,
+    Common::ProcessAddress addr, u8 data) {
+    ScopedCpuWrite transaction{page, write, impl->controlled_context.state.get(), GetInteger(addr), data};
+    Write8(addr, data);
+    return transaction.Outcome();
+}
+
+PreparedCpuWriteResult Memory::WriteOrdinaryControlled16(
+    const PreparedCpuPage& page, Common::PhysicalRegistrationBundle::CachedWrite& write,
+    Common::ProcessAddress addr, u16 data) {
+    ScopedCpuWrite transaction{page, write, impl->controlled_context.state.get(), GetInteger(addr), u16_le{data}};
+    Write16(addr, data);
+    return transaction.Outcome();
+}
+
+PreparedCpuWriteResult Memory::WriteOrdinaryControlled32(
+    const PreparedCpuPage& page, Common::PhysicalRegistrationBundle::CachedWrite& write,
+    Common::ProcessAddress addr, u32 data) {
+    ScopedCpuWrite transaction{page, write, impl->controlled_context.state.get(), GetInteger(addr), u32_le{data}};
+    Write32(addr, data);
+    return transaction.Outcome();
+}
+
+PreparedCpuWriteResult Memory::WriteOrdinaryControlled64(
+    const PreparedCpuPage& page, Common::PhysicalRegistrationBundle::CachedWrite& write,
+    Common::ProcessAddress addr, u64 data) {
+    ScopedCpuWrite transaction{page, write, impl->controlled_context.state.get(), GetInteger(addr), u64_le{data}};
+    Write64(addr, data);
+    return transaction.Outcome();
 }
 
 bool Memory::WriteExclusive8(Common::ProcessAddress addr, u8 data, u8 expected) {

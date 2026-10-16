@@ -1,5 +1,13 @@
 # M3B - Controlled First Registration Integration
 
+Latest continuation: native CI [38835727709](https://github.com/Splaser/emulator/actions/runs/38835727709)
+passed at `17f1e65977`. Typed cache transactions now invoke actual ordinary Memory Write8/16/32/64
+through a one-attempt thread-local binding, with explicit refusal and no legacy fallback. This
+connects the ordinary store body on the isolated GPU-owner continuation, not automatic CPU caller
+admission/dispatch. Caller suspension, complete producer exclusion, trusted recovery and device
+evidence are still required; unbound F2 remains backing77/cache10. See
+[current progress](../tools/physical_coherency_tests/M3B_PROGRESS.md). **F2 remains Open.**
+
 Continuation 2026-10-16 (Asia/Singapore): the cache-owner write transaction now has a separate
 checked Vulkan GPU preservation readback and holds admission through actual store/all-alias
 publication. Actual upload tracker consumption excludes active/Unknown transactions. See the

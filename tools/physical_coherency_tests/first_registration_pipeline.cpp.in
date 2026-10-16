@@ -327,7 +327,7 @@ void registration_first() {
     assert(s->cached(op,off)==77 && !s->cache->memory_tracker.IsRegionCpuModified(A,C));
     assert(s->gpu.submissions==2);
 }
-void production_write_transaction() {
+void production_write_transaction(u64 width) {
     auto s=std::make_unique<Scenario>();constexpr u64 off=4096+7;
     auto op=s->cache->BeginControlledFirstRegistration(A+off,1,s->views);assert(op);
     assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
@@ -341,7 +341,7 @@ void production_write_transaction() {
     s->cache->memory_tracker.MarkRegionAsGpuModified(A,C);
     s->cache->memory_tracker.ForEachUploadRange(ALIAS,C,[](u64,u64) {});
     auto view=s->cpu.PrepareControlledCpuPage(4096+4096);assert(view);
-    auto tx=s->cache->BeginControlledCpuWrite(op,*view,4096+off,1);assert(tx);
+    auto tx=s->cache->BeginControlledCpuWrite(op,*view,4096+off,width);assert(tx);
     using Tx=Cache::ControlledCpuWrite::Phase;
     assert(s->cache->PollControlledCpuWrite(tx)==Tx::Submitted);
     assert(s->cache->PollControlledRegistration(op)==Phase::Writing);
@@ -367,22 +367,36 @@ void production_write_transaction() {
     const std::array access{Common::PhysicalRangeAdmission::Access{4096,4096,Common::PhysicalRangeAdmission::Mode::Read}};
     auto reader=domain->Enqueue(access,std::make_shared<int>(1));assert(reader);
     assert(domain->TryStart(reader)==Common::PhysicalRangeAdmission::Start::Park);
-    assert(s->cache->CommitControlledCpuTransaction(tx,2,[&](const auto&,auto&,u64) {
+    assert(s->cache->CommitControlledCpuTransaction(tx,width==1?2:1,[&](const auto&,auto&,u64) {
         assert(false);return Result::Stored;
     })==Result::Invalid);
+    Core::Memory::Memory memory{&s->cpu};
     bool stored=false;
-    assert(s->cache->CommitControlledCpuTransaction(tx,1,[&](const auto& target,auto& write,u64 address) {
+    assert(s->cache->CommitControlledCpuTransaction(tx,width,[&](const auto& target,auto& write,u64 address) {
         expect_upload_blocked();
-        auto result=s->cpu.WriteCached<u8>(target,write,address,77);stored=result==Result::Stored;
+        Result result=Result::Invalid;
+        switch(width) {
+        case 1: result=memory.WriteOrdinaryControlled8(target,write,address,77);break;
+        case 2: result=memory.WriteOrdinaryControlled16(target,write,address,0x4d4d);break;
+        case 4: result=memory.WriteOrdinaryControlled32(target,write,address,0x4d4d4d4d);break;
+        case 8: result=memory.WriteOrdinaryControlled64(target,write,address,0x4d4d4d4d4d4d4d4d);break;
+        }
+        stored=result==Result::Stored;
+        assert(!Core::Memory::ScopedCpuWrite::Current());
+        assert(s->cpu.legacy_pointer_lookups==0 && s->cpu.legacy_callbacks==0);
         assert(s->cache->memory_tracker.IsRegionGpuModified(A,C));
         expect_upload_blocked(); // Actual store happened, real tracker publication has not.
         assert(domain->TryStart(reader)==Common::PhysicalRangeAdmission::Start::Park);
         return result;
     })==Result::Stored && stored);
-    if(s->backing(off-1)!=99 || s->backing(off)!=77 || s->backing(off+1)!=99) {
+    bool store_exact=true;
+    for(u64 i=0;i<width;++i) store_exact &= s->backing(off+i)==77;
+    if(s->backing(off-1)!=99 || !store_exact || s->backing(off+width)!=99) {
         std::cerr<<"GPU dirty complement lost before CPU store\n";std::exit(85);
     }
     assert(tx->State()==Tx::Committed);
+    const auto publication=view->physical.Published();assert(publication);
+    for(u64 i=0;i<4096;++i) assert(publication->Contains(i)==(i>=7 && i<7+width));
     assert(!s->cache->memory_tracker.IsRegionGpuModified(A,C));
     if(!s->cache->memory_tracker.IsRegionCpuModified(A+off,1) ||
        !s->cache->memory_tracker.IsRegionCpuModified(ALIAS+off,1)) {
@@ -392,8 +406,47 @@ void production_write_transaction() {
     assert(domain->Complete(reader));
     assert(s->cache->BeginControlledRefresh(op));
     assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
-    assert(s->cached(op,off-1)==99 && s->cached(op,off)==77 && s->cached(op,off+1)==99);
+    assert(s->cached(op,off-1)==99 && s->cached(op,off)==77 && s->cached(op,off+width)==99);
     assert(!s->cache->memory_tracker.IsRegionCpuModified(A,C));
+}
+
+void ordinary_binding_refusals() {
+    using Binding=Core::Memory::ScopedCpuWrite;
+    auto s=std::make_unique<Scenario>();
+    auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
+    assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
+    auto view=s->cpu.PrepareControlledCpuPage(4096);assert(view);
+    auto write=op->BeginCachedWrite();assert(write);
+    assert(write->TryStart()==Common::PhysicalRangeAdmission::Start::Granted);
+    Core::Memory::Memory memory{&s->cpu};
+    const auto attempt=[&](auto action) {
+        Binding binding{*view,*write,s->cpu.controlled_context.state.get(),4103,u8{77}};
+        action();return binding.Outcome();
+    };
+    assert(attempt([&]{memory.Write8(4104,77);})==Result::Invalid);
+    assert(attempt([&]{memory.Write16(4103,77);})==Result::Invalid);
+    assert(attempt([&]{memory.Write8(4103,78);})==Result::Invalid);
+    assert(attempt([&]{s->cpu.Write<u128>(4103,u128{});})==Result::Invalid);
+    Cpu other{s->system,&s->table};Core::Memory::Memory wrong_memory{&other};
+    assert(attempt([&]{wrong_memory.Write8(4103,77);})==Result::Invalid);
+    assert(other.legacy_pointer_lookups==0 && s->backing(7)==10 && s->backing(8)==10);
+    {const auto mutation=s->table.MutateMappings();
+     assert(attempt([&]{memory.Write8(4103,77);})==Result::Busy);}
+    assert(attempt([&]{memory.Write8(4103,77);})==Result::Stale);
+    auto current=s->cpu.PrepareControlledCpuPage(4096);assert(current);
+    assert(memory.WriteOrdinaryControlled16(*current,*write,8191,0x4d4d)==Result::Invalid);
+    {Binding outer{*current,*write,s->cpu.controlled_context.state.get(),4103,u8{77}};
+     {Binding inner{*current,*write,s->cpu.controlled_context.state.get(),4103,u8{77}};
+      memory.Write8(4103,77);assert(inner.Outcome()==Result::Busy && s->backing(7)==10);}
+     assert(Binding::Current()==&outer);
+     std::thread independent([] {assert(!Binding::Current());});independent.join();
+     memory.Write8(Common::ProcessAddress{0xabcd000000001007ULL},77);
+     assert(outer.Outcome()==Result::Stored && s->backing(7)==77);
+     memory.Write8(4103,77);assert(outer.Outcome()==Result::Invalid);}
+    assert(!Binding::Current() && s->cpu.legacy_pointer_lookups==0 && s->cpu.legacy_callbacks==0);
+    s->cache->memory_tracker.MarkRegionAsCpuModified(A+7,1);
+    s->cache->memory_tracker.MarkRegionAsCpuModified(ALIAS+7,1);
+    assert(write->CompleteAfterTrackerPublication());
 }
 
 void transaction_faults() {
@@ -420,7 +473,8 @@ void transaction_faults() {
             assert(s->cache->memory_tracker.IsRegionGpuModified(A,C));
             bool caught=false;
             try { (void)s->cache->CommitControlledCpuTransaction(tx,1,[&](const auto& target,auto& write,u64 address)->Result {
-                assert(s->cpu.WriteCached<u8>(target,write,address,77)==Result::Stored);
+                Core::Memory::Memory memory{&s->cpu};
+                assert(memory.WriteOrdinaryControlled8(target,write,address,77)==Result::Stored);
                 throw std::runtime_error("store effected, publication interrupted");
             }); } catch(const std::runtime_error&) {caught=true;}
             assert(caught && tx->State()==Tx::Unknown && s->backing(7)==77);
@@ -524,7 +578,10 @@ int main(int argc,char** argv) {
         assert(!aliases.GatherValuesBounded(0,values,count));
     }
     const int repeats=argc>1?std::atoi(argv[1]):1;
-    for(int i=0;i<repeats;++i) {writer_first(1);writer_first(15);registration_first();production_write_transaction();}
-    faults();transaction_faults();
+    for(int i=0;i<repeats;++i) {
+        writer_first(1);writer_first(15);registration_first();
+        for(u64 width: {1,2,4,8}) production_write_transaction(width);
+    }
+    faults();transaction_faults();ordinary_binding_refusals();
     std::cout<<"PASS actual cache pipeline: both 77 registration orderings, GPU dirty complement [99,77,99], transaction upload exclusion, post-store real tracker publication, delayed checked native completion and failure/drop quarantine; repeat="<<repeats<<" (Vulkan dispatch/device execution remain fixtures)\n";
 }

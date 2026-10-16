@@ -182,6 +182,7 @@ struct Flag {bool GetValue() const {return false;}};
 struct Values {Flag use_reactive_flushing;} values;
 }
 struct CpuAccess {
+    template<class T> bool TryBoundCpuWrite(u64,const T&) {return false;} // Old-code witness remains unbound.
     Common::PageTable table;Common::PageTable* current_page_table=&table;
     struct System {bool IsShuttingDown() const {return false;}} system;
     struct Buffer {int protects=0;void Protect(u64,u64,Common::MemoryPermission) {++protects;}} host;
