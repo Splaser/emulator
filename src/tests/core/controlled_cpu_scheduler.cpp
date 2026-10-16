@@ -859,6 +859,15 @@ TEST_CASE("Admitted staged alias adapter copies exact physical dirty intersectio
 
     (void)read(A + Page);
     on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, C, Page, 0x42424242); });
+    auto rewritten_source = begin(C, A + Page);
+    REQUIRE(rewritten_source);
+    // Repeating exactly the dirty interval preserves its RangeSet geometry. The
+    // original adapter accepts this different write despite its prepared snapshot.
+    on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, C, Page, 0x37373737); });
+    finish(rewritten_source, Phase::Complete);
+    REQUIRE(read(A + Page) == std::vector<u8>(Page, 55));
+    std::cout << "REPRODUCED alias write-intent ABA: identical dirty geometry accepted a new source write\n";
+    on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, C, Page, 0x42424242); });
     auto full = begin(C, A + Page);
     REQUIRE(full);
     finish(full, Phase::Complete);
