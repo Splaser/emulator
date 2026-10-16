@@ -15,6 +15,7 @@
 #include "common/alignment.h"
 #include "common/range_sets.inc"
 #include "video_core/buffer_cache/buffer_cache_base.h"
+#include "video_core/buffer_cache/controlled_conflict.h"
 #include "video_core/cache_memory_pressure.h"
 #include "video_core/guest_memory.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
@@ -3017,7 +3018,7 @@ void BufferCache<P>::CheckControlledSynchronization(DAddr device_addr, u64 size)
                 }
             });
         if (!qualified || overlaps)
-            throw std::runtime_error("controlled CPU write excludes buffer synchronization");
+            throw ControlledProducerConflict("controlled CPU write excludes legacy buffer access");
     }
 }
 

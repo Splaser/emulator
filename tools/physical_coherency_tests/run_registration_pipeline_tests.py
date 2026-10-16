@@ -270,6 +270,7 @@ if result.returncode != 95 or 'readback conflict accepted before producer retire
     raise RuntimeError(f'Readback isolation control failed incorrectly: {result.returncode} {result.stderr}')
 print('PASS negative isolation control: pending physical-alias readback must reject before acceptance (95)')
 inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
+               'src/video_core/buffer_cache/controlled_conflict.h', 'src/common/range_sets.inc',
                'src/video_core/gpu_thread.cpp','src/video_core/gpu_thread.h',
                'src/core/hle/kernel/k_process.cpp','src/core/memory.h',
                'src/video_core/buffer_cache/controlled_transfer.h', 'src/video_core/physical_access_plan.h',

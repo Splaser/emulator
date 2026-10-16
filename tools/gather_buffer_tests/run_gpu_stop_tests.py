@@ -29,6 +29,7 @@ head = r'''
 #include <variant>
 #include <vector>
 #include "video_core/buffer_cache/gather_alias.h"
+#include "video_core/buffer_cache/controlled_conflict.h"
 #define LOG_ERROR(...) ((void)0)
 #define CITRON_PROFILE_SCOPE(...) ((void)0)
 #define VK_ERROR_OUT_OF_DEVICE_MEMORY -2
@@ -82,6 +83,7 @@ struct SynchState {
 '''
 tail = r'''
 int main() {
+ for(unsigned mode=0;mode<2;++mode) {
  std::stop_source stop;
  Core::System system; VideoCore::RendererBase renderer;
  Core::Frontend::GraphicsContext context; Tegra::Control::Scheduler scheduler;
@@ -89,6 +91,7 @@ int main() {
  int before=0, affected=0, after=0;
  state.queue.entries.push_back({ExecuteCallbackCommand{[&] { ++before; }},1});
  state.queue.entries.push_back({ExecuteCallbackCommand{[&] {
+  if(mode==1) throw VideoCommon::ControlledProducerConflict("readback isolation violation");
   VideoCommon::GatherAliasValidator v{4};
   v.Add(1000,64,4,true);
   v.Add(1000,68,4,true); // throw before affected gather/scatter/dispatch
@@ -100,7 +103,9 @@ int main() {
  assert(before==1 && affected==0 && after==0);
  assert(system.gpu.notified==1 && system.exited==1);
  assert(state.signaled_fence==4 && state.queue.pos==4);
- std::cout << "PASS unsupported physical alias: explicit shutdown, no affected/later dispatch, queued fences retired\n";
+ std::cout << (mode==0 ? "PASS unsupported physical alias" : "PASS controlled producer conflict")
+           << ": explicit shutdown, no affected/later dispatch, queued fences retired\n";
+ }
 }
 '''
 p = out / 'tests.cpp'

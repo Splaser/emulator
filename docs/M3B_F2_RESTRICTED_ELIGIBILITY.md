@@ -66,6 +66,9 @@ This continuation narrows RE-GPU for one producer family without claiming comple
   before ResolveScatter/AccumulateFlushes; retirement checks the entire front download batch
   before the first copy or bookkeeping change. These use the existing explicit exception
   rejection contract, with no synchronous GPU/CPU dependency wait or silent skipped write.
+  A dedicated ControlledProducerConflict is caught by the real GPU loop's failure path:
+  stop later dispatch, cancel/quarantine continuation captures, notify shutdown and retire
+  queued acknowledgement fences. A conflict is not an unhandled runtime exception or retry.
 - This does not qualify all GC, gather/scatter, CPU notifications, remaps, bound GPU work or
   native writes. New access outside these guarded entries remains blocked by the activation
   policy, not by a global implemented barrier. Exceptions are defensive isolation for the

@@ -8,6 +8,7 @@
 #include "common/scratch_buffer.h"
 #include "common/range_sets.inc"
 #include "video_core/buffer_cache/controlled_transfer.h"
+#include "video_core/buffer_cache/controlled_conflict.h"
 // @ALIAS_CONTAINER@
 struct Allocation { std::vector<u8> bytes; explicit Allocation(size_t size):bytes(size) {} };
 struct Driver {

@@ -51,6 +51,7 @@ head = r'''
 #include <vector>
 #include "video_core/gpu_thread.h"
 #include "video_core/buffer_cache/gather_alias.h"
+#include "video_core/buffer_cache/controlled_conflict.h"
 #define LOG_ERROR(category, format, reason) ((void)(reason))
 #define CITRON_PROFILE_SCOPE(...) ((void)0)
 #define VK_ERROR_OUT_OF_DEVICE_MEMORY -2
