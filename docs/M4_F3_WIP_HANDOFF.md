@@ -6,6 +6,21 @@ This is a continuation checkpoint, not M4 acceptance or a production F3 fix.
 
 ## Status and constraints
 
+- Write-intent follow-up `d8764c0cf0` records resource-local GPU write revisions at
+  ordinary write marking, staged DMA copy/clear and scatter destinations. The
+  isolated adapter rejects pre-submit source/target rewrites even when dirty
+  geometry is unchanged; post-submit rewrites retain Unknown and quarantine.
+  This starts producer metadata but is not submission completion, historical
+  physical provenance or latest-writer subrange authority. See the
+  [revision record](M4_F3_CONTROLLED_ALIAS_ADAPTER.md#resource-write-intent-revisions).
+  Full Linux/Android run [38907387312](https://github.com/Splaser/emulator/actions/runs/38907387312)
+  passed at that source: 88 native adapter assertions in CTest and each of three
+  extra processes, all configured integration/fault/lifecycle gates and actual
+  Android arm64 core/video/shader compilation. Original F3/F2 negative controls
+  remain unchanged. Baseline run `38906918308` separately confirms the repeated
+  source write was accepted by the old adapter. Both runs' evidence is retained
+  under `.diagnostics/ci-<run>/`; no Android/device execution is claimed.
+
 - M3B-F2 remains **Open**. Restricted eligibility remains **blocked**; see
   [eligibility blockers](M3B_F2_RESTRICTED_ELIGIBILITY.md) and
   [producer inventory](M3B_F2_PRODUCER_INVENTORY.md).

@@ -111,6 +111,58 @@ under `.diagnostics/ci-38903097142/` and `.diagnostics/ci-38903908981/`.
 No local Android build was attempted. Local Windows renderer-shutdown extraction
 passed three repetitions; that fixture result remains separate from native CI.
 
+## Resource write-intent revisions
+
+Follow-up `d8764c0cf0` adds a resource-local, saturating write-intent revision to
+the existing BufferBase owner. `MarkWrittenBuffer`, staged DMA copy/clear and
+scatter destination publication advance it without allocating or taking a new
+lock. Rewriting exactly the same dirty interval (even the same bytes) therefore
+cannot reuse a prepared snapshot merely because its RangeSet geometry matches.
+The adapter captures source and target revisions under the cache mutex alongside
+their dirty snapshots and retained physical/native associations. A change before
+submission refuses without commands; after submission it preserves Unknown and
+the original physical quarantine. A saturated revision cannot qualify again.
+
+This is deliberately resource-wide: a disjoint new write in the same allocation
+also invalidates the operation. Cache retirement/merge still requires the existing
+native-identity check; revision values from different allocations are never
+compared as a latest-writer ordering. The counter records producer intent, not
+submission identity/completion, historical physical provenance, CPU upload/content
+versions, replica authority, or mapping/frame-reuse exclusion. No new producer is
+enrolled in admission by incrementing it. External isolation remains required.
+
+The native `[f3-transfer]` case now checks a same-interval source rewrite before
+submission, an identical-byte target rewrite in a disjoint dirty complement, and
+a source rewrite after checked copy/readbacks have been queued. The last case
+keeps old copied 44 versus new source 77 and parks a dependent physical reader;
+trusted idle cannot turn it into Complete. A separate actual scatter-body fixture
+checks revision invalidation before an injected copy failure. That dispatch is
+mocked. Baseline `841047f2a3` retains the original adapter and explicitly observes
+its acceptance of a prepared source rewritten from 66 to 55 with unchanged dirty
+geometry. The earlier verified adapter source/results above remain separate.
+
+Baseline Linux run [38906918308](https://github.com/Splaser/emulator/actions/runs/38906918308)
+at `841047f2a3` passed the full configured suite. Its three additional isolated
+adapter processes each passed 72 assertions and printed the same-dirty-geometry
+rewrite reproduction. Source stamp, standalone logs, generated fixtures and full
+job output are retained under `.diagnostics/ci-38906918308/`.
+
+Follow-up run [38907387312](https://github.com/Splaser/emulator/actions/runs/38907387312)
+checks exact source `d8764c0cf0`. Linux passed all four CTest processes: 130
+ordinary cases, 1708 scheduler assertions, 38 original F3 assertions and 88
+adapter assertions. Three additional native adapter processes each passed 88
+assertions. HostMemory/import, integration/lifecycle and fault/mutation gates all
+passed, including the new actual scatter-body failure check. Original F3 still
+has exactly two fixed-mode failures, and F2 still observes backing 77/cache 10.
+Downloaded source stamps, standalone logs and generated fixtures are retained
+under `.diagnostics/ci-38907387312/`. Local Windows gather/scatter fixtures and
+the original F2 reproduction also passed; these remain separate from native CI.
+The full run completed successfully, including Android's actual arm64
+core/video/shader production libraries built remotely through CPM. This is compile
+evidence, not an APK or Android/device execution result. No local Android build
+was attempted. The final documentation follow-up changes no production/test
+sources or workflow and does not require rerunning these same validations.
+
 ## Remaining work
 
 Attach physical/content provenance at actual staged producer publication, integrate

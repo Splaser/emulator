@@ -1,5 +1,28 @@
 # M3B production integration progress
 
+## Resource write-intent revision follow-up
+
+Full Linux/Android run [38907387312](https://github.com/Splaser/emulator/actions/runs/38907387312)
+passed at `d8764c0cf0`: 88 native adapter assertions in CTest and each of three
+additional processes, all configured integration/lifecycle/fault regressions and
+actual Android arm64 production library compilation. Original F3 fixed mode still
+fails exactly its two alias checks; F2 still observes backing 77/cache 10. Baseline
+Linux run [38906918308](https://github.com/Splaser/emulator/actions/runs/38906918308)
+at `841047f2a3` independently reproduces the old adapter accepting a prepared source
+rewrite in all three extra native processes (72 assertions each). Source stamps,
+logs and generated fixtures are retained under `.diagnostics/ci-<run>/`.
+
+`d8764c0cf0` advances resource-local GPU write intent at ordinary write marking,
+staged DMA copy/clear and scatter destination publication. The isolated alias
+adapter now compares those revisions alongside native identities and physical
+geometry, rejecting repeated source/target writes before submission and retaining
+Unknown/quarantine after submission. Same dirty geometry or identical-byte writes
+cannot reuse the old intent. Resource-wide conservative invalidation is not
+latest-writer subrange ownership or checked producer submission completion.
+Historical physical provenance, CPU uploads, mapping/frame reuse and ordinary
+consumer integration remain open; F2/F3 stay Open and eligibility stays blocked.
+See the [adapter follow-up](../../docs/M4_F3_CONTROLLED_ALIAS_ADAPTER.md#resource-write-intent-revisions).
+
 ## M4 isolated admitted alias copy verified; ordinary F3 remains Open
 
 Production source `642a71fb07` passed full Linux/Android run

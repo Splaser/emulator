@@ -12,6 +12,11 @@ rejects competing current dirty aliases, and performs checked exact staged copie
 Persistent write-site provenance/latest-writer ownership and ordinary routing
 are still absent; the adapter does not close the original ordinary F3 witness.
 
+Follow-up `d8764c0cf0` starts write-site metadata with a resource-local GPU intent
+revision, rejecting same-dirty-shape rewrites between preparation and completion.
+It does not establish a queue/submission content version or physical latest-writer
+ownership. See the [revision boundary](M4_F3_CONTROLLED_ALIAS_ADAPTER.md#resource-write-intent-revisions).
+
 ## Observed defect and validation boundary
 
 At checkpoint `3a95a1e4fa`, a native Vulkan write of 99 through device address A
@@ -78,6 +83,11 @@ coordinator or replacement BufferCache.
 2. Publish exact GPU-written subranges through the existing write sites with
    queue/submission identity. A bind-time write intent is not trusted completion.
    Later consumers need queue ordering or checked completion before content use.
+   In particular, `RasterizerVulkan::Draw/DrawIndirect` can suppress a draw on the
+   scheduler worker when pipeline construction failed after binding. A revision
+   increment at binding cannot establish that a shader write was even emitted.
+   `Scheduler::CurrentTick` alone also lacks the checked submit result/owner
+   carried by `CheckedSubmission`; do not promote that tick to content authority.
 3. Under existing admitted access, intersect producer and consumer physical
    segments, then build ordered staged-copy ranges with exact source/target
    offsets. Transfer only authoritative dirty bytes; preserve target complements
