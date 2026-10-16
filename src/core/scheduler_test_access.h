@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#pragma once
+
+// Linked only by CITRON_TESTS builds. These peers select real owners/locks; they do not
+// replace scheduler, store, tracker, GPU queue, completion or process finalization bodies.
+#include <functional>
+#include <memory>
+#include <mutex>
+
+#include "core/core.h"
+#include "core/memory.h"
+#include "core/hle/kernel/k_process.h"
+#include "video_core/renderer_vulkan/vk_rasterizer.h"
+
+namespace Core {
+struct SchedulerTestAccess {
+    using RendererFactory = std::function<std::unique_ptr<VideoCore::RendererBase>(System&)>;
+    static void Initialize(System&, Frontend::EmuWindow&, RendererFactory);
+    static std::unique_lock<std::mutex> LockSysCore(Memory::Memory&);
+    static auto& Cache(Vulkan::RasterizerVulkan& rasterizer) { return rasterizer.buffer_cache; }
+    static auto& CounterGuard(Tegra::MaxwellDeviceMemoryManager& memory) {
+        return memory.counter_guard;
+    }
+    static void StartProcess(Kernel::KProcess& process) {
+        // Same running reference/state transition as Run(), with a service fiber entrypoint
+        // instead of executing an ARM application image. All termination/finalization is real.
+        process.Open();
+        process.ChangeState(Kernel::KProcess::State::Running);
+    }
+    static void FillGpu(Vulkan::RasterizerVulkan& rasterizer,
+                        const Vulkan::RasterizerVulkan::ControlledRegistrationPtr& op,
+                        DAddr address, u64 size) {
+        auto& cache = Cache(rasterizer);
+        const auto id = cache.ControlledReadyBuffer(op);
+        auto& buffer = cache.slot_buffers[id];
+        rasterizer.buffer_cache_runtime.ClearBuffer(buffer.Handle(), 0, size, 0x63636363);
+        cache.memory_tracker.MarkRegionAsGpuModified(address, size);
+        cache.gpu_modified_ranges.Add(address, size);
+    }
+    static void LegacyPublish(Vulkan::RasterizerVulkan& rasterizer, DAddr address) {
+        Cache(rasterizer).memory_tracker.MarkRegionAsCpuModified(address, 1);
+    }
+};
+} // namespace Core

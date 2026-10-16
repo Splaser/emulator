@@ -129,6 +129,20 @@ public:
         return true; // retention/resource destruction follows unlocking
     }
 
+    /// Execution-lease finalization must not wait for another metadata owner. A busy result
+    /// retains the running ticket; caller quarantines it outside the execution lease.
+    [[nodiscard]] bool TryComplete(const Ticket& request) {
+        std::shared_ptr<State> retention;
+        std::unique_lock lock{state->mutex, std::try_to_lock};
+        if (!lock.owns_lock() || !Owns(request) || request->phase != Phase::Running) return false;
+        request->phase = Phase::Done;
+        state->requests.remove(request);
+        retention = RetireIfIdle();
+        Notify();
+        lock.unlock();
+        return true;
+    }
+
     [[nodiscard]] bool Cancel(const Ticket& request) {
         std::scoped_lock lock{state->mutex};
         if (!Owns(request) || request->phase != Phase::Pending) return false;

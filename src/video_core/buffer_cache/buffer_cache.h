@@ -114,7 +114,7 @@ BufferId BufferCache<P>::ControlledReadyBuffer(const ControlledRegistrationPtr& 
 
 template <class P>
 BufferId BufferCache<P>::ControlledBufferId(const ControlledRegistrationPtr& operation,
-                                            bool require_clean) {
+                                            bool require_clean, bool nonblocking_mapping) {
     if constexpr (!requires(const Buffer& buffer) { buffer.PinStagedRepresentation(0, 1); }) {
         return NULL_BUFFER_ID;
     } else {
@@ -125,8 +125,14 @@ BufferId BufferCache<P>::ControlledBufferId(const ControlledRegistrationPtr& ope
                 controlled_registrations.end() ||
             !slot_buffers.contains(operation->id))
             return NULL_BUFFER_ID;
-        if (!operation->plan.MatchesCurrentDevice(device_memory, operation->address))
+        if (nonblocking_mapping) {
+            // The immutable plan's epoch/generation certifies the captured translations.
+            // A current stamp requires no blocking rewalk of the device page table.
+            if (!device_memory.WithControlledMapping(operation->plan.DeviceEpoch(),
+                    operation->plan.DeviceGeneration(), [](const auto&) {})) return NULL_BUFFER_ID;
+        } else if (!operation->plan.MatchesCurrentDevice(device_memory, operation->address)) {
             return NULL_BUFFER_ID;
+        }
         if (require_clean &&
             memory_tracker.IsRegionCpuModified(operation->address, operation->plan.Size()))
             return NULL_BUFFER_ID;
@@ -196,7 +202,7 @@ auto BufferCache<P>::BeginControlledCpuWrite(
     } else {
         address &= 0xffffffffffffULL;
         if (!operation || operation->phase != ControlledRegistration::Phase::Ready ||
-            ControlledBufferId(operation, false) == NULL_BUFFER_ID ||
+            ControlledBufferId(operation, false, bool(extra_owner)) == NULL_BUFFER_ID ||
             (size != 1 && size != 2 && size != 4 && size != 8) ||
             size > DEVICE_PAGESIZE - address % DEVICE_PAGESIZE ||
             (address & ~(DEVICE_PAGESIZE - 1)) != view.mapping.virtual_page ||
@@ -257,8 +263,8 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuWriteReq
     if (!transaction || !transaction->request || transaction->executing_request)
         return Result::Invalid;
     if (transaction->phase != ControlledCpuWrite::Phase::Preserved) return Result::NeedSlow;
-    // This potentially blocking legacy plan qualification precedes the Memory lifetime visit.
-    if (ControlledBufferId(transaction->operation, false) == NULL_BUFFER_ID) {
+    // The GPU owner may not wait behind a CPU device mapper, even outside the Memory visit.
+    if (ControlledBufferId(transaction->operation, false, true) == NULL_BUFFER_ID) {
         AbandonControlledCpuWrite(transaction);
         return Result::NeedSlow;
     }
@@ -269,17 +275,18 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuWriteReq
         bool& flag;
         ~Reset() { flag = false; }
     } reset{transaction->executing_request};
-    Result result = Result::NeedSlow;
-    const bool visited = transaction->request->Owner()->TryVisit([&](auto& memory) {
-        result = std::visit([&](const auto& value) {
-            return CommitControlledCpuTransaction(transaction, sizeof(value),
-                [&](const auto& view, auto& write, u64 address) {
-                    return execute(memory, view, write, address, value);
+    return std::visit([&](const auto& value) {
+        return CommitControlledCpuTransaction(transaction, sizeof(value),
+            [&](const auto& view, auto& write, u64 address) {
+                Result result = Result::NeedSlow;
+                // Only the ordinary store and its nonblocking context/PTE qualification
+                // can touch Memory. Tracker/device callbacks are outside this visit.
+                (void)transaction->request->Owner()->TryVisit([&](auto& memory) {
+                    result = execute(memory, view, write, address, value);
                 });
-        }, transaction->request->Payload());
-    });
-    if (!visited) AbandonControlledCpuWrite(transaction);
-    return result;
+                return result;
+            });
+    }, transaction->request->Payload());
 }
 
 template <class P>
@@ -317,7 +324,7 @@ auto BufferCache<P>::PollControlledCpuWrite(const ControlledCpuWritePtr& transac
             if (start == Common::PhysicalRangeAdmission::Start::Park) return tx.phase;
             if (start != Common::PhysicalRangeAdmission::Start::Granted) return unknown();
         }
-        if (ControlledBufferId(tx.operation, false) == NULL_BUFFER_ID ||
+        if (ControlledBufferId(tx.operation, false, bool(tx.request)) == NULL_BUFFER_ID ||
             tx.preservation->DestinationIdentity() != op.transfer->DestinationIdentity() ||
             !tx.view.IsCurrentForRegistration() || scatter_busy ||
             std::ranges::any_of(gather_buffers, [](const auto& item) {
@@ -362,9 +369,18 @@ auto BufferCache<P>::PollControlledCpuWrite(const ControlledCpuWritePtr& transac
                 }
                 // All destinations validated BEFORE the first copy. Only immutable owned pins
                 // are written; remapping cannot redirect preservation to another allocation.
-                for (const auto& segment : op.plan.Segments()) {
-                    const auto target = segment.storage.Bytes();
-                    std::memcpy(target.data(), bytes.data() + segment.logical_offset, target.size());
+                const auto copy = [&] {
+                    for (const auto& segment : op.plan.Segments()) {
+                        const auto target = segment.storage.Bytes();
+                        std::memcpy(target.data(), bytes.data() + segment.logical_offset, target.size());
+                    }
+                };
+                // Process finalization may return kernel pages to its allocator. Close must
+                // also exclude this bounded backing copy, not only the later scalar store.
+                if (tx.request) {
+                    qualified = tx.request->Owner()->TryVisit([&](auto&) { copy(); });
+                } else {
+                    copy();
                 }
                 // Backing now contains every GPU byte. Keep GPU dirty state AND exact download
                 // ranges until the CPU store and every alias's tracker publication succeed.
@@ -404,7 +420,12 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuTransact
                 if (result != Result::Stored) return;
                 for (const auto alias : aliases) {
                     NotifyGatherWrite(alias, tx.size);
-                    memory_tracker.MarkRegionAsCpuModified(alias, tx.size);
+                    if (tx.request) {
+                        if (!memory_tracker.MarkRegionAsCpuModifiedRetainingTracking(alias, tx.size))
+                            throw std::runtime_error("controlled tracker manager lost");
+                    } else {
+                        memory_tracker.MarkRegionAsCpuModified(alias, tx.size);
+                    }
                 }
             });
         if (!qualified) result = Result::Busy;
@@ -417,13 +438,29 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuTransact
             if (tx.request) tx.request->Publish(Core::Memory::ControlledCpuWriteRequest::Phase::Unknown);
             return result;
         }
-        ClearDownload(op.address, op.plan.Size());
-        gpu_modified_ranges.Subtract(op.address, op.plan.Size());
-        memory_tracker.UnmarkRegionAsGpuModified(op.address, op.plan.Size());
-        if (!tx.write.CompleteAfterTrackerPublication()) throw std::runtime_error("CPU write admission lost");
-        tx.phase = Phase::Committed;
-        op.phase = ControlledRegistration::Phase::Ready;
-        if (tx.request) tx.request->Publish(Core::Memory::ControlledCpuWriteRequest::Phase::Stored, result);
+        const auto finish = [&] {
+            ClearDownload(op.address, op.plan.Size());
+            gpu_modified_ranges.Subtract(op.address, op.plan.Size());
+            memory_tracker.UnmarkRegionAsGpuModified(op.address, op.plan.Size());
+            // Only local GPU-owner metadata above; GPU/PTE/range-counter callbacks are
+            // forbidden. Range admission completion below uses one try-lock attempt.
+            if (!(tx.request ? tx.write.TryCompleteAfterTrackerPublication()
+                             : tx.write.CompleteAfterTrackerPublication())) return false;
+            tx.phase = Phase::Committed;
+            op.phase = ControlledRegistration::Phase::Ready;
+            if (tx.request) tx.request->Publish(Core::Memory::ControlledCpuWriteRequest::Phase::Stored, result);
+            return true;
+        };
+        bool finished = false;
+        if (tx.request) {
+            (void)tx.request->Owner()->TryVisit([&](auto&) { finished = finish(); });
+        } else {
+            finished = finish();
+        }
+        if (!finished) {
+            AbandonControlledCpuWrite(transaction); // potentially contended metadata, OUTSIDE lease
+            return Result::NeedSlow;
+        }
         return result;
     } catch (...) {
         (void)tx.write.MarkUnknown();

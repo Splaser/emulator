@@ -238,7 +238,7 @@ public:
     typename ControlledRegistration::Phase PollControlledRegistration(const ControlledRegistrationPtr&);
     bool BeginControlledRefresh(const ControlledRegistrationPtr&);
     BufferId ControlledReadyBuffer(const ControlledRegistrationPtr&);
-    BufferId ControlledBufferId(const ControlledRegistrationPtr&,bool);
+    BufferId ControlledBufferId(const ControlledRegistrationPtr&,bool,bool=false);
     template<class Store> Result CommitControlledCpuWrite(Common::PhysicalRegistrationBundle::CachedWrite&,std::span<const DAddr>,u64,Store&&);
     template<class Store> Result CommitControlledCachedWrite(const ControlledRegistrationPtr&,
         const Core::Memory::PreparedCpuPage&,Common::PhysicalRegistrationBundle::CachedWrite&,u64,u64,Store&&);

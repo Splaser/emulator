@@ -143,6 +143,11 @@ public:
             active = false;
             return true;
         }
+        [[nodiscard]] bool TryCompleteAfterTrackerPublication() {
+            if (!active || !domain->TryComplete(ticket)) return false;
+            active = false;
+            return true;
+        }
         [[nodiscard]] bool MarkUnknown() {
             if (!active || !domain->MarkUnknown(ticket)) return false;
             active = false;

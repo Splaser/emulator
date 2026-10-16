@@ -61,11 +61,16 @@ jobs:
           pacman-key --populate archlinux
           pacman -Syu --needed --noconfirm git cmake ninja gcc python pkgconf \
             boost boost-libs fmt nlohmann-json lz4 zstd zlib openssl opus ffmpeg \
-            enet sdl2 alsa-lib catch2 autoconf automake libtool
+            enet sdl2 alsa-lib catch2 autoconf automake libtool vulkan-swrast vulkan-icd-loader ccache
       - uses: actions/checkout@v4
         with:
           submodules: recursive
           persist-credentials: false
+      - uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: m3b-native-ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: m3b-native-ccache-${{ runner.os }}-
       - name: Record exact build inputs
         run: |
           # checkout and container shell use different HOME/ownership contexts.
@@ -79,12 +84,22 @@ jobs:
         run: |
           cmake -S . -B build-integration -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCITRON_USE_CPM=OFF -DCITRON_USE_BUNDLED_VCPKG=OFF \
             -DENABLE_QT=OFF -DENABLE_SDL2=ON -DCITRON_USE_EXTERNAL_SDL2=OFF \
             -DENABLE_CUBEB=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_LIBUSB=OFF \
             -DCITRON_ROOM=OFF -DCITRON_TESTS=ON -DCITRON_CRASH_DUMPS=OFF
       - name: Build CLI, shader tool and unit tests
-        run: cmake --build build-integration --target citron-cmd shader_tool tests --parallel 3 -- -k 0
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_COMPILERCHECK: content
+          CCACHE_MAXSIZE: 2G
+        run: cmake --build build-integration --target citron-cmd shader_tool tests controlled_cpu_scheduler_tests --parallel 3 -- -k 0
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .ccache
+          key: m3b-native-ccache-${{ runner.os }}-${{ github.sha }}
       - name: Run production unit tests
         run: ctest --test-dir build-integration --output-on-failure --timeout 180
       - name: Exercise real Linux HostMemory and backing import lifetime

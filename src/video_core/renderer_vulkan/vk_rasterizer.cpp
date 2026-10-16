@@ -1088,6 +1088,10 @@ bool RasterizerVulkan::QueueControlledCpuWriteRequest(
     // Renderer teardown joins this existing GPU owner before releasing Rasterizer/Device.
     // Only immutable request/registration owners cross the queue, never a raw Memory pointer.
     return gpu.TryQueueCpuWrite([this, operation, handoff] {
+        std::unique_lock cache_guard{buffer_cache.mutex, std::try_to_lock};
+        if (!cache_guard.owns_lock()) return false;
+        // A parked admission/preservation returns from this poll and releases the cache.
+        // Never block the GPU owner behind a CPU producer holding this mutex.
         if (!handoff->transaction) {
             handoff->transaction = buffer_cache.BeginControlledCpuWriteRequest(operation, handoff->request);
             if (!handoff->transaction) return true;

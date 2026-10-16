@@ -85,6 +85,7 @@ public:
                               Tegra::MaxwellDeviceMemoryManager& device_memory_,
                               const Device& device_, MemoryAllocator& memory_allocator_,
                               StateTracker& state_tracker_, Scheduler& scheduler_);
+    friend struct Core::SchedulerTestAccess;
     ~RasterizerVulkan() override;
 
     void Shutdown() override;

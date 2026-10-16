@@ -22,6 +22,8 @@
 
 namespace Core {
 
+struct SchedulerTestAccess;
+
 constexpr size_t DEVICE_PAGEBITS = 12ULL;
 constexpr size_t DEVICE_PAGESIZE = 1ULL << DEVICE_PAGEBITS;
 constexpr size_t DEVICE_PAGEMASK = DEVICE_PAGESIZE - 1ULL;
@@ -47,6 +49,7 @@ struct DeviceMemoryReadResult {
 
 template <typename Traits>
 class DeviceMemoryManager {
+    friend struct SchedulerTestAccess;
     using DeviceInterface = typename Traits::DeviceInterface;
     using DeviceMethods = typename Traits::DeviceMethods;
 

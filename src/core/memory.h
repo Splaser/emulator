@@ -23,6 +23,7 @@ struct PageTable;
 
 namespace Core {
 class System;
+struct SchedulerTestAccess;
 class GPUDirtyMemoryManager;
 } // namespace Core
 
@@ -568,6 +569,7 @@ public:
     bool InvalidateSeparateHeap(void* fault_address);
 
 private:
+    friend struct Core::SchedulerTestAccess;
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite(
         Common::ProcessAddress, ControlledCpuWriteRequest::Value);
     Core::System& system;

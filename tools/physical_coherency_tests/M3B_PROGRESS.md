@@ -1,5 +1,34 @@
 # M3B production integration progress
 
+## Native guest scheduler acceptance: implementation submitted, remote result pending
+
+`controlled_cpu_scheduler_tests` links the real CpuManager/KThread/KScheduler, kernel process
+and page-table teardown, GPU ThreadManager, Vulkan Rasterizer/BufferCache and checked transfers.
+Its headless transfer renderer omits swapchain/presentation; no scheduler or device-completion
+body is extracted/replaced. CI installs software Vulkan and treats missing driver support as
+failure. Test-only peers select real owners/locks and initialize the existing kernel/video
+stages; a service fiber entrypoint supplies the CPU work rather than an ARM application image.
+
+The suite exercises guest sleep/resume and all four terminal actions, 64 complete process
+teardowns with pending Prepared requests, and an accepted native request whose submission is
+blocked during process exit. It checks actual PTE-domain retirement before releasing delayed
+GPU work, unrelated GPU progress during exit, and CPU77/GPU99 complement with a real Vulkan fill.
+Actual cache/sys-core/counter/PTE contention and blocking legacy negative witnesses exercise
+the reverse dependencies. These are executable assertions, not yet a claim of a passing run.
+
+The execution lease no longer encloses device tracker callbacks or blocking range completion.
+Controlled request publication retains existing page protection/cache references and updates
+only pre-existing tracker managers. Store and bounded preservation backing copy have separate
+short owner visits; final local metadata publication uses nonblocking admission completion.
+Request mapping qualification and cache entry also use try-locks. Guest observation sleeps on
+the kernel timer; GPU completion never has to acquire the guest scheduler lock to wake a CPU.
+Termination interrupts observation without cancelling an accepted request or authorizing replay.
+Ordinary Memory writes are still not automatically routed here; global F2 remains Open.
+
+Previous CI 38844806313 passed Android/Linux native compilation and unit tests, but failed the
+older GPU-stop extraction harness because it omitted the new continuation/monostate variants.
+The harness has been updated; do not record that previous workflow as an overall success.
+
 ## M3B-F2 CPU Scheduler Handoff: explicit owner bridge, activation still gated
 
 This continuation implements the requested handoff boundaries without switching all ordinary

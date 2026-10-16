@@ -1343,3 +1343,7 @@ endif()
 citron_configure_lto(core)
 
 create_target_directory_groups(core)
+
+if(CITRON_TESTS)
+    target_compile_definitions(core PRIVATE CITRON_SCHEDULER_TESTS)
+endif()

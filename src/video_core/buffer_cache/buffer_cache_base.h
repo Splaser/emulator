@@ -176,6 +176,7 @@ public:
 
 template <class P>
 class BufferCache : public VideoCommon::ChannelSetupCaches<BufferCacheChannelInfo> {
+    friend struct Core::SchedulerTestAccess;
     // Page size for caching purposes.
     // This is unrelated to the CPU page size and it can be changed as it seems optimal.
     static constexpr u32 CACHING_PAGEBITS = 16;
@@ -462,7 +463,8 @@ public:
                              std::span<const DAddr> device_aliases, u64 size, Store&& store);
 
 private:
-    BufferId ControlledBufferId(const ControlledRegistrationPtr& operation, bool require_clean);
+    BufferId ControlledBufferId(const ControlledRegistrationPtr& operation, bool require_clean,
+                                bool nonblocking_mapping = false);
     void CheckControlledSynchronization(DAddr address, u64 size);
     template <typename Func>
     static void ForEachEnabledBit(u32 enabled_mask, Func&& func) {

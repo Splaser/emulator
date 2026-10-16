@@ -16,6 +16,8 @@ start = source.index('static void RunThread(')
 body = source[start:source.index('\n}\n', start) + 3]
 head = r'''
 #include <atomic>
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
@@ -59,11 +61,12 @@ namespace Tegra::Control {
 struct SubmitListCommand { int channel; std::vector<int> entries; };
 struct GPUTickCommand {};
 struct ExecuteCallbackCommand { std::function<void()> callback; };
+struct ContinueCpuWriteCommand { std::function<bool()> poll; };
 struct FlushRegionCommand { int addr,size; };
 struct InvalidateRegionCommand { int addr,size; };
 struct SynchronizeCommand {};
 struct CommandDataContainer {
- std::variant<SubmitListCommand,GPUTickCommand,ExecuteCallbackCommand,FlushRegionCommand,
+ std::variant<std::monostate,SubmitListCommand,GPUTickCommand,ExecuteCallbackCommand,ContinueCpuWriteCommand,FlushRegionCommand,
               InvalidateRegionCommand,SynchronizeCommand> data;
  int fence=0; bool block=true;
 };

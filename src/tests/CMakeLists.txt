@@ -43,6 +43,15 @@ target_link_libraries(tests PRIVATE ${PLATFORM_LIBRARIES} Catch2::Catch2WithMain
 
 add_test(NAME tests COMMAND tests)
 
+# Full native owners and software Vulkan; separate from portable unit tests so a missing
+# graphics driver is an explicit CI failure rather than a silently skipped acceptance.
+add_executable(controlled_cpu_scheduler_tests core/controlled_cpu_scheduler.cpp)
+set_property(TARGET controlled_cpu_scheduler_tests PROPERTY UNITY_BUILD OFF)
+target_link_libraries(controlled_cpu_scheduler_tests PRIVATE common core Vulkan::Headers
+    ${PLATFORM_LIBRARIES} Catch2::Catch2WithMain Threads::Threads)
+add_test(NAME controlled_cpu_scheduler_tests COMMAND controlled_cpu_scheduler_tests)
+set_tests_properties(controlled_cpu_scheduler_tests PROPERTIES TIMEOUT 180)
+
 if (CITRON_USE_PRECOMPILED_HEADERS)
     target_precompile_headers(tests PRIVATE precompiled_headers.h)
 endif()
