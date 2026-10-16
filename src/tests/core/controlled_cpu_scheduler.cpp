@@ -580,12 +580,17 @@ TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
     device_memory.Map(C, GetInteger(owner.heap) + Page, Footprint, asid);
     device_memory.Map(D, GetInteger(owner.heap) + 3 * Footprint, Footprint, asid);
     SCOPE_EXIT {
+        std::cerr << "F3 cleanup: unmap aliases\n";
         gpu.RunOnGpuThread([&] {
             for (DAddr address : {A, B, C, D}) device_memory.Unmap(address, Footprint);
         });
+        std::cerr << "F3 cleanup: unregister process\n";
         device_memory.UnregisterProcess(asid);
+        std::cerr << "F3 cleanup: close process\n";
         owner.Close();
+        std::cerr << "F3 cleanup: close keeper\n";
         EndThread(keeper);
+        std::cerr << "F3 cleanup: guest owners released\n";
     };
     auto plan_a = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, A, Footprint);
     auto plan_b = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, B, Footprint);

@@ -75,7 +75,7 @@ jobs:
           pacman-key --populate archlinux
           pacman -Syu --needed --noconfirm git cmake ninja gcc python pkgconf \
             boost boost-libs fmt nlohmann-json lz4 zstd zlib openssl opus ffmpeg \
-            enet sdl2 alsa-lib catch2 autoconf automake libtool vulkan-swrast vulkan-icd-loader ccache
+            enet sdl2 alsa-lib catch2 autoconf automake libtool vulkan-swrast vulkan-icd-loader ccache gdb
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -120,6 +120,15 @@ jobs:
           key: m3b-native-ccache-${{ runner.os }}-${{ github.sha }}
       - name: Run production unit tests
         run: ctest --test-dir build-integration --output-on-failure --timeout 180
+      - name: Diagnose native F3 teardown on test failure
+        if: failure()
+        continue-on-error: true
+        run: |
+          timeout --signal=INT --kill-after=10 25 gdb --batch \
+            -ex 'set pagination off' -ex 'set confirm off' -ex run \
+            -ex 'thread apply all bt' \
+            --args build-integration/bin/controlled_cpu_scheduler_tests '[f3]' \
+            > .diagnostics/pr375-pr380/f3-teardown.txt 2>&1
       - name: Exercise real Linux HostMemory and backing import lifetime
         run: |
           python tools/lazy_backing_tests/run_tests.py
