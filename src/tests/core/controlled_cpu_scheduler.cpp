@@ -610,6 +610,7 @@ TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
     bool stale_rejected{}, retained_after_retirement{}, fresh_identity{};
     bool full_source_valid{}, full_alias_uniform{}, partial_source_valid{}, partial_alias_uniform{};
     bool untouched_valid{}, disjoint_valid{}, retained_valid{}, remapped_valid{};
+    bool stale_representation_rejected{}, equivalent_mapping_qualified{};
     u8 remapped{}, retained_value{};
     std::exception_ptr observation_error;
     gpu.RunOnGpuThread([&] {
@@ -679,6 +680,15 @@ TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
         const auto fresh = Access::ReadPin(rasterizer, new_b);
         remapped = fresh[0];
         remapped_valid = all_bytes(fresh, 55);
+        {
+            auto& cache = Access::Cache(rasterizer);
+            std::scoped_lock lock{cache.mutex};
+            // A resource pin is not the old physical association: the replacement
+            // B cannot qualify against its pre-remap plan. Conversely, A's physical
+            // geometry is unchanged by remapping B, despite the global stamp change.
+            stale_representation_rejected = !cache.PinExistingDmaRepresentation(B, *plan_b);
+            equivalent_mapping_qualified = bool(cache.PinExistingDmaRepresentation(A, *plan_a));
+        }
         } catch (...) {
             observation_error = std::current_exception();
         }
@@ -694,6 +704,8 @@ TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
     REQUIRE(disjoint_valid);
     REQUIRE(retained_valid);
     REQUIRE(remapped_valid);
+    REQUIRE(stale_representation_rejected);
+    REQUIRE(equivalent_mapping_qualified);
     REQUIRE(untouched == 10);
     REQUIRE(disjoint == 10);
     REQUIRE(stale_rejected);
