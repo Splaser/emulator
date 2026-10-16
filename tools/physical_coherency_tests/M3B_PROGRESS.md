@@ -1,6 +1,6 @@
 # M3B production integration progress
 
-## Restricted eligibility: blocked; readback isolation validation in progress
+## Restricted eligibility: blocked; readback isolation verified
 
 The requested ordinary scalar production-eligibility acceptance is **not achieved**. The
 [restricted eligibility record](../../docs/M3B_F2_RESTRICTED_ELIGIBILITY.md) identifies the
@@ -14,33 +14,33 @@ or Unknown conflicts before their data/bookkeeping effects. This is one family o
 not full GC/scatter/mapping/Texture/CPU producer exclusion. Original unbound F2 was rerun three
 times: backing77/cache10 each time; `--require-fixed` exits 1. F2 remains Open.
 
-Host extraction passed three registration/pipeline repetitions, including the new alias,
-other-page, busy-mapping and disjoint-readback cases, and all controls 82-90/92-95. The new
-ControlledProducerConflict failure-path test and real ThreadManager topology tests also passed.
-The native test queues a real completed Vulkan async download but
-keeps guest copyback pending, then requires pre-accept Cancelled/zero stores from its guest
-consumer. It also probes actual download/writeback/scheduling entries while an accepted
-request is parked. New Android/Linux validation at `3c68914a6f` is running in
-[38869674129](https://github.com/Splaser/emulator/actions/runs/38869674129); earlier green
-workflows do not validate this continuation. The first new preflight found a missing complete
-Scheduler include in the native test peer, now fixed. Conflict exceptions now reach the real
-GPU loop's existing failure/shutdown/fence-retirement path instead of escaping uncaught.
-The subsequent actual-caller audit found Vulkan readback retirement runs on GPUFencingThread.
-That worker now catches/latches the same conflict and notifies GPU; command dispatch and
-FenceManager owner/wait APIs observe failure without replay or false completion. The complete
-FenceManager template passed ten host repetitions with native fence/cache/platform shims;
-GPU-stop tests cover the external-worker publication as well as a direct typed exception.
-This follow-up requires its own final remote run; the preceding workflow is superseded.
-Production source `3ebb655b97` passed native compilation, 130 production test cases and 1,708
-native scheduler/readback assertions (0.83 seconds) in
-[38870993595](https://github.com/Splaser/emulator/actions/runs/38870993595). Its downloaded CTest
-log is retained locally. The full Linux job failed later in the old renderer-worker extraction
-fixture, which omitted the new conflict type/state/GPU notifier. That fixture is now updated
-and passed locally along with ten complete FenceManager repetitions. Final-source host
-pipeline cases and all controls 82-90/92-95 also passed three repetitions. The Android job
-continues against this exact production source; only fixture/workflow/documentation changes
-follow it. A scoped Linux-only rerun validates those changes without cancelling that Android
-job or implying Android source changes. The final remote results still need recording.
+The native test queues a real completed Vulkan async download but keeps guest copyback pending,
+then requires pre-accept Cancelled/zero stores from its guest consumer. It also probes actual
+download/writeback/scheduling entries while an accepted request is parked. Vulkan readback
+retirement runs on GPUFencingThread: that worker catches/latches conflicts and notifies GPU;
+command dispatch and FenceManager owner/wait APIs observe failure without replay or false
+completion. The complete production FenceManager template uses native fence/cache/platform
+shims for its host topology tests, distinct from the native Vulkan executable.
+
+Final remote evidence:
+
+- Android production compilation passed at `3ebb655b97` in
+  [38870993595](https://github.com/Splaser/emulator/actions/runs/38870993595).
+- The complete Linux workflow passed at `46687f1bfa` in
+  [38873324462](https://github.com/Splaser/emulator/actions/runs/38873324462): 130 production
+  test cases, 1,708 native scheduler/readback assertions (0.81 seconds), real HostMemory/import
+  lifetime and every configured integration regression. Downloaded CTest and job logs are
+  retained locally. Registration/pipeline cases ran ten remote repetitions; all controls
+  82-90/92-95 passed. Renderer fencing and complete FenceManager cases passed ten repetitions.
+- `git diff 3ebb655b97 46687f1bfa -- src` is empty. The follow-up changes only the extraction
+  fixture, workflow and documentation; Linux-only validation intentionally skipped Android
+  rather than claiming a second Android build. The earlier full Linux job was red solely
+  because the renderer-worker fixture omitted the new conflict type/state/GPU notifier.
+- Local registration/pipeline cases passed three repetitions; controls passed individually.
+  Real ThreadManager topology passed three repetitions plus the reverse-dependency control.
+  GPU-stop tests cover both a direct typed exception and external fencing-worker publication.
+
+These results certify this isolation slice, not ordinary-game Restricted Eligibility.
 
 ## Native guest scheduler acceptance: final lifecycle hardening passed
 

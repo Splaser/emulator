@@ -105,6 +105,13 @@ It must not be relabelled as a production eligibility success.
   queued and checks that a real guest consumer observes Cancelled with zero store publications.
   After local retirement, existing controlled acceptance can proceed. A parked accepted request
   also probes real download/writeback/scheduling entries for rejection before side effects.
+- Final Linux validation at `46687f1bfa` passed the complete workflow in
+  [38873324462](https://github.com/Splaser/emulator/actions/runs/38873324462), including 1,708
+  native assertions, 130 production test cases and all configured integration regressions.
+  Android production compilation passed at `3ebb655b97` in
+  [38870993595](https://github.com/Splaser/emulator/actions/runs/38870993595). Production `src/`
+  is identical between these revisions; the follow-up fixes a renderer extraction fixture
+  and validation workflow/docs. The Linux-only rerun intentionally skipped Android.
 - Latest host/native results and exact workflow revision are recorded in
   [current progress](../tools/physical_coherency_tests/M3B_PROGRESS.md). Earlier green builds
   do not validate this continuation's new code.
