@@ -150,9 +150,7 @@ public:
     void InvalidateState();
 
     /// Assigns the query cache.
-    void SetQueryCache(VideoCommon::QueryCacheBase<QueryCacheParams>& query_cache_) {
-        query_cache = &query_cache_;
-    }
+    void SetQueryCache(VideoCommon::QueryCacheBase<QueryCacheParams>& query_cache_);
 
     // Registers a callback to perform on queue submission.
     void RegisterOnSubmit(std::function<void()>&& func) {

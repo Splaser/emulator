@@ -21,6 +21,10 @@
 
 namespace Vulkan {
 
+void Scheduler::SetQueryCache(VideoCommon::QueryCacheBase<QueryCacheParams>& query_cache_) {
+    query_cache = &query_cache_;
+}
+
 void Scheduler::CommandChunk::ExecuteAll(vk::CommandBuffer cmdbuf,
                                          vk::CommandBuffer upload_cmdbuf) {
     auto command = first;
