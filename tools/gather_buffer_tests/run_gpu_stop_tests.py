@@ -46,7 +46,9 @@ namespace Vulkan::vk {
 namespace Core {
  enum class SystemResultStatus { ErrorVideoCore };
  struct System {
-  struct Gpu { int notified=0; void NotifyShutdown() { ++notified; } void TickWork() {} } gpu;
+  struct Gpu { int notified=0; bool conflict=false;
+   bool HasControlledProducerConflict() const {return conflict;}
+   void NotifyShutdown() { ++notified; } void TickWork() {} } gpu;
   int exited=0; void RegisterHostThread() {} Gpu& GPU() { return gpu; }
   void Exit(SystemResultStatus) { ++exited; }
  };
@@ -83,7 +85,7 @@ struct SynchState {
 '''
 tail = r'''
 int main() {
- for(unsigned mode=0;mode<2;++mode) {
+ for(unsigned mode=0;mode<3;++mode) {
  std::stop_source stop;
  Core::System system; VideoCore::RendererBase renderer;
  Core::Frontend::GraphicsContext context; Tegra::Control::Scheduler scheduler;
@@ -92,6 +94,7 @@ int main() {
  state.queue.entries.push_back({ExecuteCallbackCommand{[&] { ++before; }},1});
  state.queue.entries.push_back({ExecuteCallbackCommand{[&] {
   if(mode==1) throw VideoCommon::ControlledProducerConflict("readback isolation violation");
+  if(mode==2) {system.gpu.conflict=true; return;}
   VideoCommon::GatherAliasValidator v{4};
   v.Add(1000,64,4,true);
   v.Add(1000,68,4,true); // throw before affected gather/scatter/dispatch
@@ -103,7 +106,8 @@ int main() {
  assert(before==1 && affected==0 && after==0);
  assert(system.gpu.notified==1 && system.exited==1);
  assert(state.signaled_fence==4 && state.queue.pos==4);
- std::cout << (mode==0 ? "PASS unsupported physical alias" : "PASS controlled producer conflict")
+ std::cout << (mode==0 ? "PASS unsupported physical alias" :
+               mode==1 ? "PASS controlled producer conflict" : "PASS fencing-worker conflict publication")
            << ": explicit shutdown, no affected/later dispatch, queued fences retired\n";
  }
 }

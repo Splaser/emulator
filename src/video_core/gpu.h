@@ -231,6 +231,9 @@ public:
 
     /// Performs any additional necessary steps to shutdown GPU emulation.
     void NotifyShutdown();
+    /// Fencing-worker failure publication without waiting for the command owner to run.
+    void NotifyControlledProducerConflict();
+    [[nodiscard]] bool HasControlledProducerConflict() const;
 
     /// Obtain the CPU Context
     void ObtainContext();

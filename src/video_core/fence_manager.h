@@ -5,10 +5,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -19,6 +21,7 @@
 #include "common/settings.h"
 #include "common/thread.h"
 #include "video_core/delayed_destruction_ring.h"
+#include "video_core/buffer_cache/controlled_conflict.h"
 #include "video_core/gpu.h"
 #include "video_core/host1x/host1x.h"
 #include "video_core/host1x/syncpoint_manager.h"
@@ -76,12 +79,14 @@ public:
 
     /// Notify the fence manager about a new frame
     void TickFrame() {
+        CheckFencingFailure();
         std::unique_lock lock(ring_guard);
         delayed_destruction_ring.Tick();
     }
 
     // Unlike other fences, this one doesn't
     void SignalOrdering() {
+        CheckFencingFailure();
         if constexpr (!can_async_check) {
             TryReleasePendingFences<false>();
         }
@@ -95,6 +100,7 @@ public:
     }
 
     void SyncOperation(std::function<void()>&& func) {
+        CheckFencingFailure();
         if (is_shutting_down.load()) {
             return;
         }
@@ -102,6 +108,7 @@ public:
     }
 
     void SignalFence(std::function<void()>&& func) {
+        CheckFencingFailure();
         if (is_shutting_down.load()) {
             return;
         }
@@ -135,12 +142,14 @@ public:
     }
 
     void SignalSyncPoint(u32 value) {
+        CheckFencingFailure();
         syncpoint_manager.IncrementGuest(value);
         std::function<void()> func([this, value] { syncpoint_manager.IncrementHost(value); });
         SignalFence(std::move(func));
     }
 
     void WaitPendingFences([[maybe_unused]] bool force) {
+        CheckFencingFailure();
         if (is_shutting_down.load()) {
             return;
         }
@@ -150,18 +159,18 @@ public:
             if (!force) {
                 return;
             }
-            std::mutex wait_mutex;
-            std::condition_variable wait_cv;
-            std::atomic<bool> wait_finished{};
-            std::function<void()> func([&] {
-                std::scoped_lock lk(wait_mutex);
-                wait_finished.store(true, std::memory_order_relaxed);
-                wait_cv.notify_all();
-            });
+            // The fencing worker may fail before executing this callback. Do not retain
+            // stack references, or mistake an ordinary shutdown wakeup for completion.
+            auto finished = std::make_shared<std::promise<void>>();
+            auto completion = finished->get_future();
+            std::function<void()> func([finished] { finished->set_value(); });
             SignalFence(std::move(func));
-            std::unique_lock lk(wait_mutex);
-            wait_cv.wait(
-                lk, [&wait_finished] { return wait_finished.load(std::memory_order_relaxed); });
+            while (completion.wait_for(std::chrono::milliseconds{5}) != std::future_status::ready) {
+                CheckFencingFailure();
+                if (is_shutting_down.load()) return;
+            }
+            CheckFencingFailure();
+            completion.get();
         }
     }
 
@@ -199,6 +208,11 @@ protected:
     TQueryCache& query_cache;
 
 private:
+    void CheckFencingFailure() const {
+        if (producer_conflict.load(std::memory_order_acquire))
+            throw ControlledProducerConflict("controlled producer conflict on GPU fencing thread");
+    }
+
     template <bool force_wait>
     void TryReleasePendingFences() {
         while (!fences.empty()) {
@@ -245,9 +259,17 @@ private:
             if (!current_fence->IsStubbed()) {
                 WaitFence(current_fence);
             }
-            PopAsyncFlushes();
-            for (auto& operation : current_operations) {
-                operation();
+            try {
+                PopAsyncFlushes();
+                for (auto& operation : current_operations) {
+                    operation();
+                }
+            } catch (const ControlledProducerConflict&) {
+                // Cache locks have unwound. Stop this worker without running its callbacks;
+                // the GPU owner rethrows the latched failure into RunThread's stop path.
+                producer_conflict.store(true, std::memory_order_release);
+                gpu.NotifyControlledProducerConflict();
+                return;
             }
             {
                 std::unique_lock lock(ring_guard);
@@ -296,6 +318,7 @@ private:
 
     std::jthread fence_thread;
     std::atomic<bool> is_shutting_down{};
+    std::atomic<bool> producer_conflict{};
 
     DelayedDestructionRing<TFence, 8> delayed_destruction_ring;
 };

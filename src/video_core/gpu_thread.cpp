@@ -68,6 +68,8 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
             state.cv.notify_all();
         }
         CITRON_PROFILE_SCOPE("GPUThread::ProcessCommand");
+        if (!failed && system.GPU().HasControlledProducerConflict())
+            request_failure_shutdown("controlled producer conflict on fencing worker");
         // After failure, retire queued commands without executing partially updated GPU state.
         // Barriers below still wake their callers, allowing frontend shutdown to join the CPUs.
         if (!failed) {

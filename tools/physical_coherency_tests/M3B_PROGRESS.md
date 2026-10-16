@@ -15,11 +15,22 @@ not full GC/scatter/mapping/Texture/CPU producer exclusion. Original unbound F2 
 times: backing77/cache10 each time; `--require-fixed` exits 1. F2 remains Open.
 
 Host extraction passed three registration/pipeline repetitions, including the new alias,
-other-page, busy-mapping and disjoint-readback cases. Mutation 95 and the complete new native
-case are being validated. The native test queues a real completed Vulkan async download but
+other-page, busy-mapping and disjoint-readback cases, and all controls 82-90/92-95. The new
+ControlledProducerConflict failure-path test and real ThreadManager topology tests also passed.
+The native test queues a real completed Vulkan async download but
 keeps guest copyback pending, then requires pre-accept Cancelled/zero stores from its guest
 consumer. It also probes actual download/writeback/scheduling entries while an accepted
-request is parked. New Android/Linux remote results must be recorded separately below.
+request is parked. New Android/Linux validation at `3c68914a6f` is running in
+[38869674129](https://github.com/Splaser/emulator/actions/runs/38869674129); earlier green
+workflows do not validate this continuation. The first new preflight found a missing complete
+Scheduler include in the native test peer, now fixed. Conflict exceptions now reach the real
+GPU loop's existing failure/shutdown/fence-retirement path instead of escaping uncaught.
+The subsequent actual-caller audit found Vulkan readback retirement runs on GPUFencingThread.
+That worker now catches/latches the same conflict and notifies GPU; command dispatch and
+FenceManager owner/wait APIs observe failure without replay or false completion. The complete
+FenceManager template passed ten host repetitions with native fence/cache/platform shims;
+GPU-stop tests cover the external-worker publication as well as a direct typed exception.
+This follow-up requires its own final remote run; the preceding workflow is superseded.
 
 ## Native guest scheduler acceptance: final lifecycle hardening passed
 

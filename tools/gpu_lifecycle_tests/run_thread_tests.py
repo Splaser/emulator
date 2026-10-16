@@ -85,6 +85,7 @@ enum class SystemResultStatus { ErrorVideoCore };
 struct System {
     struct Gpu {
         std::atomic<int> ticks=0; void NotifyShutdown() {} void TickWork() { ++ticks; }
+        bool HasControlledProducerConflict() const { return false; }
         u64 RequestFlush(DAddr,u64) { return 0; } void WaitForSyncOperation(u64) {}
     } gpu;
     void RegisterHostThread() {} Gpu& GPU() { return gpu; }

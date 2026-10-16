@@ -425,6 +425,7 @@ struct GPU::Impl {
     std::unique_ptr<VideoCore::ShaderNotify> shader_notify;
     /// When true, we are about to shut down emulation session, so terminate outstanding tasks
     std::atomic_bool shutting_down{};
+    std::atomic_bool controlled_producer_conflict{};
 
     std::array<std::atomic<u32>, Service::Nvidia::MaxSyncPoints> syncpoints{};
 
@@ -618,6 +619,15 @@ void GPU::Start() {
 
 void GPU::NotifyShutdown() {
     impl->NotifyShutdown();
+}
+
+void GPU::NotifyControlledProducerConflict() {
+    impl->controlled_producer_conflict.store(true, std::memory_order_release);
+    impl->NotifyShutdown();
+}
+
+bool GPU::HasControlledProducerConflict() const {
+    return impl->controlled_producer_conflict.load(std::memory_order_acquire);
 }
 
 void GPU::ObtainContext() {

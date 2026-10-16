@@ -33,7 +33,8 @@ namespace Tegra::Host1x { struct Host1x { SyncpointManager points; SyncpointMana
 ''',
     'video_core/gpu.h': '''#pragma once
 #include "video_core/host1x/host1x.h"
-namespace Tegra { struct GPU { Tegra::Host1x::Host1x host; auto& Host1x(){return host;} }; }
+namespace Tegra { struct GPU { Tegra::Host1x::Host1x host; auto& Host1x(){return host;}
+    std::atomic<unsigned> conflicts{}; void NotifyControlledProducerConflict(){++conflicts;} }; }
 ''',
     'video_core/rasterizer_interface.h': '''#pragma once
 namespace VideoCore { struct RasterizerInterface { void FlushCommands(){} void InvalidateGPUCache(){} }; }
@@ -64,7 +65,9 @@ void OnFenceStopRequested(){if(stopping) stopping->Set();}
 #include "fence_complete.h"
 struct Cache {
     std::mutex mutex;
-    void AccumulateFlushes(){} void PopAsyncFlushes(){} void CommitAsyncFlushes(){}
+    bool conflict=false;
+    void AccumulateFlushes(){} void CommitAsyncFlushes(){}
+    void PopAsyncFlushes(){if(conflict) throw VideoCommon::ControlledProducerConflict("injected readback");}
     bool ShouldWaitAsyncFlushes(){return false;} bool HasUncommittedFlushes(){return false;}
 };
 struct Fence : VideoCommon::FenceBase { Fence():FenceBase(true){} };
@@ -99,6 +102,23 @@ int main() {
         manager.SignalFence([&]{++queued;}); manager.SyncOperation([&]{++queued;}); manager.WaitPendingFences(true);
         if(active!=1 || queued!=0 || !weak.expired()) throw std::runtime_error("cancelled callback executed or retained");
         std::cout<<"PASS complete FenceManager template: active drain, queued cancellation, late rejection, idempotence\n";
+        {
+            Tegra::GPU failed_gpu; Cache ft,fb,fq; fb.conflict=true;
+            Manager failed{rasterizer,failed_gpu,ft,fb,fq}; std::atomic<unsigned> callbacks{};
+            failed.SignalFence([&]{++callbacks;});
+            bool rejected=false;
+            try {failed.WaitPendingFences(true);}
+            catch(const VideoCommon::ControlledProducerConflict&) {rejected=true;}
+            failed.Shutdown(); // Join failure publication before observing its notification.
+            if(!rejected || callbacks!=0 || failed_gpu.conflicts!=1)
+                throw std::runtime_error("fencing conflict hung or published false completion");
+            rejected=false;
+            try {failed.SignalFence([&]{++callbacks;});}
+            catch(const VideoCommon::ControlledProducerConflict&) {rejected=true;}
+            if(!rejected || callbacks!=0) throw std::runtime_error("failed fencing worker admitted callback");
+            failed.Shutdown();
+            std::cout<<"PASS fencing-worker readback conflict: waiter rejects, no callback/replay, GPU notified, shutdown joins\n";
+        }
     } catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<"\n"; return 1;}
 }
 '''

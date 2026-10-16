@@ -69,6 +69,13 @@ This continuation narrows RE-GPU for one producer family without claiming comple
   A dedicated ControlledProducerConflict is caught by the real GPU loop's failure path:
   stop later dispatch, cancel/quarantine continuation captures, notify shutdown and retire
   queued acknowledgement fences. A conflict is not an unhandled runtime exception or retry.
+- Vulkan retires async downloads on a separate GPUFencingThread under the cache mutexes.
+  That worker catches the same typed conflict, stops without running its fence callbacks,
+  and publishes an atomic failure to GPU. RunThread checks it before subsequent dispatch.
+  FenceManager also latches the error for owner APIs: WaitPendingFences uses a retained
+  promise with bounded failure polling instead of retaining stack references and waiting
+  forever for a callback that the failed worker will never execute. Polling holds no
+  cache/PTE/owner lease. No native-completion success is manufactured by this failure path.
 - This does not qualify all GC, gather/scatter, CPU notifications, remaps, bound GPU work or
   native writes. New access outside these guarded entries remains blocked by the activation
   policy, not by a global implemented barrier. Exceptions are defensive isolation for the
@@ -87,7 +94,13 @@ It must not be relabelled as a production eligibility success.
   through controlled test helpers or modified to hide the ordinary-entry defect.
 - New host cases cover queued, committed and uncommitted readbacks through another device
   alias on another page of the coarse footprint, busy mapping rejection and disjoint queues.
-  Mutation 95 removes the pre-accept exclusion and must accept the forbidden request/fail.
+  Three repetitions and all existing controls plus mutation 95 passed. Mutation 95 removes
+  the pre-accept exclusion and demonstrably accepts the forbidden request/fails the test.
+  The real GPU-loop extraction also passes typed conflict shutdown/fence retirement, and
+  real ThreadManager topology passed three repetitions plus its dependency-cycle control.
+  The complete production FenceManager template, with native fence/cache/platform shims,
+  passed ten repetitions of conflict notification, rejected waiter/late callback and join.
+  This host topology check is distinct from the native Vulkan cache/readback acceptance.
 - The native executable adds a real Vulkan async download, keeps its completed copyback
   queued and checks that a real guest consumer observes Cancelled with zero store publications.
   After local retirement, existing controlled acceptance can proceed. A parked accepted request
