@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 
 #include "core/core.h"
 #include "core/scheduler_system_test_access.h"
@@ -37,6 +38,41 @@ struct SchedulerTestAccess : SystemTestAccess {
     }
     static void LegacyPublish(Vulkan::RasterizerVulkan& rasterizer, DAddr address) {
         Cache(rasterizer).memory_tracker.MarkRegionAsCpuModified(address, 1);
+    }
+    static bool QueueLegacyReadback(Vulkan::RasterizerVulkan& rasterizer,
+                                   const Vulkan::RasterizerVulkan::ControlledRegistrationPtr& op,
+                                   DAddr address, u32 size) {
+        auto& cache = Cache(rasterizer);
+        const auto id = cache.ControlledReadyBuffer(op);
+        cache.MarkWrittenBuffer(id, address, size);
+        cache.CommitAsyncFlushes();
+        return cache.ShouldWaitAsyncFlushes();
+    }
+    static void RetireLegacyReadback(Vulkan::RasterizerVulkan& rasterizer) {
+        rasterizer.scheduler.Finish();
+        Cache(rasterizer).PopAsyncFlushes();
+    }
+    static unsigned ProbeLegacyReadbackGuards(
+        Vulkan::RasterizerVulkan& rasterizer,
+        const Vulkan::RasterizerVulkan::ControlledRegistrationPtr& op,
+        DAddr address, u32 size) {
+        auto& cache = Cache(rasterizer);
+        const auto id = cache.ControlledBufferId(op, false, true);
+        unsigned blocked{};
+        const auto probe = [&](auto&& operation) {
+            try { operation(); } catch (const std::runtime_error&) { ++blocked; }
+        };
+        probe([&] { cache.DownloadMemory(address, size); });
+        probe([&] { cache.DownloadBufferMemory(cache.slot_buffers[id], address, size); });
+        const u8 stale = 10;
+        probe([&] { cache.WriteBackDownload(address, &stale, 1); });
+        // Deliberately attempt a legacy scheduling violation. Rejection must precede
+        // AccumulateFlushes, so the test can remove its untouched candidate afterwards.
+        cache.uncommitted_gpu_modified_ranges.Add(address, 1);
+        probe([&] { cache.CommitAsyncFlushes(); });
+        if (cache.uncommitted_gpu_modified_ranges.Empty()) return 0;
+        cache.uncommitted_gpu_modified_ranges.Subtract(address, 1);
+        return blocked;
     }
 };
 } // namespace Core

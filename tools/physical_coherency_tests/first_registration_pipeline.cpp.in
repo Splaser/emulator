@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 #include "common/slot_vector.h"
 #include "common/scratch_buffer.h"
+#include "common/range_sets.inc"
 #include "video_core/buffer_cache/controlled_transfer.h"
 // @ALIAS_CONTAINER@
 struct Allocation { std::vector<u8> bytes; explicit Allocation(size_t size):bytes(size) {} };
@@ -215,6 +216,9 @@ public:
     std::map<u64,BufferId> page_table;
     // @REGISTRATION_CLASS@
     std::vector<ControlledRegistrationPtr> controlled_registrations;
+    Common::RangeSet<DAddr> uncommitted_gpu_modified_ranges;
+    std::deque<Common::RangeSet<DAddr>> committed_gpu_modified_ranges;
+    std::deque<std::vector<BufferCopy>> pending_downloads;
     BufferCache(Cpu& cpu,Runtime& runtime_):runtime{runtime_},device_tracker{cpu},memory_tracker{device_tracker},
         device_memory{cpu.system.device.buffer} {(void)slot_buffers.insert(runtime,0,C);}
     bool IsRegionPageTableAddressable(u64 address,u64 size) const {return size && address<1ULL<<39 && size<=(1ULL<<39)-address;}
@@ -227,6 +231,7 @@ public:
     struct Ranges {void Subtract(u64,u64) {}} gpu_modified_ranges; // Exact range container collaborator.
     void ClearDownload(u64,u64) {} // Pending async download container collaborator.
     void CheckControlledSynchronization(DAddr,u64);
+    bool ControlledReadbacksIdle(const ControlledRegistrationPtr&);
     bool SynchronizeBuffer(Buffer&,DAddr,u32);
     bool IsDirectGuest(Buffer&) {return false;}
     void EndGuestCpuAccess(Buffer&) {}
@@ -859,6 +864,35 @@ void faults() {
         assert(domain->Cancel(reader));
     }
 }
+void readback_exclusion() {
+    using Request=Core::Memory::ControlledCpuWriteRequest;
+    for(unsigned mode=0;mode<5;++mode) {
+        auto s=std::make_unique<Scenario>();
+        auto op=s->cache->BeginControlledFirstRegistration(A+7,1,s->views);assert(op);
+        assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
+        Core::Memory::Memory memory{&s->cpu};
+        auto request=memory.PrepareControlledWrite8(4096+7,77);assert(request);
+        // Other device alias, other page, same coarse physical preservation footprint.
+        const auto alias=ALIAS+C-4096;
+        if(mode==0) s->cache->uncommitted_gpu_modified_ranges.Add(alias,1);
+        if(mode==1) {s->cache->committed_gpu_modified_ranges.emplace_back();
+            s->cache->committed_gpu_modified_ranges.back().Add(alias,1);}
+        if(mode==2) s->cache->pending_downloads.push_back({BufferCopy{alias,0,1}});
+        if(mode==3) s->cache->pending_downloads.push_back({BufferCopy{ALIAS+C,0,1}});
+        std::unique_lock mapping{s->cache->device_memory.mapping_guard,std::defer_lock};
+        if(mode==4) mapping.lock();
+        auto tx=s->cache->BeginControlledCpuWriteRequest(op,request);
+        if(mode==3) {
+            assert(tx && request->State()==Request::Phase::Accepted);
+            s->cache->AbandonControlledCpuWrite(tx); // No store; retain accepted identity.
+        } else if(tx || request->State()!=Request::Phase::Cancelled ||
+                  s->backing(7)!=10 || s->gpu.submissions!=1 || op->State()!=Phase::Ready) {
+            std::cerr<<"readback conflict accepted before producer retirement\n";std::exit(95);
+        }
+    }
+    std::cout<<"PASS pre-accept readback exclusion: uncommitted/committed/native pending, physical alias, coarse footprint, busy mapping and disjoint queue\n";
+}
+
 int main(int argc,char** argv) {
     {
         MultiAddressContainer aliases;const auto first=aliases.Register(1);
@@ -874,6 +908,6 @@ int main(int argc,char** argv) {
         writer_first(1);writer_first(15);registration_first();
         for(u64 width: {1,2,4,8}) {production_write_transaction(width);production_write_transaction(width,true);}
     }
-    faults();transaction_faults();ordinary_binding_refusals();request_lifecycle();scheduler_handoff();enqueue_close_and_teardown();
+    faults();transaction_faults();ordinary_binding_refusals();request_lifecycle();scheduler_handoff();enqueue_close_and_teardown();readback_exclusion();
     std::cout<<"PASS actual cache pipeline: both 77 registration orderings, GPU dirty complement [99,77,99], transaction upload exclusion, post-store real tracker publication, delayed checked native completion and failure/drop quarantine; repeat="<<repeats<<" (Vulkan dispatch/device execution remain fixtures)\n";
 }

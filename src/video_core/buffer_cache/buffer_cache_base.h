@@ -466,6 +466,8 @@ private:
     BufferId ControlledBufferId(const ControlledRegistrationPtr& operation, bool require_clean,
                                 bool nonblocking_mapping = false);
     void CheckControlledSynchronization(DAddr address, u64 size);
+    // One producer-family exclusion, not a certificate for ordinary-game F2 activation.
+    bool ControlledReadbacksIdle(const ControlledRegistrationPtr& operation);
     template <typename Func>
     static void ForEachEnabledBit(u32 enabled_mask, Func&& func) {
         for (u32 index = 0; enabled_mask != 0; ++index, enabled_mask >>= 1) {

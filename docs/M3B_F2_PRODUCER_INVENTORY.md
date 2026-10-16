@@ -5,6 +5,10 @@ inventory, not evidence that every listed producer has joined physical admission
 The [scheduler acceptance and lock audit](M3B_CPU_SCHEDULER_ACCEPTANCE.md) covers the
 explicit controlled endpoint. **Ordinary-game F2 activation remains blocked.**
 
+The subsequent [restricted eligibility record](M3B_F2_RESTRICTED_ELIGIBILITY.md) documents
+that blocker and the first implemented readback-isolation slice. Queue cancellation before
+acceptance and defensive download/async guards do not enroll the remaining forbidden rows.
+
 ## Scope and admission rule
 
 The conflict identity is the backing epoch plus physical byte/page footprint, across
@@ -71,8 +75,8 @@ CPU source anchors: [memory.cpp](../src/core/memory.cpp),
 | Normal buffer upload: `SynchronizeBuffer` | Partial: `CheckControlledSynchronization` checks current physical aliases against Writing/Unknown registrations before `ForEachUploadRange` consumes CPU dirty state | Explicitly rejects overlapping active/Unknown operations through this entry. Not a global permission for other upload paths, Ready bindings or mapping races |
 | Immediate/inline upload, `InlineMemory`, gather materialization/scatter and buffer overlap merge/copy | Legacy synchronization/dirty ranges, staging and GPU usage ticks; some routes call guarded SynchronizeBuffer, others mutate directly | Forbidden unless each complete route is certified. Reaching a guarded helper once does not cover later writes/merges |
 | Already bound vertex/index/uniform/storage/transform-feedback/indirect/query buffers; draw/compute writes | Cache binding and command ordering, usage stamps, ordinary dirty tracking | Forbidden. Existing bindings can consume or modify a representation without another upload check; shader outputs are producers too |
-| Normal synchronous buffer download: `DownloadBufferMemory`, `WriteBackDownload` | Legacy dirty-range accounting, Finish or immediate download, then `DeviceMemoryManager::WriteBlockUnsafe` | Forbidden. No controlled admission/lifetime lease; GPU fence completion does not certify the destination physical identity |
-| Buffer async readback: `CommitAsyncFlushesHigh`, `PopAsyncBuffers` | Staging allocations, fences/flush queues, `async_downloads` and delayed WriteBackDownload | Forbidden from enqueue through final writeback/retirement, including readbacks queued before activation |
+| Normal synchronous buffer download: `DownloadBufferMemory`, `WriteBackDownload` | Partial: ordinary download/writeback entries reject physical-alias Writing/Unknown conflicts before data/dirty effects; legacy Finish and unsafe writeback remain outside a full execution lease | Overlap is rejected by these guarded entries. This does not qualify other download/GC/mapping routes or certify the destination physical identity after arbitrary remaps |
+| Buffer async readback: `CommitAsyncFlushesHigh`, `PopAsyncBuffers` | Partial: candidate batch scheduling and front-batch retirement reject active/Unknown conflicts before effects; ControlledReadbacksIdle rejects queued/uncommitted/committed alias conflicts before request acceptance | Conflicting pending callbacks must retire before acceptance; no global queue drain for disjoint work. Remaining producer/mapping exclusion is still required |
 | Buffer GC, eviction, dirty-batch flush, unmap preservation | Legacy download/copyback and cache-container retirement; unmap retains GPU dirty complement before clearing tracker state | Forbidden while conflicting accepted/Unknown work exists. Neither ordinary cache destruction nor a whole-queue drain is a certified recovery action |
 | UMA/direct guest buffers and native imported backing | Vulkan import eligibility, guest barriers/CPU-access tracking, native completion/lifetime references | Forbidden. Device writes can inhabit backing directly; CPU page protection alone cannot exclude them. Acceptance tests disable UMA zero-copy |
 | Maxwell GPU DMA linear/split/remap/block-linear, clear, semaphore write | `Launch`, BufferCache DMA acceleration and MemoryManager fallback; snapshots/overlap handling and GPU order are legacy only | Forbidden for source and destination footprints, semaphore addresses and all remapped coverage |

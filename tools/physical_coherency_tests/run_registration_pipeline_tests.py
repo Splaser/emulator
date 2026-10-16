@@ -100,6 +100,7 @@ for marker in ['auto BufferCache<P>::BeginControlledFirstRegistration(',
                'auto BufferCache<P>::PollControlledCpuWrite(',
                'Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuTransaction(',
                'void BufferCache<P>::CheckControlledSynchronization(',
+               'bool BufferCache<P>::ControlledReadbacksIdle(',
                'bool BufferCache<P>::SynchronizeBuffer(',
                'void BufferCache<P>::Register(', 'void BufferCache<P>::Unregister(',
                'void BufferCache<P>::ChangeRegister(',
@@ -261,6 +262,13 @@ result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout
 if result.returncode != 94 or 'accepted construction failure lost request identity' not in result.stderr:
     raise RuntimeError(f'Construction Unknown control failed incorrectly: {result.returncode} {result.stderr}')
 print('PASS negative lifecycle control: pre-transaction Unknown must retain the accepted request (94)')
+cpp.write_text(source.replace('if (!ControlledReadbacksIdle(operation)) {',
+                              'if (false && !ControlledReadbacksIdle(operation)) {'))
+subprocess.run(cmd + [str(cpp), '-o', str(exe)], check=True)
+result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout=60)
+if result.returncode != 95 or 'readback conflict accepted before producer retirement' not in result.stderr:
+    raise RuntimeError(f'Readback isolation control failed incorrectly: {result.returncode} {result.stderr}')
+print('PASS negative isolation control: pending physical-alias readback must reject before acceptance (95)')
 inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
                'src/video_core/gpu_thread.cpp','src/video_core/gpu_thread.h',
                'src/core/hle/kernel/k_process.cpp','src/core/memory.h',

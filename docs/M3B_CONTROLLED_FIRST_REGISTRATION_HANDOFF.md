@@ -1,5 +1,9 @@
 # M3B - Controlled First Registration Integration
 
+The [restricted eligibility gate](M3B_F2_RESTRICTED_ELIGIBILITY.md) remains blocked before
+ordinary-game activation. The current continuation first isolates legacy buffer readbacks;
+the earlier explicit scheduler acceptance below is not an ordinary-entry exclusion proof.
+
 Current scope is **M3B-F2 CPU Scheduler Handoff**: explicit nonblocking existing-owner queue
 continuations, per-Memory execution closure before process PTE finalization, distinct
 Cancelled/Refused/Unknown actions, and the five concurrency/lifecycle assertion groups.

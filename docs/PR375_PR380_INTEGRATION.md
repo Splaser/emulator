@@ -2,6 +2,11 @@
 
 ## Current continuation: 2026-10-16 — M3B-F2 CPU Scheduler Handoff
 
+The next [restricted eligibility acceptance](M3B_F2_RESTRICTED_ELIGIBILITY.md) is blocked:
+ordinary scalar callers cannot yet prove complete physical producer exclusion. Work advances
+readback isolation first; the original unbound F2 witness still reproduces backing77/cache10.
+See current progress for this continuation's validation, distinct from the earlier green run.
+
 An explicit nonblocking bridge now runs request continuations on the existing GPU ThreadManager.
 Per-Memory Close cancels/quarantines only its requests and joins bounded execution visits before
 production process page-table finalization, without draining unrelated GPU work. Cancelled,

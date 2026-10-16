@@ -249,6 +249,33 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     REQUIRE(Until([&] { return registered.load(); }));
     REQUIRE(operation);
     gpu.RunOnGpuThread([&] { Access::FillGpu(rasterizer, operation, address, Footprint); });
+    // Real deferred legacy readback on another page of the COARSE preservation footprint.
+    // Native completion alone does not retire its pending guest writeback identity.
+    bool legacy_pending{};
+    gpu.RunOnGpuThread([&] {
+        legacy_pending = Access::QueueLegacyReadback(
+            rasterizer, operation, address + Footprint - 4096, 4096);
+        renderer->scheduler.Finish();
+    });
+    REQUIRE(legacy_pending);
+    auto excluded = memory.PrepareControlledWrite8(owner.heap + 7, 76);
+    REQUIRE(excluded);
+    std::atomic<bool> exclusion_done{};
+    std::optional<Action> exclusion_action;
+    auto* excluded_thread = owner.Start([&] {
+        const bool enqueued = rasterizer.QueueControlledCpuWriteRequest(operation, excluded);
+        if (enqueued) exclusion_action = system.GetCpuManager().AwaitControlledCpuWrite(excluded);
+        exclusion_done = true;
+    });
+    REQUIRE(Until([&] { return exclusion_done.load(); }));
+    REQUIRE(exclusion_action == Action::DoNotExecute);
+    REQUIRE(excluded->State() == Request::Phase::Cancelled);
+    REQUIRE(excluded->View().physical.Published()->sequence == 0);
+    EndThread(excluded_thread);
+    gpu.RunOnGpuThread([&] {
+        Access::RetireLegacyReadback(rasterizer);
+        Access::FillGpu(rasterizer, operation, address, Footprint);
+    });
     auto request = memory.PrepareControlledWrite8(owner.heap + 7, 77);
     REQUIRE(request);
     REQUIRE_FALSE(system.GetCpuManager().AwaitControlledCpuWrite(request).has_value());
@@ -371,6 +398,12 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
         consumer_done = true;
     });
     REQUIRE(Until([&] { return producer_entered.load() && uncertain->State() == Request::Phase::Accepted; }));
+    unsigned readback_guards{};
+    gpu.RunOnGpuThread([&] {
+        readback_guards = Access::ProbeLegacyReadbackGuards(
+            rasterizer, operation, address, Footprint);
+    });
+    REQUIRE(readback_guards == 4);
     gpu.SynchronizeGPUThread(); // accepted, parked behind the real physical predecessor
     std::unique_lock pte_lock{uncertain->View().mapping.domain->mutex};
     REQUIRE(admission->Complete(dependency));

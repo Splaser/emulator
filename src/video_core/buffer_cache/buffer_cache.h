@@ -235,7 +235,15 @@ auto BufferCache<P>::BeginControlledCpuWriteRequest(
     const ControlledRegistrationPtr& operation,
     const Core::Memory::ControlledCpuWriteRequestPtr& request) -> ControlledCpuWritePtr {
     using Request = Core::Memory::ControlledCpuWriteRequest;
-    if (!request || !request->TryAccept(request)) return {};
+    if (!request) return {};
+    // A queued legacy copyback has no request execution identity. It must retire before
+    // acceptance, including work addressed through another device alias of this footprint.
+    // This check certifies only buffer-readback exclusion, never the other producer families.
+    if (!ControlledReadbacksIdle(operation)) {
+        (void)request->Cancel();
+        return {};
+    }
+    if (!request->TryAccept(request)) return {};
     if (!request->Owner()->TryVisit([](auto&) {})) {
         request->RefuseBeforeEffects();
         return {};
@@ -680,6 +688,7 @@ bool BufferCache<P>::RunGarbageCollector(bool aggressive_gc) {
     u64 download_bytes = 0;
     const auto clean_up = [&](BufferId buffer_id) {
         auto& buffer = slot_buffers[buffer_id];
+        CheckControlledSynchronization(buffer.CpuAddr(), buffer.SizeBytes());
         if (IsDirectGuest(buffer) && memory_tracker.IsRegionGpuModified(buffer.CpuAddr(), buffer.SizeBytes())) {
             DownloadBufferMemory(buffer);
         }
@@ -1042,6 +1051,7 @@ std::optional<VideoCore::RasterizerDownloadArea> BufferCache<P>::GetFlushArea(DA
 
 template <class P>
 void BufferCache<P>::DownloadMemory(DAddr device_addr, u64 size) {
+    CheckControlledSynchronization(device_addr, size);
     ResolveScatter(device_addr, size);
     ForEachBufferInRange(device_addr, size, [&](BufferId, Buffer& buffer) {
         DownloadBufferMemory(buffer, device_addr, size);
@@ -1671,6 +1681,18 @@ bool BufferCache<P>::ShouldWaitAsyncFlushes() const noexcept {
 
 template <class P>
 void BufferCache<P>::CommitAsyncFlushesHigh() {
+    // Reject the complete candidate batch before ResolveScatter/AccumulateFlushes or dirty
+    // bookkeeping changes. There is no silent skip or waiting with a cache lock held.
+    if (!controlled_registrations.empty()) {
+        uncommitted_gpu_modified_ranges.ForEach([&](DAddr start, DAddr end) {
+            CheckControlledSynchronization(start, end - start);
+        });
+        for (const auto& ranges : committed_gpu_modified_ranges) {
+            ranges.ForEach([&](DAddr start, DAddr end) {
+                CheckControlledSynchronization(start, end - start);
+            });
+        }
+    }
     // Without reactive flushing, CPU reads of GPU-written memory are not trapped, so everything
     // has to be downloaded ahead of time.
     const bool download_all = !Settings::values.use_reactive_flushing.GetValue();
@@ -1835,6 +1857,10 @@ void BufferCache<P>::PopAsyncBuffers() {
         return;
     }
     auto& downloads = pending_downloads.front();
+    // Validate every destination before any copyback or queue/range retirement. Otherwise
+    // a later conflicting copy could reject after an earlier one has already written.
+    for (const auto& copy : downloads)
+        CheckControlledSynchronization(static_cast<DAddr>(copy.src_offset), copy.size);
     auto& async_buffer = async_buffers.front();
     u8* base = async_buffer->mapped_span.data();
     const size_t base_offset = async_buffer->offset;
@@ -2924,6 +2950,47 @@ void BufferCache<P>::MarkGpuUse(Buffer& buffer, u64 offset, u64 size) {
 }
 
 template <class P>
+bool BufferCache<P>::ControlledReadbacksIdle(const ControlledRegistrationPtr& operation) {
+    if (!operation) return false;
+    bool idle = true;
+    const bool qualified = device_memory.WithControlledMapping(
+        operation->plan.DeviceEpoch(), operation->plan.DeviceGeneration(),
+        [&](const auto& aliases_for) {
+            std::array<DAddr, 64> aliases{};
+            for (const auto& segment : operation->plan.Segments()) {
+                size_t count{};
+                if (!segment.storage.OwnerAlive() ||
+                    !aliases_for(segment.storage.PhysicalOffset(), aliases, count)) {
+                    idle = false;
+                    return;
+                }
+                for (size_t i = 0; i < count; ++i) {
+                    const auto address = aliases[i];
+                    const auto conflict = [&](DAddr start, DAddr end) {
+                        if (start <= address ? address - start < end - start
+                                             : start - address < DEVICE_PAGESIZE)
+                            idle = false;
+                    };
+                    uncommitted_gpu_modified_ranges.ForEachInRange(address, DEVICE_PAGESIZE, conflict);
+                    for (const auto& ranges : committed_gpu_modified_ranges)
+                        ranges.ForEachInRange(address, DEVICE_PAGESIZE, conflict);
+                    // pending_downloads also retains copies invalidated in async_downloads;
+                    // conservatively require their queued native/callback identity to retire.
+                    for (const auto& batch : pending_downloads) {
+                        for (const auto& copy : batch) {
+                            const DAddr start = static_cast<DAddr>(copy.src_offset);
+                            if (start <= address ? address - start < copy.size
+                                                 : start - address < DEVICE_PAGESIZE)
+                                idle = false;
+                        }
+                    }
+                }
+            }
+        });
+    return qualified && idle;
+}
+
+template <class P>
 void BufferCache<P>::CheckControlledSynchronization(DAddr device_addr, u64 size) {
     if (!size) return;
     // This owner-thread continuation must run before consuming the real tracker. A failure
@@ -3213,6 +3280,11 @@ void BufferCache<P>::DownloadBufferMemory(Buffer& buffer, DAddr device_addr, u64
     const DAddr unmap_begin = std::max(buffer.CpuAddr(), Common::AlignDown(device_addr, DEVICE_PAGESIZE));
     const DAddr unmap_end = std::min(buffer.CpuAddr() + buffer.SizeBytes(),
                                     Common::AlignUp(device_addr + size, DEVICE_PAGESIZE));
+    if (preserve_on_unmap) {
+        CheckControlledSynchronization(unmap_begin, unmap_end - unmap_begin);
+    } else {
+        CheckControlledSynchronization(device_addr, size);
+    }
     const auto complete_unmap = [&] {
         if (preserve_on_unmap) {
             ClearDownload(unmap_begin, unmap_end - unmap_begin);
@@ -3313,6 +3385,7 @@ void BufferCache<P>::DownloadBufferMemory(Buffer& buffer, DAddr device_addr, u64
 
 template <class P>
 void BufferCache<P>::WriteBackDownload(DAddr device_addr, const u8* data, u64 size) {
+    CheckControlledSynchronization(device_addr, size);
     // A buffer can cover device pages no guest memory backs (a storage buffer bound without a
     // size spans its whole GPU mapping, see StorageBufferBinding). The GPU's writes there have
     // nowhere to go; skip them, as the upload zero-fills them, and say so now and then instead

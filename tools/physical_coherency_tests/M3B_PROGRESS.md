@@ -1,5 +1,26 @@
 # M3B production integration progress
 
+## Restricted eligibility: blocked; readback isolation validation in progress
+
+The requested ordinary scalar production-eligibility acceptance is **not achieved**. The
+[restricted eligibility record](../../docs/M3B_F2_RESTRICTED_ELIGIBILITY.md) identifies the
+missing CPU/native/raw-pointer/GPU/alias-lifetime exclusion authorities. No certificate or
+automatic ordinary Write handoff is fabricated. The strict fallback is producer isolation.
+
+This continuation rejects overlapping uncommitted/committed/pending BufferCache readback work
+before request acceptance, through current physical aliases over the full preservation
+footprint. Guarded ordinary download/writeback and async scheduling/retirement reject active
+or Unknown conflicts before their data/bookkeeping effects. This is one family of isolation,
+not full GC/scatter/mapping/Texture/CPU producer exclusion. Original unbound F2 was rerun three
+times: backing77/cache10 each time; `--require-fixed` exits 1. F2 remains Open.
+
+Host extraction passed three registration/pipeline repetitions, including the new alias,
+other-page, busy-mapping and disjoint-readback cases. Mutation 95 and the complete new native
+case are being validated. The native test queues a real completed Vulkan async download but
+keeps guest copyback pending, then requires pre-accept Cancelled/zero stores from its guest
+consumer. It also probes actual download/writeback/scheduling entries while an accepted
+request is parked. New Android/Linux remote results must be recorded separately below.
+
 ## Native guest scheduler acceptance: final lifecycle hardening passed
 
 CI [38864622309](https://github.com/Splaser/emulator/actions/runs/38864622309) at `02610e1766`
