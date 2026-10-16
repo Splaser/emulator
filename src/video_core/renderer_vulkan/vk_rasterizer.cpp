@@ -1073,13 +1073,37 @@ VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64
     return new_area;
 }
 
+bool RasterizerVulkan::QueueControlledCpuWriteRequest(
+    const ControlledRegistrationPtr& operation,
+    const Core::Memory::ControlledCpuWriteRequestPtr& request) {
+    using Request = Core::Memory::ControlledCpuWriteRequest;
+    if (!operation || !request || request->State() != Request::Phase::Prepared) return false;
+    struct Handoff {
+        Core::Memory::ControlledCpuWriteRequestPtr request;
+        ControlledCpuWritePtr transaction;
+        ~Handoff() { if (!transaction) (void)request->Cancel(); }
+    };
+    auto handoff = std::make_shared<Handoff>();
+    handoff->request = request;
+    // Renderer teardown joins this existing GPU owner before releasing Rasterizer/Device.
+    // Only immutable request/registration owners cross the queue, never a raw Memory pointer.
+    return gpu.TryQueueCpuWrite([this, operation, handoff] {
+        if (!handoff->transaction) {
+            handoff->transaction = buffer_cache.BeginControlledCpuWriteRequest(operation, handoff->request);
+            if (!handoff->transaction) return true;
+        }
+        const auto phase = AdvanceControlledCpuWriteRequest(handoff->transaction);
+        return phase != Request::Phase::Prepared && phase != Request::Phase::Accepted;
+    });
+}
+
 Core::Memory::ControlledCpuWriteRequest::Phase RasterizerVulkan::AdvanceControlledCpuWriteRequest(
-    const ControlledCpuWritePtr& transaction, Core::Memory::Memory& memory) {
+    const ControlledCpuWritePtr& transaction) {
     using Request = Core::Memory::ControlledCpuWriteRequest;
     if (!transaction || !transaction->Request()) return Request::Phase::Unknown;
     if (buffer_cache.PollControlledCpuWrite(transaction) == BufferCache::ControlledCpuWrite::Phase::Preserved) {
         (void)buffer_cache.CommitControlledCpuWriteRequest(transaction,
-            [&](const auto& view, auto& write, u64 address, const auto& value) {
+            [&](auto& memory, const auto& view, auto& write, u64 address, const auto& value) {
                 using T = std::decay_t<decltype(value)>;
                 if constexpr (std::is_same_v<T, u8>)
                     return memory.WriteOrdinaryControlled8(view, write, Common::ProcessAddress{address}, value);

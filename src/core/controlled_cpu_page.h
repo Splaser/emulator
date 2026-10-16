@@ -13,6 +13,28 @@ template <class P> class BufferCache;
 
 namespace Core::Memory {
 
+class Memory;
+class ControlledCpuWriteRequest;
+
+/// Non-owning Memory pointer with a short execution-use boundary. Closing precedes Memory/
+/// process page-table destruction; it never waits for queued GPU work or native completion.
+struct CpuWriteOwner {
+    explicit CpuWriteOwner(Memory* memory_) : memory{memory_} {}
+    template <typename Visit>
+    bool TryVisit(Visit&& visit) const {
+        std::shared_lock lock{mutex, std::try_to_lock};
+        if (!lock.owns_lock() || !memory) return false;
+        visit(*memory); // Only bounded CPU store/publication; no GPU polling/wait here.
+        return true;
+    }
+    [[nodiscard]] bool Track(const std::shared_ptr<ControlledCpuWriteRequest>& request);
+    void Close();
+private:
+    mutable std::shared_mutex mutex;
+    Memory* memory;
+    std::array<std::weak_ptr<ControlledCpuWriteRequest>, 256> requests;
+};
+
 enum class PreparedCpuWriteResult { Stored, NeedSlow, Stale, Busy, Retired, Invalid };
 
 struct CpuAccessContext {
@@ -183,10 +205,23 @@ private:
 /// and admission release. Callers poll terminal state; this object never waits or dispatches.
 class ControlledCpuWriteRequest {
     friend class Memory;
+    friend struct CpuWriteOwner;
     template <class P> friend class VideoCommon::BufferCache;
 public:
     using Value = std::variant<u8, u16, u32, u64>;
     enum class Phase { Prepared, Accepted, Stored, Refused, Cancelled, Unknown };
+    enum class SchedulerAction { AwaitOwner, Complete, DoNotExecute, ReprepareCertified, Quarantine };
+    [[nodiscard]] SchedulerAction Action() const noexcept {
+        switch (State()) {
+        case Phase::Stored: return SchedulerAction::Complete;
+        case Phase::Cancelled: return SchedulerAction::DoNotExecute;
+        case Phase::Refused:
+            return no_effects.load(std::memory_order_relaxed)
+                ? SchedulerAction::ReprepareCertified : SchedulerAction::Quarantine;
+        case Phase::Unknown: return SchedulerAction::Quarantine;
+        default: return SchedulerAction::AwaitOwner;
+        }
+    }
     [[nodiscard]] Phase State() const noexcept { return phase.load(std::memory_order_acquire); }
     [[nodiscard]] std::optional<PreparedCpuWriteResult> Outcome() const noexcept {
         const auto state = State();
@@ -206,25 +241,55 @@ public:
         return std::visit([](const auto& scalar) { return sizeof(scalar); }, value);
     }
     [[nodiscard]] const Value& Payload() const { return value; }
+    [[nodiscard]] const std::shared_ptr<CpuWriteOwner>& Owner() const { return owner; }
 
 private:
-    ControlledCpuWriteRequest(PreparedCpuPage view_, u64 address_, Value value_)
-        : view{std::move(view_)}, address{address_}, value{std::move(value_)} {}
+    ControlledCpuWriteRequest(PreparedCpuPage view_, u64 address_, Value value_,
+                             std::shared_ptr<CpuWriteOwner> owner_)
+        : view{std::move(view_)}, address{address_}, value{std::move(value_)}, owner{std::move(owner_)} {}
+    void RefuseBeforeEffects() {
+        no_effects.store(true, std::memory_order_relaxed);
+        Publish(Phase::Refused);
+    }
     [[nodiscard]] bool TryAccept() noexcept {
         auto expected = Phase::Prepared;
         return phase.compare_exchange_strong(expected, Phase::Accepted,
                                               std::memory_order_acq_rel);
     }
     void Publish(Phase terminal, PreparedCpuWriteResult outcome = PreparedCpuWriteResult::NeedSlow) {
+        if (State() != Phase::Accepted) return; // terminal results are immutable
         result.store(outcome, std::memory_order_relaxed);
-        phase.store(terminal, std::memory_order_release);
+        auto expected = Phase::Accepted;
+        (void)phase.compare_exchange_strong(expected, terminal, std::memory_order_release,
+                                             std::memory_order_relaxed);
     }
     const PreparedCpuPage view;
     const u64 address;
     const Value value;
+    const std::shared_ptr<CpuWriteOwner> owner;
+    std::atomic<bool> no_effects{};
     std::atomic<Phase> phase{Phase::Prepared};
     std::atomic<PreparedCpuWriteResult> result{PreparedCpuWriteResult::NeedSlow};
 };
 using ControlledCpuWriteRequestPtr = std::shared_ptr<ControlledCpuWriteRequest>;
+
+inline bool CpuWriteOwner::Track(const ControlledCpuWriteRequestPtr& request) {
+    std::unique_lock lock{mutex, std::try_to_lock};
+    if (!lock.owns_lock() || !memory || request->Owner().get() != this) return false;
+    for (auto& entry : requests) {
+        if (entry.expired()) { entry = request; return true; }
+    }
+    return false;
+}
+
+inline void CpuWriteOwner::Close() {
+    std::unique_lock lock{mutex};
+    memory = nullptr;
+    for (auto& entry : requests) {
+        if (auto request = entry.lock()) {
+            if (!request->Cancel()) request->Publish(ControlledCpuWriteRequest::Phase::Unknown);
+        }
+    }
+}
 
 } // namespace Core::Memory

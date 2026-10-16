@@ -1,5 +1,86 @@
 # M3B production integration progress
 
+## M3B-F2 CPU Scheduler Handoff: explicit owner bridge, activation still gated
+
+This continuation implements the requested handoff boundaries without switching all ordinary
+Memory writes. `QueueControlledCpuWriteRequest` goes through the existing GPU facade and actual
+ThreadManager/RunThread. Its queue admission makes one try-lock/TryEmplace attempt: it never
+waits for queue space, a GPU fence, preservation, admission or the original CPU producer.
+Synchronous-mode/inline-owner submissions refuse. Up to 64 owner continuations poll once per
+normal owner iteration, allowing normal queue work and suspended-channel retries to progress.
+An already suspended channel refuses a new continuation before request acceptance. Stop/failure
+destroys captures while the renderer remains alive: Prepared requests cancel and accepted
+uncertainty quarantines. No second dispatcher or recursive queue pump was introduced.
+
+Each Memory now has a bounded weak request registry and an independently retained execution
+gate. Cold preparation registers its immutable request. Close seals only that Memory: it
+cancels Prepared requests, marks non-completed Accepted requests Unknown, and joins only an
+entered CPU store/publication visit. It does not drain the GPU queue or wait for native
+preservation. Queued closures contain no Memory/process raw pointer; final commit obtains a
+nonblocking execution visit. Actual KProcess::Finalize closes the gate BEFORE TLS/page-table
+finalization; Memory destruction, reset and move also close the old execution identity. Reset/
+move cannot redirect an old request to a replacement Memory. This is revocable execution
+qualification, not an assertion that the request pins the entire KProcess.
+
+Terminal request classification is explicit and cannot be downgraded by teardown:
+
+| Request state | Scheduler action |
+| --- | --- |
+| Prepared / Accepted | Await owner; enqueue/callback return is not store completion |
+| Stored | CPU store/publication completed; protected GPU refresh remains separate |
+| Cancelled | Do not execute this request |
+| Refused | Reprepare only with the explicit certified-no-effects flag; no legacy bypass |
+| Unknown | Quarantine; retain physical/native/request identity, never replay |
+
+Accepted cancellation still refuses without a certified no-effects cancellation operation.
+Owner exit does not manufacture such certification: admitted uncertainty stays Unknown.
+Quarantine checks now collect current physical aliases under a short try-guard, so a stale
+mapping generation alone does not block an unrelated current range or another owner's tasks.
+The same old physical footprint remains isolated; this is not recovery or revalidation for
+replaying the old store.
+
+The requested assertions are executable in the registration pipeline:
+
+| Test | Assertion/evidence |
+| --- | --- |
+| Enqueue vs Close | `enqueue_close_and_teardown`: real owner queue races Close, destroys the Memory wrapper before delayed GPU completion, and never executes the queued store |
+| CPU suspend vs GPU progress | `scheduler_handoff`: producer parks after releasing guards; real RunThread advances admission and checked preservation independently |
+| Repeated poll/resume | Same test: additional ticks/queue attempts leave physical publication sequence exactly one |
+| Process teardown | Execution gate Close joins the entered visitor before real PageTable::Resize destroys storage; subsequent visits refuse; production KProcess closes before Finalize |
+| Accepted cancellation | Late Cancel refuses; native/owner-close failures retain Unknown, dirty obligations and accepted owners |
+
+The handoff test parks a real conflicting physical admission, verifies that PTE/cache/sys-core
+guard probes can enter while admission/preservation are pending, and releases the dependency
+through later normal GPU-owner work. Close leaves unrelated owner ticks and current ranges
+running. A mutation which inserts synchronous queue acknowledgement recreates the CPU/GPU
+producer cycle and fails the topology gate. Omitting Close fails lifecycle control 92. Earlier
+candidate insertion/whole-owner deadlock witnesses remain required and unchanged in meaning.
+
+Evidence boundaries: ThreadManager, RunThread, bounded queue, CPU preparation, scoped ordinary
+store, physical admission/pins, PageTable, tracker, cache/Vulkan advance and checked transfer
+bodies are production code. Driver/device execution and engine/platform collaborators remain
+fixtures. The sys-core probe and cache object surrounding extracted bodies are harness
+collaborators; this is NOT full guest CpuManager/KThread fiber or complete KProcess destruction
+execution. The production Finalize ordering is compiled/audited, and the execution gate/PTE
+ordering is runtime-tested, but a complete kernel/process teardown run and alias-process lifetime
+qualification remain activation gates. Do not claim those remaining tests passed merely from
+the host topology suite. No automatic game-CPU routing is enabled.
+
+Next acceptance: connect the actual guest CPU suspension/resume owner without retaining any
+production sys-core/PTE/cache guard or required producer duty, validate complete kernel teardown
+and all alias-process owners, and enforce exclusion of ordinary GPU/GC/download/mapping/unknown
+producers. Real-device evidence and trusted Unknown recovery remain necessary. F2 remains Open.
+
+Validation for this slice: registration pipeline `--repeat 10` passed the four-width
+store/preservation cases and controls 82-90/92; its actual-owner handoff/lifecycle groups
+passed (including eight enqueue/close races), together with the synchronous-acknowledgement
+negative topology control. First-registration tests passed `--repeat 10` and controls 71/72/75;
+insertion audit passed three repetitions and all rejected baselines. `git diff --check` passed.
+The unchanged legacy F2 `--require-fixed` witness still fails as expected (`backing=77`,
+`observed=10`), so this is not a global F2 closure. Previous-source CI
+[38842256792](https://github.com/Splaser/emulator/actions/runs/38842256792) completed Android
+and Linux successfully at `da5bf21a39`; current-source native compilation awaits remote CI.
+
 ## Owned CPU requests and completion handoff: 2026-10-16 — automatic dispatch pending
 
 CI [38839879554](https://github.com/Splaser/emulator/actions/runs/38839879554) completed successfully

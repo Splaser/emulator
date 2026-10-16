@@ -34,10 +34,15 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
 
     CommandDataContainer next;
     bool failed = false;
+    std::array<std::function<bool()>, 64> cpu_writes{};
+    const auto has_cpu_writes = [&] {
+        return std::ranges::any_of(cpu_writes, [](const auto& poll) { return bool(poll); });
+    };
 
     const auto request_failure_shutdown = [&](const char* reason) {
         LOG_ERROR(HW_GPU, "Stopping GPU execution after resource failure: {}", reason);
         failed = true;
+        for (auto& poll : cpu_writes) poll = {}; // cancel/quarantine captures, never replay
         // Do not continue executing partially processed command lists or invent a dummy image.
         // Wake GPU sync waiters, then let the frontend stop the CPU and destroy the renderer.
         system.GPU().NotifyShutdown();
@@ -48,7 +53,7 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
         // A channel stopped at a semaphore acquire waits for a write by the guest CPU or by
         // another channel. While one is stopped, poll instead of sleeping on the queue.
         bool have_command = true;
-        if (!failed && scheduler.HasSuspendedChannels()) {
+        if (!failed && (scheduler.HasSuspendedChannels() || has_cpu_writes())) {
             have_command = state.queue.TryPop(next);
         } else {
             state.queue.PopWait(next, stop_token);
@@ -67,13 +72,21 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
         if (!failed) {
             try {
                 if (!have_command) {
-                    scheduler.RetrySuspended(true);
+                    if (scheduler.HasSuspendedChannels()) scheduler.RetrySuspended(true);
                 } else if (auto* submit_list = std::get_if<SubmitListCommand>(&next.data)) {
                     scheduler.Push(submit_list->channel, std::move(submit_list->entries));
                 } else if (std::holds_alternative<GPUTickCommand>(next.data)) {
                     system.GPU().TickWork();
                 } else if (const auto* execute = std::get_if<ExecuteCallbackCommand>(&next.data)) {
                     execute->callback();
+                } else if (auto* continuation = std::get_if<ContinueCpuWriteCommand>(&next.data)) {
+                    // Do not start a new transaction behind a channel which needs a CPU
+                    // producer. Destruction cancels the still-unaccepted request.
+                    if (!scheduler.HasSuspendedChannels()) {
+                        auto slot = std::ranges::find_if(cpu_writes, [](const auto& poll) { return !poll; });
+                        if (slot != cpu_writes.end()) *slot = std::move(continuation->poll);
+                    }
+                    continuation->poll = {};
                 } else if (const auto* flush = std::get_if<FlushRegionCommand>(&next.data)) {
                     rasterizer->FlushRegion(flush->addr, flush->size);
                 } else if (const auto* invalidate =
@@ -85,6 +98,9 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
                 } else {
                     assert(false);
                 }
+                // Ordinary queue entries, other channels and CPU producers can make progress
+                // while checked device completion is pending. Never spin inside one callback.
+                for (auto& poll : cpu_writes) if (poll && poll()) poll = {};
                 if (have_command && scheduler.HasSuspendedChannels()) {
                     // Also between commands, so a busy queue cannot starve a stopped channel.
                     // No flush here: that would add a host fence after every command.
@@ -105,11 +121,13 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
             }
         }
         if (!have_command) {
-            if (!failed && scheduler.HasSuspendedChannels()) {
+            if (!failed && (scheduler.HasSuspendedChannels() || has_cpu_writes())) {
                 std::this_thread::sleep_for(std::chrono::microseconds{500});
             }
             continue;
         }
+        if (failed && std::holds_alternative<ContinueCpuWriteCommand>(next.data))
+            next.data = std::monostate{};
         state.signaled_fence.store(next.fence);
         if (next.block) {
             // We have to lock the write_lock to ensure that the condition_variable wait not get a
@@ -200,6 +218,16 @@ void ThreadManager::RunOnGpuThread(std::function<void()> callback) {
     }
     // Admission and cancellation are checked under write_lock by PushCommand.
     PushCommand(ExecuteCallbackCommand{std::move(callback)}, true);
+}
+
+bool ThreadManager::TryQueueCpuWrite(std::function<bool()> poll) {
+    if (!poll || !is_async || IsGpuThread()) return false;
+    std::unique_lock lock{state.write_lock, std::try_to_lock};
+    if (!lock.owns_lock() || !state.accepting) return false;
+    if (!state.queue.TryEmplace(ContinueCpuWriteCommand{std::move(poll)},
+                                state.last_fence + 1, false)) return false;
+    ++state.last_fence;
+    return true;
 }
 
 void ThreadManager::InvalidateRegion(DAddr addr, u64 size) {

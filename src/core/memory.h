@@ -62,7 +62,7 @@ public:
     Memory(const Memory&) = delete;
     Memory& operator=(const Memory&) = delete;
 
-    Memory(Memory&&) = default;
+    Memory(Memory&&);
     Memory& operator=(Memory&&) = delete;
 
     /**
@@ -121,6 +121,9 @@ public:
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite16(Common::ProcessAddress, u16);
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite32(Common::ProcessAddress, u32);
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite64(Common::ProcessAddress, u64);
+    /// Owner teardown only, before process PTE finalization or Memory reset/destruction.
+    /// Closes short CPU execution visits, without waiting for GPU requests to finish.
+    void SealControlledCpuWrites();
 
     /// GPU-owner continuation only, AFTER preservation and admission. Invokes the actual
     /// ordinary Write8/16/32/64 with one bounded thread-local capability; every refusal is
@@ -568,6 +571,7 @@ private:
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite(
         Common::ProcessAddress, ControlledCpuWriteRequest::Value);
     Core::System& system;
+    std::shared_ptr<CpuWriteOwner> controlled_owner{std::make_shared<CpuWriteOwner>(this)};
 
     struct Impl;
     std::unique_ptr<Impl> impl;

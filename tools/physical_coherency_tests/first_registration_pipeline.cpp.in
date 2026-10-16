@@ -172,6 +172,7 @@ template<class P> class BufferCache {
 public:
     using Buffer=Vulkan::Buffer;using Runtime=Vulkan::BufferCacheRuntime;
     Runtime& runtime;
+    std::mutex mutex; // Same cache-lock type; producer locking is explicit in handoff tests.
     DeviceTracker device_tracker;
     VideoCommon::MemoryTrackerBase<DeviceTracker> memory_tracker;
     struct DeviceMemory {
@@ -244,6 +245,7 @@ public:
     ControlledCpuWritePtr BeginControlledCpuWrite(const ControlledRegistrationPtr&,const Core::Memory::PreparedCpuPage&,u64,u64,std::shared_ptr<const void> = {});
     ControlledCpuWritePtr BeginControlledCpuWriteRequest(const ControlledRegistrationPtr&,const Core::Memory::ControlledCpuWriteRequestPtr&);
     template<class Execute> Result CommitControlledCpuWriteRequest(const ControlledCpuWritePtr&,Execute&&);
+    void AbandonControlledCpuWrite(const ControlledCpuWritePtr&);
     typename ControlledCpuWrite::Phase PollControlledCpuWrite(const ControlledCpuWritePtr&);
     template<class Store> Result CommitControlledCpuTransaction(const ControlledCpuWritePtr&,u64,Store&&);
     void ReuseHidden(const ControlledRegistrationPtr& op) {
@@ -253,16 +255,31 @@ public:
 // @CACHE_METHODS@
 }
 using Cache=VideoCommon::BufferCache<int>;using Phase=Cache::ControlledRegistration::Phase;
+namespace VideoCommon::GPUThread {class ThreadManager;}
 namespace Vulkan {
 class RasterizerVulkan {
 public:
     using BufferCache=::Cache;
     using ControlledCpuWritePtr=Cache::ControlledCpuWritePtr;
+    using ControlledRegistrationPtr=Cache::ControlledRegistrationPtr;
     Cache& buffer_cache;
+    struct GpuFacade {
+        VideoCommon::GPUThread::ThreadManager* manager{};
+        bool TryQueueCpuWrite(std::function<bool()> poll);
+    } gpu;
+    bool QueueControlledCpuWriteRequest(const Cache::ControlledRegistrationPtr&,
+        const Core::Memory::ControlledCpuWriteRequestPtr&);
     Core::Memory::ControlledCpuWriteRequest::Phase AdvanceControlledCpuWriteRequest(
-        const ControlledCpuWritePtr&,Core::Memory::Memory&);
+        const ControlledCpuWritePtr&);
 };
 // @REQUEST_ADVANCE@
+}
+// @GPU_THREAD@
+bool Vulkan::RasterizerVulkan::GpuFacade::TryQueueCpuWrite(std::function<bool()> poll) {
+    return manager && manager->TryQueueCpuWrite(std::move(poll));
+}
+namespace Vulkan {
+// @REQUEST_QUEUE@
 }
 struct Scenario {
     Driver gpu;
@@ -398,7 +415,7 @@ void production_write_transaction(u64 width,bool deferred=false) {
     };
     expect_upload_blocked();
     s->scheduler.RunWorker();
-    if(request) assert(rasterizer.AdvanceControlledCpuWriteRequest(tx,memory)==Request::Phase::Accepted);
+    if(request) assert(rasterizer.AdvanceControlledCpuWriteRequest(tx)==Request::Phase::Accepted);
     require_pending();
     assert(s->cache->PollControlledCpuWrite(tx)==Tx::Submitted);
     assert(s->backing(off)==10 && s->cache->memory_tracker.IsRegionGpuModified(A,C));
@@ -428,7 +445,7 @@ void production_write_transaction(u64 width,bool deferred=false) {
             while(request->State()==Request::Phase::Accepted) std::this_thread::yield();
             observed=request->State()==Request::Phase::Stored && request->Outcome()==Result::Stored && s->backing(off)==77;
         });
-        assert(rasterizer.AdvanceControlledCpuWriteRequest(tx,memory)==Request::Phase::Stored);
+        assert(rasterizer.AdvanceControlledCpuWriteRequest(tx)==Request::Phase::Stored);
         cpu_consumer.join();assert(observed);
         before_cpu_store={};s->cache->device_tracker.before_mark=[] {};
         stored=true;
@@ -484,12 +501,14 @@ void request_lifecycle() {
             assert(request->Cancel() && !request->Cancel());
             assert(!s->cache->BeginControlledCpuWriteRequest(op,request));
             assert(request->State()==Request::Phase::Cancelled && !request->Outcome());
+            assert(request->Action()==Request::SchedulerAction::DoNotExecute);
             assert(op->State()==Phase::Ready && s->backing(7)==10);continue;
         }
         if(mode==1) {
             s->cpu.MapPages(s->table,1,1,B,Common::PageType::RasterizerCachedMemory);
             assert(!s->cache->BeginControlledCpuWriteRequest(op,request));
             assert(request->State()==Request::Phase::Refused && request->Outcome()==Result::NeedSlow);
+            assert(request->Action()==Request::SchedulerAction::ReprepareCertified);
             assert(s->gpu.submissions==1 && s->backing(7)==10);continue;
         }
         s->cache->memory_tracker.MarkRegionAsGpuModified(A,C);
@@ -499,8 +518,12 @@ void request_lifecycle() {
         if(mode==2) s->gpu.submit_result=VK_ERROR_DEVICE_LOST;
         s->scheduler.RunWorker();s->gpu.Complete();
         Vulkan::RasterizerVulkan rasterizer{*s->cache};
-        Cpu other{s->system,&s->table};Core::Memory::Memory wrong_memory{&other};
-        assert(rasterizer.AdvanceControlledCpuWriteRequest(tx,mode==3?wrong_memory:memory)==Request::Phase::Unknown);
+        if(mode==3) memory.SealControlledCpuWrites();
+        const auto completion=rasterizer.AdvanceControlledCpuWriteRequest(tx);
+        if(mode==3 && completion!=Request::Phase::Unknown) {
+            std::cerr<<"closed Memory owner executed a queued CPU store\n";std::exit(92);
+        }
+        assert(completion==Request::Phase::Unknown);
         assert(!request->Outcome() && s->backing(7)==10 && s->cache->memory_tracker.IsRegionGpuModified(A,C));
         std::weak_ptr<Request> retained=request;
         request.reset();tx.reset();
@@ -521,12 +544,128 @@ void request_lifecycle() {
         } else {
             assert(tx && request->State()==Request::Phase::Accepted);
             Vulkan::RasterizerVulkan rasterizer{*s->cache};
-            assert(rasterizer.AdvanceControlledCpuWriteRequest(tx,memory)==Request::Phase::Accepted);
+            assert(rasterizer.AdvanceControlledCpuWriteRequest(tx)==Request::Phase::Accepted);
             s->scheduler.RunWorker();s->gpu.Complete();
-            assert(rasterizer.AdvanceControlledCpuWriteRequest(tx,memory)==Request::Phase::Stored);
+            assert(rasterizer.AdvanceControlledCpuWriteRequest(tx)==Request::Phase::Stored);
             assert(request->Outcome()==Result::Stored && s->backing(7)==77);
         }
     }
+}
+
+void scheduler_handoff() {
+    using Request=Core::Memory::ControlledCpuWriteRequest;
+    for(bool close_owner: {false,true}) {
+        auto s=std::make_unique<Scenario>();Core::Memory::Memory memory{&s->cpu};
+        auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
+        assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
+        auto id=s->cache->ControlledReadyBuffer(op);
+        auto pin=s->cache->slot_buffers[id].PinStagedRepresentation(0,C);assert(pin);
+        auto& bytes=reinterpret_cast<Allocation*>(pin->Handle())->bytes;
+        std::fill(bytes.begin(),bytes.end(),99); // Fixture GPU allocation contents, not hardware evidence.
+        s->cache->memory_tracker.MarkRegionAsGpuModified(A,C);
+        auto request=memory.PrepareControlledWrite8(4103,77);assert(request);
+        const auto admission=request->View().physical.Epoch()->ranges;
+        const std::array access{Common::PhysicalRangeAdmission::Access{0,4096,Common::PhysicalRangeAdmission::Mode::Write}};
+        auto predecessor=admission->Enqueue(access,std::make_shared<int>(1));assert(predecessor);
+        assert(admission->TryStart(predecessor)==Common::PhysicalRangeAdmission::Start::Granted);
+        Core::System owner_system;VideoCore::RendererBase renderer;
+        Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler channels;
+        VideoCommon::GPUThread::ThreadManager manager{owner_system,true};
+        Vulkan::RasterizerVulkan rasterizer{*s->cache};rasterizer.gpu.manager=&manager;
+        manager.StartThread(renderer,context,channels);
+        Event entered,release;
+        std::mutex sys_core_guard;
+        auto blocked=std::async(std::launch::async,[&] {
+            manager.RunOnGpuThread([&] {entered.Set();release.Wait();});
+        });entered.Wait();
+        Event cpu_suspended,cpu_resume;
+        std::thread cpu_producer([&] {
+            {std::scoped_lock sys_lock{sys_core_guard},cache_lock{s->cache->mutex};
+             std::shared_lock pte_lock{request->View().mapping.domain->mutex};
+             assert(rasterizer.QueueControlledCpuWriteRequest(op,request));
+             assert(request->State()==Request::Phase::Prepared);}
+            cpu_suspended.Set();cpu_resume.Wait(); // no producer lock survives suspension
+        });cpu_suspended.Wait();
+        // The producer can release its real PTE/cache guards before releasing the GPU worker.
+        release.Set();Ready(blocked);
+        const auto guards_released=[&] {
+            std::unique_lock cache_lock{s->cache->mutex,std::try_to_lock};
+            std::unique_lock pte_lock{request->View().mapping.domain->mutex,std::try_to_lock};
+            std::unique_lock sys_lock{sys_core_guard,std::try_to_lock};
+            assert(cache_lock.owns_lock() && pte_lock.owns_lock() && sys_lock.owns_lock());
+        };
+        manager.RunOnGpuThread([&] {guards_released();assert(admission->Complete(predecessor));});
+        manager.RunOnGpuThread([&] {guards_released();s->scheduler.RunWorker();});
+        assert(request->State()==Request::Phase::Accepted && !request->Outcome());
+        if(close_owner) memory.SealControlledCpuWrites(); // Actual gate used before KProcess PTE finalization.
+        manager.RunOnGpuThread([&] {s->gpu.Complete();});manager.Synchronize();
+        if(close_owner) {
+            if(request->State()!=Request::Phase::Unknown || s->backing(7)==77) {
+                std::cerr<<"closed Memory owner executed a queued CPU store\n";std::exit(92);
+            }
+            assert(request->Action()==Request::SchedulerAction::Quarantine);
+            assert(s->cache->memory_tracker.IsRegionGpuModified(A,C));
+            s->cache->device_memory.epoch->generation.fetch_add(2);
+            s->cache->CheckControlledSynchronization(5*C,4); // Unrelated current range still runs after remap.
+            bool isolated=false;
+            try {s->cache->CheckControlledSynchronization(A,4);} catch(const std::runtime_error&) {isolated=true;}
+            assert(isolated);
+        } else {
+            assert(request->State()==Request::Phase::Stored && request->Outcome()==Result::Stored);
+            assert(s->backing(6)==99 && s->backing(7)==77 && s->backing(8)==99);
+            assert(request->View().physical.Published()->sequence==1);
+            memory.SealControlledCpuWrites();
+            assert(request->State()==Request::Phase::Stored && request->Outcome()==Result::Stored);
+            assert(!rasterizer.QueueControlledCpuWriteRequest(op,request));
+            for(int i=0;i<8;++i) {manager.TickGPU();}
+            manager.Synchronize();
+            assert(request->View().physical.Published()->sequence==1);
+        }
+        const int before=owner_system.gpu.ticks;
+        for(int i=0;i<8;++i) {manager.TickGPU();}
+        manager.Synchronize();assert(owner_system.gpu.ticks==before+8);
+        cpu_resume.Set();cpu_producer.join();
+        manager.Stop();
+    }
+}
+
+void enqueue_close_and_teardown() {
+    using Request=Core::Memory::ControlledCpuWriteRequest;
+    for(int i=0;i<8;++i) {
+        auto s=std::make_unique<Scenario>();auto memory=std::make_unique<Core::Memory::Memory>(&s->cpu);
+        auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
+        assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
+        auto request=memory->PrepareControlledWrite8(4103,77);assert(request);
+        Core::System owner_system;VideoCore::RendererBase renderer;
+        Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler channels;
+        VideoCommon::GPUThread::ThreadManager manager{owner_system,true};
+        Vulkan::RasterizerVulkan rasterizer{*s->cache};rasterizer.gpu.manager=&manager;
+        manager.StartThread(renderer,context,channels);
+        std::latch start{1};
+        std::thread enqueue([&] {start.wait();(void)rasterizer.QueueControlledCpuWriteRequest(op,request);});
+        std::thread close([&] {start.wait();memory->SealControlledCpuWrites();});
+        start.count_down();enqueue.join();close.join();memory.reset();
+        manager.RunOnGpuThread([&] {s->scheduler.RunWorker();s->gpu.Complete();});manager.Synchronize();
+        assert(request->State()==Request::Phase::Cancelled || request->State()==Request::Phase::Unknown || request->State()==Request::Phase::Refused);
+        assert(s->backing(7)==10);
+        assert(!request->Outcome().has_value() || request->State()==Request::Phase::Refused);
+        assert(!request->Owner()->TryVisit([](auto&) {assert(false);}));
+        manager.Stop();
+    }
+    // Teardown closes only this Memory's entered execution visit, not a GPU queue drain.
+    auto s=std::make_unique<Scenario>();Core::Memory::Memory memory{&s->cpu};
+    auto owner=memory.controlled_owner;
+    Event entered,release;
+    auto executor=std::async(std::launch::async,[&] {
+        return owner->TryVisit([&](auto&) {entered.Set();release.Wait();});
+    });entered.Wait();
+    std::atomic<bool> page_table_destroyed=false;
+    auto teardown=std::async(std::launch::async,[&] {
+        memory.SealControlledCpuWrites();s->table.Resize(16,12);page_table_destroyed=true;
+    });
+    assert(teardown.wait_for(std::chrono::milliseconds(20))!=std::future_status::ready && !page_table_destroyed);
+    release.Set();assert(Ready(executor));Ready(teardown);
+    assert(page_table_destroyed && !owner->TryVisit([](auto&) {assert(false);}));
 }
 
 void ordinary_binding_refusals() {
@@ -701,6 +840,6 @@ int main(int argc,char** argv) {
         writer_first(1);writer_first(15);registration_first();
         for(u64 width: {1,2,4,8}) {production_write_transaction(width);production_write_transaction(width,true);}
     }
-    faults();transaction_faults();ordinary_binding_refusals();request_lifecycle();
+    faults();transaction_faults();ordinary_binding_refusals();request_lifecycle();scheduler_handoff();enqueue_close_and_teardown();
     std::cout<<"PASS actual cache pipeline: both 77 registration orderings, GPU dirty complement [99,77,99], transaction upload exclusion, post-store real tracker publication, delayed checked native completion and failure/drop quarantine; repeat="<<repeats<<" (Vulkan dispatch/device execution remain fixtures)\n";
 }

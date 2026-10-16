@@ -293,6 +293,7 @@ public:
     template <typename Execute>
     [[nodiscard]] Core::Memory::PreparedCpuWriteResult CommitControlledCpuWriteRequest(
         const ControlledCpuWritePtr&, Execute&& execute);
+    void AbandonControlledCpuWrite(const ControlledCpuWritePtr& transaction);
     [[nodiscard]] typename ControlledCpuWrite::Phase PollControlledCpuWrite(
         const ControlledCpuWritePtr&);
     template <typename Store>

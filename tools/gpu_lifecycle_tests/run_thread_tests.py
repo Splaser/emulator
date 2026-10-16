@@ -11,6 +11,7 @@ p = argparse.ArgumentParser()
 p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--repeat', type=int, default=10)
 p.add_argument('--sanitize', choices=['address', 'thread'])
+p.add_argument('--handoff-controls', action='store_true')
 args = p.parse_args()
 if args.repeat < 1:
     p.error('--repeat must be positive')
@@ -119,6 +120,7 @@ void full_queue_stop() {
     });
     entered->Wait();
     for(int i=0;i<4096;++i) manager.TickGPU(); // exact production queue capacity
+    Require(!manager.TryQueueCpuWrite([] {return true;}),"full queue admitted nonblocking CPU handoff");
     Event waiting,stopping; queue_wait=&waiting; stop_requested=&stopping;
     std::atomic<int> cancelled_executions=0;
     auto producer=std::async(std::launch::async,[&] {
@@ -192,10 +194,36 @@ void failed_worker_acknowledgement() {
             "failed-mode queue fence reported preservation success");
     Require(calls==0,"failed worker executed preservation");manager.Stop();
 }
+void nonblocking_cpu_continuation() {
+    Core::System system;VideoCore::RendererBase renderer;
+    Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler scheduler;
+    ThreadManager manager{system,true};manager.StartThread(renderer,context,scheduler);
+    Event entered,release,polled;
+    auto blocked=std::async(std::launch::async,[&] {
+        manager.RunOnGpuThread([&] {entered.Set();release.Wait();});
+    });entered.Wait();
+    std::atomic<bool> produced=false;std::atomic<int> stores=0;
+    auto enqueue=std::async(std::launch::async,[&] {
+        return manager.TryQueueCpuWrite([&] {polled.Set();if(!produced) return false;++stores;return true;});
+    });
+    const bool nonblocking=enqueue.wait_for(100ms)==std::future_status::ready;
+    release.Set();Ready(blocked);Require(Ready(enqueue),"handoff queue refused unexpectedly");
+    Require(nonblocking,"CPU handoff waited for a GPU worker waiting on that CPU producer");
+    polled.Wait();
+    manager.RunOnGpuThread([&] {produced=true;}); // later normal queue work must break the dependency
+    manager.Synchronize();Require(stores==1,"continuation failed or replayed store");
+    for(int i=0;i<8;++i) {manager.TickGPU();}
+    manager.Synchronize();
+    Require(stores==1,"retired continuation was resumed again");manager.Stop();
+    Require(!manager.TryQueueCpuWrite([] {return true;}),"post-stop CPU handoff accepted");
+    ThreadManager synchronous{system,false};
+    Require(!synchronous.TryQueueCpuWrite([] {return true;}),"unsupported synchronous handoff accepted");
+}
 int main() {
     try {
         full_queue_stop(); suspended_stop(); execution_and_ownership(true); execution_and_ownership(false);
         acknowledged_preservation();failed_worker_acknowledgement();
+        nonblocking_cpu_continuation();
         std::cout<<"PASS actual ThreadManager: full-queue cancellation, active join, suspended retry, sync/async inline, pre/post-start rejection\n";
     } catch(const std::exception& e) { std::cerr<<"FAIL "<<e.what()<<"\n"; return 1; }
 }
@@ -220,3 +248,15 @@ for i in range(args.repeat):
     if result.returncode:
         print(result.stdout+result.stderr,end=''); raise SystemExit(result.returncode)
 print(f'PASS actual ThreadManager ({args.repeat} repetitions)')
+if args.handoff_controls:
+    admission = '++state.last_fence;\n    return true;'
+    assert body.count(admission) == 1
+    control = out / 'blocking_handoff.cpp'
+    control.write_text(head + body.replace(admission,
+        '++state.last_fence;\n    lock.unlock();\n    Synchronize();\n    return true;') + tail)
+    mutant = out / ('blocking_handoff.exe' if os.name == 'nt' else 'blocking_handoff')
+    subprocess.run(flags + [str(control), '-o', str(mutant)], check=True)
+    result = subprocess.run([str(mutant)], capture_output=True, text=True, timeout=30)
+    if result.returncode != 1 or 'handoff waited for a GPU worker waiting on that CPU producer' not in result.stderr:
+        raise RuntimeError(f'Blocking handoff control failed incorrectly: {result.returncode} {result.stderr}')
+    print('PASS negative topology control: synchronous queue acknowledgement recreates the CPU/GPU dependency cycle')

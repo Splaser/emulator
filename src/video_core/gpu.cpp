@@ -174,6 +174,9 @@ struct GPU::Impl {
     void RunOnGpuThread(std::function<void()> callback) {
         gpu_thread.RunOnGpuThread(std::move(callback));
     }
+    bool TryQueueCpuWrite(std::function<bool()> poll) {
+        return gpu_thread.TryQueueCpuWrite(std::move(poll));
+    }
 
     /// Returns a reference to the Maxwell3D GPU engine.
     [[nodiscard]] Engines::Maxwell3D& Maxwell3D() {
@@ -524,6 +527,10 @@ bool GPU::IsGpuThread() const { return impl->IsGpuThread(); }
 
 void GPU::RunOnGpuThread(std::function<void()> callback) {
     impl->RunOnGpuThread(std::move(callback));
+}
+
+bool GPU::TryQueueCpuWrite(std::function<bool()> poll) {
+    return impl->TryQueueCpuWrite(std::move(poll));
 }
 
 void GPU::SynchronizeGPUThread() {

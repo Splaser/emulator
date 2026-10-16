@@ -1,6 +1,20 @@
 # PR #375 / #380 integration roadmap
 
-## Current continuation: 2026-10-16 — CPU request/completion owned, automatic dispatch pending
+## Current continuation: 2026-10-16 — M3B-F2 CPU Scheduler Handoff
+
+An explicit nonblocking bridge now runs request continuations on the existing GPU ThreadManager.
+Per-Memory Close cancels/quarantines only its requests and joins bounded execution visits before
+production process page-table finalization, without draining unrelated GPU work. Cancelled,
+certified Refused and Unknown have distinct scheduler actions; Unknown never permits replay.
+The five requested assertion groups, queue dependency-cycle mutation and lifetime-close mutation
+are in the [current progress entry](../tools/physical_coherency_tests/M3B_PROGRESS.md).
+
+This does not switch ordinary game writes. Actual guest CPU fiber suspension/resume, full kernel
+teardown, production lock-context proof, alias-process lifetime qualification, full producer
+exclusion and device acceptance remain gated. Host tests use real GPU owner scheduling code but
+retain explicit engine/driver/lock-spy fixture boundaries. F2 stays Open.
+
+### Earlier continuation: CPU request/completion owned, automatic dispatch pending
 
 CI [38839879554](https://github.com/Splaser/emulator/actions/runs/38839879554) passed both Android
 and Linux at `273bfb2f5d`. The next slice adds actual CPU-owner immutable scalar request

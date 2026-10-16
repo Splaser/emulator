@@ -104,6 +104,19 @@ public:
         return true;
     }
 
+    /// Current alias qualification for quarantine isolation, never permission to replay an
+    /// old physical plan. Remaps may change aliases; unrelated current ranges can still run.
+    template <typename Func>
+    [[nodiscard]] bool WithCurrentControlledAliases(Func&& operation) {
+        std::unique_lock lock{mapping_guard, std::try_to_lock};
+        if (!lock.owns_lock() || (MapGeneration() & 1) || !backing_epoch ||
+            !backing_epoch->alive.load()) return false;
+        operation(backing_epoch, [this](PAddr physical, std::span<DAddr> output, size_t& count) {
+            return CollectControlledAliasesLocked(physical, output, count);
+        });
+        return true;
+    }
+
     /// Bounded store + post-store tracker publication only, on the GPU owner. No waits,
     /// preservation/dispatch callbacks or cache/PTE guards may enclose this entry. The callback's
     /// CPU context/PTE guards must be nonblocking and released before tracker/tag publication.

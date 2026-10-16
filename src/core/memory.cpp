@@ -976,19 +976,28 @@ std::optional<PreparedCpuPage> Memory::PrepareControlledCpuPage(
     return impl->PrepareControlledCpuPage(page_address);
 }
 
-Memory::~Memory() = default;
+Memory::~Memory() { SealControlledCpuWrites(); }
+
+Memory::Memory(Memory&& other) : system{other.system} {
+    other.SealControlledCpuWrites(); // queued requests never migrate their execution identity
+    impl = std::move(other.impl);
+}
+
+void Memory::SealControlledCpuWrites() { controlled_owner->Close(); }
 
 ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite(
     Common::ProcessAddress target, ControlledCpuWriteRequest::Value value) {
     const u64 address = GetInteger(target) & 0xffffffffffffULL;
     const auto size = std::visit([](const auto& scalar) { return sizeof(scalar); }, value);
+    if (!controlled_owner->TryVisit([](Memory&) {})) return {};
     if (size > CITRON_PAGESIZE - address % CITRON_PAGESIZE) return {};
     auto page = PrepareControlledCpuPage(address & ~(CITRON_PAGESIZE - 1));
     if (!page || page->mapping.type != Common::PageType::RasterizerCachedMemory ||
         !page->IsCurrentForRegistration())
         return {};
-    return ControlledCpuWriteRequestPtr{
-        new ControlledCpuWriteRequest{std::move(*page), address, std::move(value)}};
+    auto request = ControlledCpuWriteRequestPtr{
+        new ControlledCpuWriteRequest{std::move(*page), address, std::move(value), controlled_owner}};
+    return controlled_owner->Track(request) ? request : ControlledCpuWriteRequestPtr{};
 }
 
 ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite8(Common::ProcessAddress address, u8 value) {
@@ -1008,7 +1017,9 @@ ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite64(Common::ProcessAdd
 }
 
 void Memory::Reset() {
+    SealControlledCpuWrites();
     impl = std::make_unique<Impl>(system);
+    controlled_owner = std::make_shared<CpuWriteOwner>(this);
 }
 
 void Memory::SetCurrentPageTable(Kernel::KProcess& process) {

@@ -136,13 +136,17 @@ public:
     /// Explicit GPU-owner controlled endpoint. Ordinary game routing remains unenrolled.
     using ControlledRegistrationPtr = BufferCache::ControlledRegistrationPtr;
     using ControlledCpuWritePtr = BufferCache::ControlledCpuWritePtr;
+    /// Explicit isolated-footprint handoff only. A successful enqueue is not acceptance or
+    /// completion. Never wait for it while retaining CPU/PTE/cache locks or producer duties.
+    [[nodiscard]] bool QueueControlledCpuWriteRequest(
+        const ControlledRegistrationPtr&, const Core::Memory::ControlledCpuWriteRequestPtr&);
     [[nodiscard]] ControlledCpuWritePtr BeginControlledCpuWriteRequest(
         const ControlledRegistrationPtr& operation,
         const Core::Memory::ControlledCpuWriteRequestPtr& request) {
         return buffer_cache.BeginControlledCpuWriteRequest(operation, request);
     }
     [[nodiscard]] Core::Memory::ControlledCpuWriteRequest::Phase AdvanceControlledCpuWriteRequest(
-        const ControlledCpuWritePtr&, Core::Memory::Memory&);
+        const ControlledCpuWritePtr&);
     [[nodiscard]] ControlledCpuWritePtr BeginControlledCpuWrite(
         const ControlledRegistrationPtr& operation, const Core::Memory::PreparedCpuPage& view,
         u64 address, u64 size) {

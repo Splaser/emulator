@@ -1,5 +1,14 @@
 # M3B - Controlled First Registration Integration
 
+Current scope is **M3B-F2 CPU Scheduler Handoff**: explicit nonblocking existing-owner queue
+continuations, per-Memory execution closure before process PTE finalization, distinct
+Cancelled/Refused/Unknown actions, and the five concurrency/lifecycle assertion groups.
+See [current progress](../tools/physical_coherency_tests/M3B_PROGRESS.md) for production-code and
+fixture boundaries. Close isolates this Memory's requests, not the entire GPU queue. Complete
+guest fiber/process/production-lock runtime proof, alias-process lifetime qualification, full
+producer exclusion and real-device acceptance remain pending. Automatic game routing stays off;
+F2 remains Open. The older notes below are historical.
+
 Current continuation: [38839879554](https://github.com/Splaser/emulator/actions/runs/38839879554)
 passed Android and Linux at `273bfb2f5d`. CPU-owner scalar preparation now supplies an immutable
 request to the actual cache/Vulkan continuation, with cancellation/acceptance ownership and

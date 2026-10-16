@@ -173,6 +173,7 @@ public:
     void SynchronizeGPUThread();
     bool IsGpuThread() const;
     void RunOnGpuThread(std::function<void()> callback);
+    [[nodiscard]] bool TryQueueCpuWrite(std::function<bool()> poll);
 
     /// Gets a mutable reference to the Host1x interface
     [[nodiscard]] Host1x::Host1x& Host1x();

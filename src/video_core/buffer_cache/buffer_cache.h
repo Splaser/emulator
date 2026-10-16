@@ -230,11 +230,15 @@ auto BufferCache<P>::BeginControlledCpuWriteRequest(
     const Core::Memory::ControlledCpuWriteRequestPtr& request) -> ControlledCpuWritePtr {
     using Request = Core::Memory::ControlledCpuWriteRequest;
     if (!request || !request->TryAccept()) return {};
+    if (!request->Owner()->TryVisit([](auto&) {})) {
+        request->RefuseBeforeEffects();
+        return {};
+    }
     try {
         auto transaction = BeginControlledCpuWrite(operation, request->View(), request->Address(),
                                                     request->Size(), request);
         if (!transaction) {
-            request->Publish(Request::Phase::Refused);
+            request->RefuseBeforeEffects();
             return {};
         }
         transaction->request = request;
@@ -253,6 +257,11 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuWriteReq
     if (!transaction || !transaction->request || transaction->executing_request)
         return Result::Invalid;
     if (transaction->phase != ControlledCpuWrite::Phase::Preserved) return Result::NeedSlow;
+    // This potentially blocking legacy plan qualification precedes the Memory lifetime visit.
+    if (ControlledBufferId(transaction->operation, false) == NULL_BUFFER_ID) {
+        AbandonControlledCpuWrite(transaction);
+        return Result::NeedSlow;
+    }
     // Request-backed writes may commit only their immutable accepted payload, never a later
     // caller-supplied scalar via the old typed endpoint. No binding survives this short call.
     transaction->executing_request = true;
@@ -260,12 +269,28 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuWriteReq
         bool& flag;
         ~Reset() { flag = false; }
     } reset{transaction->executing_request};
-    return std::visit([&](const auto& value) {
-        return CommitControlledCpuTransaction(transaction, sizeof(value),
-            [&](const auto& view, auto& write, u64 address) {
-                return execute(view, write, address, value);
-            });
-    }, transaction->request->Payload());
+    Result result = Result::NeedSlow;
+    const bool visited = transaction->request->Owner()->TryVisit([&](auto& memory) {
+        result = std::visit([&](const auto& value) {
+            return CommitControlledCpuTransaction(transaction, sizeof(value),
+                [&](const auto& view, auto& write, u64 address) {
+                    return execute(memory, view, write, address, value);
+                });
+        }, transaction->request->Payload());
+    });
+    if (!visited) AbandonControlledCpuWrite(transaction);
+    return result;
+}
+
+template <class P>
+void BufferCache<P>::AbandonControlledCpuWrite(const ControlledCpuWritePtr& transaction) {
+    if (!transaction || transaction->phase == ControlledCpuWrite::Phase::Committed ||
+        transaction->phase == ControlledCpuWrite::Phase::Cancelled) return;
+    (void)transaction->write.MarkUnknown();
+    transaction->phase = ControlledCpuWrite::Phase::Unknown;
+    transaction->operation->phase = ControlledRegistration::Phase::Unknown;
+    if (transaction->request)
+        transaction->request->Publish(Core::Memory::ControlledCpuWriteRequest::Phase::Unknown);
 }
 
 template <class P>
@@ -275,6 +300,10 @@ auto BufferCache<P>::PollControlledCpuWrite(const ControlledCpuWritePtr& transac
     if (!transaction) return Phase::Unknown;
     auto& tx = *transaction;
     if (tx.phase != Phase::Waiting && tx.phase != Phase::Submitted) return tx.phase;
+    if (tx.request && tx.request->State() != Core::Memory::ControlledCpuWriteRequest::Phase::Accepted) {
+        AbandonControlledCpuWrite(transaction);
+        return tx.phase;
+    }
     auto& op = *tx.operation;
     const auto unknown = [&] {
         (void)tx.write.MarkUnknown();
@@ -363,7 +392,9 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuTransact
     auto& op = *tx.operation;
     try {
         Result result = Result::Busy;
-        const bool valid = ControlledBufferId(tx.operation, false) != NULL_BUFFER_ID && tx.write.Granted();
+        // A request's slot was qualified immediately before entering the lifetime visit on
+        // this same GPU owner. Do not acquire a blocking device snapshot lock in that visit.
+        const bool valid = (tx.executing_request || ControlledBufferId(tx.operation, false) != NULL_BUFFER_ID) && tx.write.Granted();
         const bool qualified = valid && device_memory.WithControlledPhysicalAliases(
             tx.view.physical.PhysicalOffset() + tx.address % DEVICE_PAGESIZE,
             op.plan.DeviceEpoch(), op.plan.DeviceGeneration(), [&](auto aliases) {
@@ -2863,11 +2894,11 @@ void BufferCache<P>::CheckControlledSynchronization(DAddr device_addr, u64 size)
             operation->phase != ControlledRegistration::Phase::Unknown)
             continue;
         bool overlaps = false;
-        const bool qualified = device_memory.WithControlledMapping(
-            operation->plan.DeviceEpoch(), operation->plan.DeviceGeneration(),
-            [&](const auto& aliases_for) {
+        const bool qualified = device_memory.WithCurrentControlledAliases(
+            [&](const auto& backing, const auto& aliases_for) {
                 std::array<DAddr, 64> aliases{};
                 for (const auto& segment : operation->plan.Segments()) {
+                    if (segment.storage.Epoch() != backing) continue;
                     size_t count{};
                     if (!aliases_for(segment.storage.PhysicalOffset(), aliases, count)) {
                         overlaps = true; // Unknown aliases cannot qualify an upload.

@@ -4,6 +4,8 @@
 #pragma once
 
 #include <atomic>
+#include <algorithm>
+#include <array>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
@@ -81,10 +83,14 @@ struct ExecuteCallbackCommand final {
     std::function<void()> callback;
 };
 
+/// Nonblocking owner continuation. false parks until another normal owner iteration; true
+/// retires this capture. The callback must never wait for a CPU producer or pump the queue.
+struct ContinueCpuWriteCommand final { std::function<bool()> poll; };
+
 using CommandData =
     std::variant<std::monostate, SubmitListCommand, FlushRegionCommand, InvalidateRegionCommand,
                  FlushAndInvalidateRegionCommand, GPUTickCommand, SynchronizeCommand,
-                 ExecuteCallbackCommand>;
+                 ExecuteCallbackCommand, ContinueCpuWriteCommand>;
 
 struct CommandDataContainer {
     CommandDataContainer() = default;
@@ -143,6 +149,9 @@ public:
 
     bool IsGpuThread() const { return current_manager == this; }
     void RunOnGpuThread(std::function<void()> callback);
+    /// Single try-lock/queue attempt, including full-queue rejection; never a blocking fence.
+    /// Unsupported synchronous mode and inline GPU-owner submissions refuse before execution.
+    [[nodiscard]] bool TryQueueCpuWrite(std::function<bool()> poll);
 
 private:
     /// Pushes a command to be executed by the GPU thread
