@@ -4,6 +4,14 @@ on:
   push:
     branches: [codex/pr375-pr380-integration]
   workflow_dispatch:
+    inputs:
+      validation_scope:
+        description: Full validation, or Linux only when unchanged Android sources already passed
+        type: choice
+        default: full
+        options:
+          - full
+          - linux-only
 
 permissions:
   contents: read
@@ -14,6 +22,7 @@ concurrency:
 
 jobs:
   android-native:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.validation_scope != 'linux-only' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:

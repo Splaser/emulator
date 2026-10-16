@@ -70,6 +70,8 @@ head=r'''
 #include <utility>
 #include <vector>
 #include "common/polyfill_thread.h"
+#include "video_core/buffer_cache/controlled_conflict.h"
+using VideoCommon::ControlledProducerConflict;
 #define CITRON_PROFILE_SCOPE(...) ((void)0)
 template<class... T> void Log(const T&...) {}
 #define LOG_INFO(category, format, ...) Log(__VA_ARGS__)
@@ -127,6 +129,8 @@ struct FenceManager {
     static constexpr bool can_async_check=true;
     using TFence=std::shared_ptr<Fence>;
     std::atomic<bool> is_shutting_down=false;
+    std::atomic<bool> producer_conflict=false;
+    struct Gpu {void NotifyControlledProducerConflict(){}} gpu;
     std::queue<TFence> fences;
     std::deque<std::function<void()>> uncommitted_operations;
     std::deque<std::deque<std::function<void()>>> pending_operations;
