@@ -27,4 +27,16 @@ public:
     virtual void RetireAfterDeviceIdle() = 0;
 };
 
+/// Dedicated retained staged-to-staged copy plus checked source/destination readback.
+/// Owners grant neither cache membership nor physical/content authority.
+class ControlledAliasTransfer {
+public:
+    virtual ~ControlledAliasTransfer() = default;
+    virtual const void* SourceIdentity() const = 0;
+    virtual const void* DestinationIdentity() const = 0;
+    virtual bool Submit() = 0;
+    virtual ControlledTransferPoll Poll() = 0;
+    virtual void RetireAfterDeviceIdle() = 0;
+};
+
 } // namespace VideoCommon

@@ -150,7 +150,19 @@ fence_shutdown=fence_shutdown.replace('cv.notify_all();','cv.notify_all();\n    
 
 orchestration=r'''
 std::vector<std::string> order;
+enum class ControlledAliasPhase { Prepared, Parked, Submitted, Complete, Refused, Unknown };
+struct AliasDomain {
+    int cancelled{}, unknown{};
+    bool Cancel(int) {++cancelled; return true;}
+    bool MarkUnknown(int) {++unknown; return true;}
+};
+struct AliasOp {
+    ControlledAliasPhase phase;
+    std::shared_ptr<AliasDomain> domain;
+    int ticket{};
+};
 struct RasterizerVulkan {
+    std::vector<std::shared_ptr<AliasOp>> controlled_alias_copies;
     void RetireControlledTransfersAfterDeviceIdle() {order.push_back("controlled_retire");}
     std::atomic<bool> is_shutting_down=false; std::shared_mutex shutdown_mutex; bool physical_shadow=false;
     struct Cache { std::mutex mutex; void SetPhysicalShadow(void*){} } texture_cache,buffer_cache;
@@ -234,7 +246,13 @@ struct RendererVulkan {
 '''
 tail=r'''
 void renderer_order() {
-    order.clear(); {RendererVulkan renderer;}
+    auto domain=std::make_shared<AliasDomain>();
+    auto pending=std::make_shared<AliasOp>(AliasOp{ControlledAliasPhase::Prepared,domain,1});
+    auto active=std::make_shared<AliasOp>(AliasOp{ControlledAliasPhase::Submitted,domain,2});
+    order.clear(); {RendererVulkan renderer;renderer.rasterizer.controlled_alias_copies={pending,active};}
+    Require(domain->cancelled==1 && domain->unknown==1,"alias shutdown cancelled an active effect or lost pending cancellation");
+    Require(pending->phase==ControlledAliasPhase::Refused && active->phase==ControlledAliasPhase::Unknown,
+            "alias shutdown returned a false completion");
     const std::vector<std::string> expected={"pin_seal","pipelines","finish","fencing","runtime_finish","runtime_finish","recording","presentation_join","scheduler_join","detach_on_submit","turbo_join","device_idle","controlled_retire","completion_join","imports"};
     Require(order==expected,"renderer destroys resources or waits idle before host workers are joined");
 }

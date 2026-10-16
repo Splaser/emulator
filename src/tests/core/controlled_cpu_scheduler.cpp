@@ -726,4 +726,188 @@ TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
         std::cout << "F3 REPRODUCED (not fixed); real ordinary cache and Vulkan transfers\n";
     }
 }
+TEST_CASE("Admitted staged alias adapter copies exact physical dirty intersections",
+          "[.][f3-transfer]") {
+    using Phase = Vulkan::ControlledAliasPhase;
+    using Admission = Common::PhysicalRangeAdmission;
+    Settings::values.use_multi_core.SetValue(true);
+    Settings::values.use_asynchronous_gpu_emulation.SetValue(true);
+    Settings::values.use_uma_zero_copy.SetValue(false);
+    Settings::values.cpu_debug_mode.SetValue(false);
+    Core::System system;
+    Window window;
+    system.Initialize();
+    TransferRenderer* renderer{};
+    Access::Initialize(system, window, [&](Core::System& initialized) {
+        auto result = std::make_unique<TransferRenderer>(window, initialized);
+        renderer = result.get();
+        return result;
+    });
+    SCOPE_EXIT { system.ShutdownMainProcess(); };
+    auto& gpu = system.GPU();
+    auto& rasterizer = renderer->rasterizer;
+    auto& device_memory = system.Host1x().MemoryManager();
+    const auto on_gpu = [&](auto&& callback) {
+        std::exception_ptr error;
+        gpu.RunOnGpuThread([&] {
+            try { callback(); } catch (...) { error = std::current_exception(); }
+        });
+        if (error) std::rethrow_exception(error);
+    };
+    auto channel = gpu.AllocateChannel();
+    channel->memory_manager = std::make_shared<Tegra::MemoryManager>(system);
+    on_gpu([&] { gpu.InitChannel(*channel, 0); gpu.BindChannel(channel->bind_id); });
+    Process owner{system};
+    auto& memory = owner.process->GetMemory();
+    auto* keeper = owner.Start([&] {
+        auto& kernel = system.Kernel();
+        auto& self = Kernel::GetCurrentThread(kernel);
+        while (!self.IsTerminationRequested())
+            (void)self.Sleep(kernel.HardwareTimer().GetTick() + 1'000'000);
+    });
+    constexpr DAddr A = 0x1000000, B = 0x2000000, C = 0x3000000,
+                    D = 0x4000000, E = 0x5000000;
+    constexpr u32 Page = 4096;
+    std::vector<u8> initial(5 * Footprint, 10);
+    std::fill(initial.begin() + 4 * Footprint, initial.end(), u8{55});
+    REQUIRE(memory.WriteBlock(owner.heap, initial.data(), initial.size()));
+    const auto asid = device_memory.RegisterProcess(&memory);
+    for (DAddr address : {A, B, C, D, E}) device_memory.AllocateFixed(address, Footprint);
+    device_memory.Map(A, GetInteger(owner.heap), Footprint, asid);
+    device_memory.Map(B, GetInteger(owner.heap), Footprint, asid);
+    device_memory.Map(C, GetInteger(owner.heap) + Page, Footprint, asid);
+    device_memory.Map(D, GetInteger(owner.heap) + 3 * Footprint, Footprint, asid);
+    device_memory.Map(E, GetInteger(owner.heap) + 3 * Footprint, Footprint, asid);
+    SCOPE_EXIT {
+        on_gpu([&] {
+            for (DAddr address : {A, B, C, D, E}) device_memory.Unmap(address, Footprint);
+        });
+        device_memory.UnregisterProcess(asid);
+        owner.Close();
+        EndThread(keeper);
+    };
+    const auto read = [&](DAddr address) {
+        std::vector<u8> bytes;
+        on_gpu([&] { bytes = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, address, Page)); });
+        return bytes;
+    };
+    for (DAddr address : {A, B, C, D, E}) REQUIRE(read(address) == std::vector<u8>(Page, 10));
+    const auto begin = [&](DAddr source, DAddr target) {
+        std::shared_ptr<Vulkan::ControlledAliasCopy> op;
+        on_gpu([&] { op = rasterizer.BeginControlledAliasCopy(source, target, Page); });
+        return op;
+    };
+    const auto poll = [&](const auto& op) {
+        Phase phase{};
+        on_gpu([&] { phase = rasterizer.PollControlledAliasCopy(op); });
+        return phase;
+    };
+    const auto finish = [&](const auto& op, Phase expected) {
+        Phase phase{};
+        REQUIRE(Until([&] {
+            phase = poll(op);
+            return phase == Phase::Complete || phase == Phase::Refused || phase == Phase::Unknown;
+        }));
+        REQUIRE(phase == expected);
+        REQUIRE(poll(op) == expected); // One-shot terminal state, never replay.
+    };
+    REQUIRE_FALSE(begin(A, B)); // Clean source is not a GPU content authority.
+    on_gpu([&] {
+        Access::WriteOrdinaryGpu(rasterizer, A + 128, 256, 0x63636363);
+        Access::WriteOrdinaryGpu(rasterizer, B + 512, 256, 0x58585858);
+    });
+    REQUIRE_FALSE(begin(A, A));
+    REQUIRE_FALSE(begin(A, D)); // Different physical backing must not copy by DAddr shape.
+    auto plan = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, A, Page);
+    REQUIRE(plan);
+    auto domain = plan->Segments().front().storage.Epoch()->ranges;
+    const auto physical = plan->Segments().front().storage.PhysicalOffset();
+    const std::array block_range{Admission::Access{physical + 128, 256, Admission::Mode::Write}};
+    auto blocker = domain->Enqueue(block_range, std::make_shared<int>(1));
+    REQUIRE(domain->TryStart(blocker) == Admission::Start::Granted);
+    auto partial = begin(A, B);
+    REQUIRE(partial);
+    REQUIRE(poll(partial) == Phase::Parked);
+    auto expected = std::vector<u8>(Page, 10);
+    std::fill(expected.begin() + 512, expected.begin() + 768, u8{88});
+    REQUIRE(read(B) == expected);
+    on_gpu([&] {
+        // An unrelated remap changes the global stamp, not either admitted association.
+        device_memory.Unmap(E, Footprint);
+        device_memory.Map(E, GetInteger(owner.heap) + 3 * Footprint, Footprint, asid);
+    });
+    REQUIRE(domain->Complete(blocker));
+    finish(partial, Phase::Complete);
+    std::fill(expected.begin() + 128, expected.begin() + 384, u8{99});
+    REQUIRE(read(B) == expected); // Both untouched complements and B's dirty 88 survive.
+    auto reverse = begin(B, A);
+    REQUIRE(reverse);
+    finish(reverse, Phase::Complete);
+    REQUIRE(read(A) == expected); // Byte-disjoint reverse writer within the same page.
+    on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, B + 128, 256, 0x4d4d4d4d); });
+    REQUIRE_FALSE(begin(B, A)); // Two overlapping dirty owners: no fabricated latest version.
+    REQUIRE(read(A) == expected);
+    REQUIRE(read(D) == std::vector<u8>(Page, 10));
+
+    (void)read(A + Page);
+    on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, C, Page, 0x42424242); });
+    auto full = begin(C, A + Page);
+    REQUIRE(full);
+    finish(full, Phase::Complete);
+    REQUIRE(read(A + Page) == std::vector<u8>(Page, 66));
+    REQUIRE(read(A) == expected);
+    on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, C, Page, 0x37373737); });
+    auto retired_target = begin(C, A + Page);
+    REQUIRE(retired_target);
+    std::optional<Vulkan::StagedBufferPin> retained;
+    on_gpu([&] {
+        retained = Access::OrdinaryPin(rasterizer, A + Page, Page);
+        Access::RetireOrdinary(rasterizer, A);
+    });
+    finish(retired_target, Phase::Refused);
+    std::vector<u8> old_bytes;
+    on_gpu([&] { old_bytes = Access::ReadPin(rasterizer, *retained); });
+    REQUIRE(old_bytes == std::vector<u8>(Page, 66));
+    (void)read(B + Page);
+    auto retired_source = begin(C, B + Page);
+    REQUIRE(retired_source);
+    on_gpu([&] { Access::RetireOrdinary(rasterizer, C); });
+    finish(retired_source, Phase::Refused);
+    REQUIRE(read(B + Page) == std::vector<u8>(Page, 10));
+
+    (void)read(E);
+    on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, D, Page, 0x2c2c2c2c); });
+    auto remapped = begin(D, E);
+    REQUIRE(remapped);
+    REQUIRE(poll(remapped) == Phase::Submitted);
+    on_gpu([&] {
+        Access::RetireOrdinary(rasterizer, E);
+        device_memory.Unmap(E, Footprint);
+        device_memory.Map(E, GetInteger(owner.heap) + 4 * Footprint, Footprint, asid);
+    });
+    finish(remapped, Phase::Unknown); // Effects recorded for OLD retained allocation only.
+    REQUIRE(read(E) == std::vector<u8>(Page, 55));
+    auto old_plan = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, D, Page);
+    REQUIRE(old_plan);
+    const std::array blocked_range{Admission::Access{
+        old_plan->Segments().front().storage.PhysicalOffset(), Page, Admission::Mode::Read}};
+    auto blocked_reader = domain->Enqueue(blocked_range, std::make_shared<int>(2));
+    REQUIRE(domain->TryStart(blocked_reader) == Admission::Start::Park);
+    REQUIRE(domain->Cancel(blocked_reader));
+    const std::array separate_range{Admission::Access{physical, Page, Admission::Mode::Read}};
+    auto separate_reader = domain->Enqueue(separate_range, std::make_shared<int>(3));
+    REQUIRE(domain->TryStart(separate_reader) == Admission::Start::Granted);
+    REQUIRE(domain->Complete(separate_reader));
+    on_gpu([&] {
+        renderer->scheduler.Finish();
+        std::scoped_lock lock{renderer->scheduler.submit_mutex};
+        if (renderer->device.GetLogical().WaitIdle() != VK_SUCCESS)
+            throw std::runtime_error("alias test trusted device-idle drain failed");
+        rasterizer.RetireControlledTransfersAfterDeviceIdle();
+    });
+    REQUIRE(poll(remapped) == Phase::Unknown); // Trusted idle alone does not forgive Unknown.
+    std::cout << "PASS admitted alias adapter: exact partial/full physical copies, dirty complements, "
+                 "parking, disjoint reverse write, overlapping-writer refusal, retained retirement, "
+                 "remap Unknown and quarantine; ordinary F3 remains Open\n";
+}
 } // namespace

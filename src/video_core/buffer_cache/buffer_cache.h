@@ -1365,6 +1365,26 @@ bool BufferCache<P>::DMAClear(GPUVAddr dst_address, u64 amount, u32 value) {
 }
 
 template <class P>
+std::optional<std::vector<AliasWrittenRange>> BufferCache<P>::SnapshotAliasWrites(
+    DAddr address, u64 size) {
+    if (!size || !IsRegionPageTableAddressable(address, size) || scatter_busy ||
+        !async_downloads.Empty() || !pending_downloads.empty() ||
+        std::ranges::any_of(committed_gpu_modified_ranges,
+                           [](const auto& ranges) { return !ranges.Empty(); }) ||
+        std::ranges::any_of(gather_buffers, [](const auto& item) {
+            return item.second.scatter_pending;
+        }) || memory_tracker.IsRegionCpuModified(address, size)) return std::nullopt;
+    CheckControlledSynchronization(address, size);
+    std::vector<AliasWrittenRange> ranges;
+    gpu_modified_ranges.ForEachInRange(address, size, [&](DAddr begin, DAddr end) {
+        if (ranges.size() <= Common::PhysicalRangeAdmission::MaxAccesses)
+            ranges.push_back({begin - address, end - begin});
+    });
+    if (ranges.size() > Common::PhysicalRangeAdmission::MaxAccesses) return std::nullopt;
+    return ranges;
+}
+
+template <class P>
 template <typename B>
 auto BufferCache<P>::PinExistingDmaRepresentation(
     DAddr device_addr, const Tegra::PhysicalAccessPlan& physical)

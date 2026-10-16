@@ -53,6 +53,137 @@
 
 namespace Vulkan {
 
+struct ControlledAliasCopy {
+    struct Owners {
+        const Tegra::PhysicalAccessPlan source, destination;
+        const std::shared_ptr<VideoCommon::ControlledAliasTransfer> transfer;
+    };
+    const std::shared_ptr<const u8> owner;
+    const DAddr source, destination;
+    const u32 size;
+    const std::vector<VideoCommon::AliasWrittenRange> written;
+    const std::vector<VideoCommon::AliasCopyRange> copies;
+    const std::shared_ptr<Owners> owners;
+    const std::shared_ptr<Common::PhysicalRangeAdmission> domain;
+    Common::PhysicalRangeAdmission::Ticket ticket;
+    ControlledAliasPhase phase{ControlledAliasPhase::Refused};
+};
+
+std::shared_ptr<ControlledAliasCopy> RasterizerVulkan::BeginControlledAliasCopy(
+    DAddr source, DAddr destination, u32 size) {
+    std::shared_lock shutdown_guard{shutdown_mutex, std::try_to_lock};
+    if (!shutdown_guard.owns_lock() || is_shutting_down || !gpu.IsGpuThread() ||
+        source == destination || !size || size > 256 * 1024) return {};
+    std::erase_if(controlled_alias_copies, [](const auto& op) {
+        return op->phase == ControlledAliasPhase::Complete || op->phase == ControlledAliasPhase::Refused;
+    });
+    if (controlled_alias_copies.size() >= 256) return {};
+    // Cold physical pins are prepared outside all cache/PTE locks.
+    auto from = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, source, size);
+    auto to = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, destination, size);
+    if (!from || !to || from->DeviceEpoch() != to->DeviceEpoch()) return {};
+    std::optional<StagedBufferPin> source_pin, destination_pin;
+    std::optional<std::vector<VideoCommon::AliasWrittenRange>> written, target_written;
+    try {
+        std::unique_lock lock{buffer_cache.mutex, std::try_to_lock};
+        if (!lock.owns_lock()) return {};
+        source_pin = buffer_cache.PinExistingDmaRepresentation(source, *from);
+        destination_pin = buffer_cache.PinExistingDmaRepresentation(destination, *to);
+        written = buffer_cache.SnapshotAliasWrites(source, size);
+        target_written = buffer_cache.SnapshotAliasWrites(destination, size);
+    } catch (...) { return {}; }
+    if (!source_pin || !destination_pin || !written || !target_written) return {};
+    const auto copies = VideoCommon::BuildPhysicalAliasCopies(*from, *to, *written);
+    if (!copies) return {};
+    for (const auto& copy : *copies)
+        for (const auto& dirty : *target_written)
+            if (copy.destination_offset < dirty.offset + dirty.size &&
+                dirty.offset < copy.destination_offset + copy.size) return {};
+    // Dedicated readback allocation is also outside cache/PTE locks. Only the
+    // transfer retains native pins; device-idle retirement can disarm every owner.
+    auto transfer = buffer_cache_runtime.PrepareAliasTransfer(
+        std::move(*source_pin), std::move(*destination_pin), *copies);
+    if (!transfer) return {};
+    auto domain = from->Segments().front().storage.Epoch()->ranges;
+    auto owners = std::make_shared<ControlledAliasCopy::Owners>(
+        ControlledAliasCopy::Owners{std::move(*from), std::move(*to), std::move(transfer)});
+    auto op = std::make_shared<ControlledAliasCopy>(ControlledAliasCopy{
+        controlled_alias_owner, source, destination, size, std::move(*written), *copies,
+        std::move(owners), domain, {}, ControlledAliasPhase::Refused});
+    std::vector<Common::PhysicalRangeAdmission::Access> accesses;
+    for (const auto& copy : op->copies)
+        accesses.push_back({copy.physical_offset, copy.size,
+                           Common::PhysicalRangeAdmission::Mode::Write});
+    controlled_alias_copies.push_back(op); // Retain accepted identity before admission.
+    op->ticket = domain->Enqueue(accesses, op->owners);
+    if (!op->ticket) return {};
+    op->phase = ControlledAliasPhase::Prepared;
+    return op;
+}
+
+ControlledAliasPhase RasterizerVulkan::PollControlledAliasCopy(
+    const std::shared_ptr<ControlledAliasCopy>& op) {
+    using Phase = ControlledAliasPhase;
+    using Admission = Common::PhysicalRangeAdmission;
+    std::shared_lock shutdown_guard{shutdown_mutex, std::try_to_lock};
+    if (!shutdown_guard.owns_lock() || !gpu.IsGpuThread() || !op ||
+        op->owner != controlled_alias_owner) return Phase::Refused;
+    if (op->phase == Phase::Complete || op->phase == Phase::Refused || op->phase == Phase::Unknown)
+        return op->phase;
+    const auto unknown = [&] {
+        (void)op->domain->Quarantine(op->ticket);
+        return op->phase = Phase::Unknown;
+    };
+    if (is_shutting_down) return unknown();
+    const auto qualified = [&] {
+        if (!op->owners->source.DeviceEpoch()->alive.load() ||
+            !op->owners->destination.DeviceEpoch()->alive.load()) return false;
+        const auto source_pin = buffer_cache.PinExistingDmaRepresentation(op->source, op->owners->source);
+        const auto target_pin = buffer_cache.PinExistingDmaRepresentation(op->destination, op->owners->destination);
+        if (!source_pin || !target_pin ||
+            source_pin->Identity() != op->owners->transfer->SourceIdentity() ||
+            target_pin->Identity() != op->owners->transfer->DestinationIdentity()) return false;
+        const auto writes = buffer_cache.SnapshotAliasWrites(op->source, op->size);
+        const auto target_writes = buffer_cache.SnapshotAliasWrites(op->destination, op->size);
+        if (!writes || *writes != op->written || !target_writes) return false;
+        for (const auto& copy : op->copies)
+            for (const auto& dirty : *target_writes)
+                if (copy.destination_offset < dirty.offset + dirty.size &&
+                    dirty.offset < copy.destination_offset + copy.size) return false;
+        return true;
+    };
+    if (op->phase == Phase::Prepared || op->phase == Phase::Parked) {
+        const auto admitted = op->domain->TryStart(op->ticket);
+        if (admitted == Admission::Start::Park || admitted == Admission::Start::Reentrant)
+            return op->phase = Phase::Parked;
+        if (admitted != Admission::Start::Granted) return op->phase = Phase::Refused;
+        bool current{};
+        try {
+            std::unique_lock lock{buffer_cache.mutex, std::try_to_lock};
+            current = lock.owns_lock() && qualified();
+        } catch (...) { current = false; }
+        if (!current) {
+            if (!op->domain->Complete(op->ticket)) return unknown();
+            return op->phase = Phase::Refused; // No commands have been recorded.
+        }
+        if (!op->owners->transfer->Submit()) return unknown();
+        return op->phase = Phase::Submitted;
+    }
+    const auto result = op->owners->transfer->Poll();
+    if (result == VideoCommon::ControlledTransferPoll::Pending) return op->phase;
+    if (result != VideoCommon::ControlledTransferPoll::Complete) return unknown();
+    bool current{};
+    try {
+        std::unique_lock lock{buffer_cache.mutex, std::try_to_lock};
+        current = lock.owns_lock() && qualified();
+    } catch (...) { current = false; }
+    if (!current) return unknown();
+    // No upload consumption, backing copy, or dirty-bit clearing: this only makes
+    // a warmed, nonconflicting staged representation reflect an isolated producer.
+    if (!op->domain->Complete(op->ticket)) return unknown();
+    return op->phase = Phase::Complete;
+}
+
 using MaxwellDrawState = Tegra::Engines::DrawManager::State;
 using VideoCommon::ImageViewId;
 using VideoCommon::ImageViewType;
@@ -403,6 +534,15 @@ void RasterizerVulkan::Shutdown() {
         return;
     }
     std::unique_lock exclusive_guard{shutdown_mutex};
+    for (const auto& op : controlled_alias_copies) {
+        if (op->phase == ControlledAliasPhase::Prepared || op->phase == ControlledAliasPhase::Parked) {
+            (void)op->domain->Cancel(op->ticket);
+            op->phase = ControlledAliasPhase::Refused;
+        } else if (op->phase == ControlledAliasPhase::Submitted) {
+            (void)op->domain->MarkUnknown(op->ticket);
+            op->phase = ControlledAliasPhase::Unknown;
+        }
+    }
     buffer_cache_runtime.SealStagedPins();
     if (physical_shadow) {
         // Texture copies/clears also use the cache mutex outside draw preparation.

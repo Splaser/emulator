@@ -30,6 +30,7 @@
 #include "common/slot_vector.h"
 #include "video_core/buffer_cache/buffer_base.h"
 #include "video_core/buffer_cache/controlled_transfer.h"
+#include "video_core/buffer_cache/physical_alias_copy.h"
 #include "video_core/buffer_cache/uma.h"
 #include "video_core/buffer_cache/direct_guest_mapping.h"
 #include "video_core/buffer_cache/gather_alias.h"
@@ -389,6 +390,11 @@ public:
     [[nodiscard]] auto PinExistingDmaRepresentation(
         DAddr device_addr, const Tegra::PhysicalAccessPlan& physical)
         -> decltype(std::declval<const B&>().PinStagedRepresentation(u64{}, u64{}));
+
+    /// Explicit isolated alias adapter only; caller holds mutex on the GPU owner.
+    /// Snapshots actual dirty subranges, without consuming uploads or changing trackers.
+    [[nodiscard]] std::optional<std::vector<AliasWrittenRange>> SnapshotAliasWrites(
+        DAddr address, u64 size);
 
     [[nodiscard]] std::pair<Buffer*, u32> ObtainBuffer(GPUVAddr gpu_addr, u32 size,
                                                        ObtainBufferSynchronize sync_info,

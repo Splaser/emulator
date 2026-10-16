@@ -150,6 +150,7 @@ public:
     Device& device;Allocator memory_allocator;Scheduler& scheduler;
     std::shared_ptr<StagedBufferPinDomain> staged_pin_domain=std::make_shared<StagedBufferPinDomain>();
     std::vector<std::weak_ptr<VideoCommon::ControlledBufferTransfer>> controlled_transfers;
+    std::vector<std::weak_ptr<VideoCommon::ControlledAliasTransfer>> alias_transfers;
     struct Staging {VkBuffer StreamBuf() const {return VK_NULL_HANDLE;}} staging_pool;
     BufferCacheRuntime(Device& device_,Scheduler& scheduler_):device{device_},scheduler{scheduler_} {}
     bool SupportsControlledTransfers() const;

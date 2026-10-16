@@ -132,6 +132,9 @@ public:
     [[nodiscard]] bool SupportsControlledTransfers() const;
     [[nodiscard]] std::shared_ptr<VideoCommon::ControlledBufferTransfer> PrepareControlledTransfer(
         const Buffer& buffer);
+    [[nodiscard]] std::shared_ptr<VideoCommon::ControlledAliasTransfer> PrepareAliasTransfer(
+        StagedBufferPin source, StagedBufferPin destination,
+        std::span<const VideoCommon::AliasCopyRange> copies);
     void RetireControlledTransfersAfterDeviceIdle();
 
     void TickFrame(Common::SlotVector<Buffer>& slot_buffers) noexcept;
@@ -241,6 +244,7 @@ public:
 
 private:
     std::vector<std::weak_ptr<VideoCommon::ControlledBufferTransfer>> controlled_transfers;
+    std::vector<std::weak_ptr<VideoCommon::ControlledAliasTransfer>> alias_transfers;
     std::shared_ptr<StagedBufferPinDomain> staged_pin_domain{
         std::make_shared<StagedBufferPinDomain>()};
     void BindBuffer(VkBuffer buffer, u32 offset, u32 size) {

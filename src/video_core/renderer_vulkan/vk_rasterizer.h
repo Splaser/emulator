@@ -47,6 +47,8 @@ class Maxwell3D;
 } // namespace Tegra
 
 namespace Vulkan {
+struct ControlledAliasCopy;
+enum class ControlledAliasPhase { Prepared, Parked, Submitted, Complete, Refused, Unknown };
 
 struct FramebufferTextureInfo;
 
@@ -87,6 +89,14 @@ public:
                               StateTracker& state_tracker_, Scheduler& scheduler_);
     friend struct Core::SchedulerTestAccess;
     ~RasterizerVulkan() override;
+
+    /// GPU-owner isolated-footprint adapter only. External producer/mapping/allocator
+    /// exclusion is a caller precondition, not an ordinary-game eligibility certificate.
+    /// Captures existing representations; never creates/uploads or changes dirty trackers.
+    [[nodiscard]] std::shared_ptr<ControlledAliasCopy> BeginControlledAliasCopy(
+        DAddr source, DAddr destination, u32 size);
+    [[nodiscard]] ControlledAliasPhase PollControlledAliasCopy(
+        const std::shared_ptr<ControlledAliasCopy>& operation);
 
     void Shutdown() override;
 
@@ -298,6 +308,8 @@ private:
     TextureCache texture_cache;
     BufferCacheRuntime buffer_cache_runtime;
     BufferCache buffer_cache;
+    std::vector<std::shared_ptr<ControlledAliasCopy>> controlled_alias_copies;
+    const std::shared_ptr<const u8> controlled_alias_owner{std::make_shared<const u8>(0)};
     QueryCacheRuntime query_cache_runtime;
     QueryCache query_cache;
     PipelineCache pipeline_cache;

@@ -116,6 +116,78 @@ vk::Buffer CreateBuffer(const Device& device, const MemoryAllocator& memory_allo
 } // Anonymous namespace
 
 namespace {
+class AliasTransfer final : public VideoCommon::ControlledAliasTransfer {
+public:
+    AliasTransfer(BufferCacheRuntime& runtime_, Scheduler& scheduler_, StagedBufferPin source_,
+                  StagedBufferPin destination_, std::span<const VideoCommon::AliasCopyRange> copies_,
+                  vk::Buffer readback_, u64 bytes_)
+        : runtime{runtime_}, scheduler{scheduler_}, source{std::move(source_)},
+          destination{std::move(destination_)}, copies{copies_.begin(), copies_.end()},
+          readback{std::move(readback_)}, bytes{bytes_} {}
+    const void* SourceIdentity() const override { return source ? source->Identity() : nullptr; }
+    const void* DestinationIdentity() const override {
+        return destination ? destination->Identity() : nullptr;
+    }
+    bool Submit() override {
+        if (submitted || retired || !source || !destination ||
+            !source->IsUsable() || !destination->IsUsable()) return false;
+        submitted = true; // Recording failures cannot authorize replay.
+        try {
+            std::vector<VideoCommon::BufferCopy> transfer, observe_source, observe_destination;
+            u64 packed{};
+            for (const auto& copy : copies) {
+                transfer.push_back({source->Offset() + copy.source_offset,
+                                    destination->Offset() + copy.destination_offset, copy.size});
+                observe_source.push_back({source->Offset() + copy.source_offset, packed, copy.size});
+                observe_destination.push_back({destination->Offset() + copy.destination_offset,
+                                               bytes + packed, copy.size});
+                packed += copy.size;
+            }
+            runtime.CopyBuffer(destination->Handle(), source->Handle(), transfer, true, false);
+            runtime.CopyBuffer(*readback, source->Handle(), observe_source, true, false);
+            runtime.CopyBuffer(*readback, destination->Handle(), observe_destination, true, false);
+            scheduler.Record([](vk::CommandBuffer command) {
+                const VkMemoryBarrier barrier{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                    .pNext = nullptr, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                    .dstAccessMask = VK_ACCESS_HOST_READ_BIT};
+                command.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+                                        0, barrier);
+            });
+            submission = scheduler.FlushChecked();
+            return bool(submission);
+        } catch (...) { return false; }
+    }
+    VideoCommon::ControlledTransferPoll Poll() override {
+        using Result = VideoCommon::ControlledTransferPoll;
+        if (retired || !submitted || !source || !destination || !source->IsUsable() ||
+            !destination->IsUsable() || !submission) return Result::Unknown;
+        if (verified) return Result::Complete;
+        const auto status = scheduler.PollChecked(submission);
+        if (status == VK_NOT_READY) return Result::Pending;
+        if (status != VK_SUCCESS || readback.InvalidateChecked() != VK_SUCCESS ||
+            std::memcmp(readback.Mapped().data(), readback.Mapped().data() + bytes, bytes) != 0)
+            return Result::Unknown;
+        verified = true;
+        return Result::Complete;
+    }
+    void RetireAfterDeviceIdle() override {
+        retired = true;
+        source.reset();
+        destination.reset();
+        readback.reset();
+        submission.reset();
+    }
+private:
+    BufferCacheRuntime& runtime;
+    Scheduler& scheduler;
+    std::optional<StagedBufferPin> source, destination;
+    const std::vector<VideoCommon::AliasCopyRange> copies;
+    vk::Buffer readback;
+    const u64 bytes;
+    Scheduler::Submission submission;
+    bool submitted{}, verified{}, retired{};
+};
+
 class ControlledTransfer final : public VideoCommon::ControlledBufferTransfer {
 public:
     ControlledTransfer(BufferCacheRuntime& runtime_, Scheduler& scheduler_, StagedBufferPin target_,
@@ -279,6 +351,38 @@ void BufferCacheRuntime::RetireControlledTransfersAfterDeviceIdle() {
     for (const auto& weak : controlled_transfers)
         if (const auto transfer = weak.lock()) transfer->RetireAfterDeviceIdle();
     controlled_transfers.clear();
+    for (const auto& weak : alias_transfers)
+        if (const auto transfer = weak.lock()) transfer->RetireAfterDeviceIdle();
+    alias_transfers.clear();
+}
+
+std::shared_ptr<VideoCommon::ControlledAliasTransfer> BufferCacheRuntime::PrepareAliasTransfer(
+    StagedBufferPin source, StagedBufferPin destination,
+    std::span<const VideoCommon::AliasCopyRange> copies) {
+    std::erase_if(alias_transfers, [](const auto& weak) { return weak.expired(); });
+    if (!SupportsControlledTransfers() || alias_transfers.size() >= 256 || copies.empty() ||
+        copies.size() > 64 || !source.IsUsable() || !destination.IsUsable() ||
+        source.Identity() == destination.Identity()) return {};
+    u64 bytes{};
+    for (const auto& copy : copies) {
+        if (!copy.size || copy.source_offset >= source.Size() ||
+            copy.size > source.Size() - copy.source_offset ||
+            copy.destination_offset >= destination.Size() ||
+            copy.size > destination.Size() - copy.destination_offset ||
+            (copy.source_offset | copy.destination_offset | copy.size) % 4 ||
+            copy.size > 256 * 1024 - bytes) return {};
+        bytes += copy.size;
+    }
+    const VkBufferCreateInfo ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .pNext = nullptr, .flags = 0, .size = 2 * bytes,
+        .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0, .pQueueFamilyIndices = nullptr};
+    auto readback = memory_allocator.CreateBuffer(ci, MemoryUsage::Download);
+    if (!readback || readback.Mapped().size() < 2 * bytes) return {};
+    auto transfer = std::make_shared<AliasTransfer>(*this, scheduler, std::move(source),
+        std::move(destination), copies, std::move(readback), bytes);
+    alias_transfers.push_back(transfer);
+    return transfer;
 }
 
 bool BufferCacheRuntime::TryDirectGuestBuffer(Buffer& target, Common::GuestBackingRange backing) {

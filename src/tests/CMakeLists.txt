@@ -55,6 +55,8 @@ set_tests_properties(controlled_cpu_scheduler_tests PROPERTIES TIMEOUT 180)
 # from the first System. Keep both native owners intact and isolate their processes.
 add_test(NAME native_f3_witness COMMAND controlled_cpu_scheduler_tests "[f3]")
 set_tests_properties(native_f3_witness PROPERTIES TIMEOUT 30)
+add_test(NAME native_f3_transfer COMMAND controlled_cpu_scheduler_tests "[f3-transfer]")
+set_tests_properties(native_f3_transfer PROPERTIES TIMEOUT 30)
 
 if (CITRON_USE_PRECOMPILED_HEADERS)
     target_precompile_headers(tests PRIVATE precompiled_headers.h)
