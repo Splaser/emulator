@@ -1365,6 +1365,31 @@ bool BufferCache<P>::DMAClear(GPUVAddr dst_address, u64 amount, u32 value) {
 }
 
 template <class P>
+bool BufferCache<P>::HasUniqueAliasSource(DAddr source, const Tegra::PhysicalAccessPlan& plan,
+                                        std::span<const AliasCopyRange> copies) {
+    if (plan.Segments().empty() || copies.empty()) return false;
+    bool unique = true;
+    const bool current = device_memory.WithCurrentControlledAliases(
+        [&](const auto& backing, const auto& aliases_for) {
+            if (backing != plan.Segments().front().storage.Epoch()) { unique = false; return; }
+            std::array<DAddr, 64> aliases{};
+            for (const auto& copy : copies) {
+                size_t count{};
+                if (!copy.size || copy.size > DEVICE_PAGESIZE - copy.physical_offset % DEVICE_PAGESIZE ||
+                    !aliases_for(copy.physical_offset, aliases, count)) { unique = false; return; }
+                bool found_source{};
+                for (size_t i = 0; i < count; ++i) {
+                    if (aliases[i] == source + copy.source_offset) { found_source = true; continue; }
+                    gpu_modified_ranges.ForEachInRange(aliases[i], copy.size,
+                        [&](DAddr, DAddr) { unique = false; });
+                }
+                if (!found_source) unique = false;
+            }
+        });
+    return current && unique; // Unknown alias cardinality/mapping is never disjointness.
+}
+
+template <class P>
 std::optional<std::vector<AliasWrittenRange>> BufferCache<P>::SnapshotAliasWrites(
     DAddr address, u64 size) {
     if (!size || !IsRegionPageTableAddressable(address, size) || scatter_busy ||

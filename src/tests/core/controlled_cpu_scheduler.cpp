@@ -766,21 +766,22 @@ TEST_CASE("Admitted staged alias adapter copies exact physical dirty intersectio
             (void)self.Sleep(kernel.HardwareTimer().GetTick() + 1'000'000);
     });
     constexpr DAddr A = 0x1000000, B = 0x2000000, C = 0x3000000,
-                    D = 0x4000000, E = 0x5000000;
+                    D = 0x4000000, E = 0x5000000, F = 0x6000000;
     constexpr u32 Page = 4096;
     std::vector<u8> initial(5 * Footprint, 10);
     std::fill(initial.begin() + 4 * Footprint, initial.end(), u8{55});
     REQUIRE(memory.WriteBlock(owner.heap, initial.data(), initial.size()));
     const auto asid = device_memory.RegisterProcess(&memory);
-    for (DAddr address : {A, B, C, D, E}) device_memory.AllocateFixed(address, Footprint);
+    for (DAddr address : {A, B, C, D, E, F}) device_memory.AllocateFixed(address, Footprint);
     device_memory.Map(A, GetInteger(owner.heap), Footprint, asid);
     device_memory.Map(B, GetInteger(owner.heap), Footprint, asid);
     device_memory.Map(C, GetInteger(owner.heap) + Page, Footprint, asid);
     device_memory.Map(D, GetInteger(owner.heap) + 3 * Footprint, Footprint, asid);
     device_memory.Map(E, GetInteger(owner.heap) + 3 * Footprint, Footprint, asid);
+    device_memory.Map(F, GetInteger(owner.heap), Footprint, asid);
     SCOPE_EXIT {
         on_gpu([&] {
-            for (DAddr address : {A, B, C, D, E}) device_memory.Unmap(address, Footprint);
+            for (DAddr address : {A, B, C, D, E, F}) device_memory.Unmap(address, Footprint);
         });
         device_memory.UnregisterProcess(asid);
         owner.Close();
@@ -791,7 +792,7 @@ TEST_CASE("Admitted staged alias adapter copies exact physical dirty intersectio
         on_gpu([&] { bytes = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, address, Page)); });
         return bytes;
     };
-    for (DAddr address : {A, B, C, D, E}) REQUIRE(read(address) == std::vector<u8>(Page, 10));
+    for (DAddr address : {A, B, C, D, E, F}) REQUIRE(read(address) == std::vector<u8>(Page, 10));
     const auto begin = [&](DAddr source, DAddr target) {
         std::shared_ptr<Vulkan::ControlledAliasCopy> op;
         on_gpu([&] { op = rasterizer.BeginControlledAliasCopy(source, target, Page); });
@@ -815,6 +816,13 @@ TEST_CASE("Admitted staged alias adapter copies exact physical dirty intersectio
     on_gpu([&] {
         Access::WriteOrdinaryGpu(rasterizer, A + 128, 256, 0x63636363);
         Access::WriteOrdinaryGpu(rasterizer, B + 512, 256, 0x58585858);
+        Access::WriteOrdinaryGpu(rasterizer, F + 128, 256, 0x21212121);
+    });
+    REQUIRE_FALSE(begin(A, B)); // A third physical alias can own newer dirty content.
+    on_gpu([&] {
+        Access::RetireOrdinary(rasterizer, F);
+        device_memory.Unmap(F, Footprint);
+        Access::WriteOrdinaryGpu(rasterizer, A + 128, 256, 0x63636363);
     });
     REQUIRE_FALSE(begin(A, A));
     REQUIRE_FALSE(begin(A, D)); // Different physical backing must not copy by DAddr shape.

@@ -269,12 +269,102 @@ result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout
 if result.returncode != 95 or 'readback conflict accepted before producer retirement' not in result.stderr:
     raise RuntimeError(f'Readback isolation control failed incorrectly: {result.returncode} {result.stderr}')
 print('PASS negative isolation control: pending physical-alias readback must reject before acceptance (95)')
+
+# Exercise the real alias transfer/factory/checked-submit bodies against the same
+# fake Vulkan dispatch. Kept separate so original mutation controls retain their
+# exact failure sites. These are fault-injection fixtures, not native driver proof.
+alias_source = source.rsplit('int main(int argc,char** argv) {', 1)[0]
+alias_source = alias_source.replace(
+    '#include "video_core/buffer_cache/controlled_transfer.h"',
+    '#include "video_core/buffer_cache/controlled_transfer.h"\n'
+    '#include "video_core/buffer_cache/physical_alias_copy.h"')
+declaration = 'std::shared_ptr<VideoCommon::ControlledBufferTransfer> PrepareControlledTransfer(const Buffer&);'
+assert alias_source.count(declaration) == 1
+alias_source = alias_source.replace(declaration, declaration + '\n'
+    'std::shared_ptr<VideoCommon::ControlledAliasTransfer> PrepareAliasTransfer('
+    'StagedBufferPin,StagedBufferPin,std::span<const VideoCommon::AliasCopyRange>);')
+alias_source += '\nnamespace Vulkan {\n' + body(runtime_path, 'class AliasTransfer final') + ';\n'
+alias_source += body(runtime_path,
+    'std::shared_ptr<VideoCommon::ControlledAliasTransfer> BufferCacheRuntime::PrepareAliasTransfer(')
+alias_source += '\n}\n' + r'''
+int main() {
+    using Poll=VideoCommon::ControlledTransferPoll;
+    using Admission=Common::PhysicalRangeAdmission;
+    for(int mode=0;mode<6;++mode) {
+        auto s=std::make_unique<Scenario>();
+        auto source=std::make_unique<Vulkan::Buffer>(s->runtime,A,4096);
+        auto target=std::make_unique<Vulkan::Buffer>(s->runtime,ALIAS,4096);
+        auto from=source->PinStagedRepresentation(0,4096);
+        auto to=target->PinStagedRepresentation(0,4096);assert(from && to);
+        auto* input=reinterpret_cast<Allocation*>(from->Handle());
+        auto* output=reinterpret_cast<Allocation*>(to->Handle());
+        std::fill(input->bytes.begin(),input->bytes.end(),u8{99});
+        std::fill(output->bytes.begin(),output->bytes.end(),u8{10});
+        const std::array copies{VideoCommon::AliasCopyRange{128,256,256,0}};
+        auto transfer=s->runtime.PrepareAliasTransfer(*from,*to,copies);assert(transfer);
+        auto domain=s->views.front().physical.Epoch()->ranges;
+        const std::array access{Admission::Access{0,256,Admission::Mode::Write}};
+        auto ticket=domain->Enqueue(access,transfer);assert(ticket);
+        assert(domain->TryStart(ticket)==Admission::Start::Granted);
+        if(mode==5) s->runtime.staged_pin_domain->Seal();
+        const bool submitted=transfer->Submit();
+        assert(submitted==(mode!=5));
+        assert(!transfer->Submit()); // No second recording, even after refusal/failure.
+        if(mode!=5) {
+            assert(transfer->Poll()==Poll::Pending);
+            if(mode==1) s->gpu.submit_result=VK_ERROR_UNKNOWN;
+            s->scheduler.RunWorker();
+            source.reset();target.reset();from.reset();to.reset(); // Real payload pins own both resources.
+            if(mode==1) assert(transfer->Poll()==Poll::Unknown);
+            else {
+                assert(transfer->Poll()==Poll::Pending); // Callback return is not GPU completion.
+                s->gpu.Complete();
+                if(mode==2) s->gpu.counter_result=VK_ERROR_UNKNOWN;
+                if(mode==3) s->gpu.invalidate_result=VK_ERROR_UNKNOWN;
+                if(mode==4) reinterpret_cast<Allocation*>(s->gpu.readback_target)->bytes[256+7]^=1;
+                if(mode==0) {
+                    assert(transfer->Poll()==Poll::Complete && transfer->Poll()==Poll::Complete);
+                    for(size_t i=0;i<4096;++i) assert(output->bytes[i]==(i>=256 && i<512?99:10));
+                    assert(s->gpu.host_read_barrier);
+                } else assert(transfer->Poll()==Poll::Unknown);
+            }
+        } else assert(transfer->Poll()==Poll::Unknown);
+        if(mode==0) assert(domain->Complete(ticket));
+        else assert(domain->MarkUnknown(ticket));
+        auto reader=domain->Enqueue(access,std::make_shared<int>(1));assert(reader);
+        if(mode==0) {
+            assert(domain->TryStart(reader)==Admission::Start::Granted);
+            assert(domain->Complete(reader));
+        } else {
+            assert(domain->TryStart(reader)==Admission::Start::Park);
+            assert(domain->Cancel(reader));
+        }
+        std::weak_ptr<VideoCommon::ControlledAliasTransfer> retained=transfer;
+        transfer.reset();ticket.reset();
+        if(mode!=0) assert(!retained.expired()); // Unknown domain retains actual native owners.
+        s->runtime.RetireControlledTransfersAfterDeviceIdle(); // Fixture trusted-idle boundary.
+        if(auto alive=retained.lock()) {
+            assert(alive->Poll()==Poll::Unknown);
+            assert(!alive->SourceIdentity() && !alive->DestinationIdentity());
+        }
+    }
+    std::cout<<"PASS actual alias transfer fault fixture: exact copy/complements, delayed completion, "
+               "submit/counter/invalidate/corruption/seal failures, one-shot submission, dropped cache "
+               "owners and Unknown quarantine (Vulkan dispatch remains a fixture)\n";
+}
+'''
+alias_cpp = out / 'alias_transfer.cpp'
+alias_cpp.write_text(alias_source)
+alias_exe = out / ('alias_transfer.exe' if os.name == 'nt' else 'alias_transfer')
+subprocess.run(cmd + [str(alias_cpp), '-o', str(alias_exe)], check=True)
+subprocess.run([str(alias_exe)], check=True, timeout=60)
 inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
                'src/video_core/buffer_cache/controlled_conflict.h', 'src/common/range_sets.inc',
                'src/video_core/gpu_thread.cpp','src/video_core/gpu_thread.h',
                'src/core/hle/kernel/k_process.cpp','src/core/memory.h',
                'src/video_core/buffer_cache/controlled_transfer.h', 'src/video_core/physical_access_plan.h',
-               'src/video_core/renderer_vulkan/vk_buffer_payload.h'])
+               'src/video_core/renderer_vulkan/vk_buffer_payload.h',
+               'src/video_core/buffer_cache/physical_alias_copy.h'])
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sorted(inputs)},
     'real': ['cold device physical plan and HostMemory pins', 'actual BufferCache controlled registration/refresh/poll and Register',

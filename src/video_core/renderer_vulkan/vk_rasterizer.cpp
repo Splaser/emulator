@@ -95,6 +95,10 @@ std::shared_ptr<ControlledAliasCopy> RasterizerVulkan::BeginControlledAliasCopy(
     if (!source_pin || !destination_pin || !written || !target_written) return {};
     const auto copies = VideoCommon::BuildPhysicalAliasCopies(*from, *to, *written);
     if (!copies) return {};
+    {
+        std::unique_lock lock{buffer_cache.mutex, std::try_to_lock};
+        if (!lock.owns_lock() || !buffer_cache.HasUniqueAliasSource(source, *from, *copies)) return {};
+    }
     for (const auto& copy : *copies)
         for (const auto& dirty : *target_written)
             if (copy.destination_offset < dirty.offset + dirty.size &&
@@ -145,7 +149,8 @@ ControlledAliasPhase RasterizerVulkan::PollControlledAliasCopy(
             target_pin->Identity() != op->owners->transfer->DestinationIdentity()) return false;
         const auto writes = buffer_cache.SnapshotAliasWrites(op->source, op->size);
         const auto target_writes = buffer_cache.SnapshotAliasWrites(op->destination, op->size);
-        if (!writes || *writes != op->written || !target_writes) return false;
+        if (!writes || *writes != op->written || !target_writes ||
+            !buffer_cache.HasUniqueAliasSource(op->source, op->owners->source, op->copies)) return false;
         for (const auto& copy : op->copies)
             for (const auto& dirty : *target_writes)
                 if (copy.destination_offset < dirty.offset + dirty.size &&

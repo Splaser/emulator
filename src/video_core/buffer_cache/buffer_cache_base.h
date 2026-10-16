@@ -395,6 +395,8 @@ public:
     /// Snapshots actual dirty subranges, without consuming uploads or changing trackers.
     [[nodiscard]] std::optional<std::vector<AliasWrittenRange>> SnapshotAliasWrites(
         DAddr address, u64 size);
+    [[nodiscard]] bool HasUniqueAliasSource(DAddr source, const Tegra::PhysicalAccessPlan& plan,
+                                          std::span<const AliasCopyRange> copies);
 
     [[nodiscard]] std::pair<Buffer*, u32> ObtainBuffer(GPUVAddr gpu_addr, u32 size,
                                                        ObtainBufferSynchronize sync_info,
