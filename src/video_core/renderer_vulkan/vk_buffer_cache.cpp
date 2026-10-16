@@ -369,7 +369,8 @@ std::shared_ptr<VideoCommon::ControlledAliasTransfer> BufferCacheRuntime::Prepar
             copy.size > source.Size() - copy.source_offset ||
             copy.destination_offset >= destination.Size() ||
             copy.size > destination.Size() - copy.destination_offset ||
-            (copy.source_offset | copy.destination_offset | copy.size) % 4 ||
+            ((source.Offset() + copy.source_offset) |
+             (destination.Offset() + copy.destination_offset) | copy.size) % 4 ||
             copy.size > 256 * 1024 - bytes) return {};
         bytes += copy.size;
     }

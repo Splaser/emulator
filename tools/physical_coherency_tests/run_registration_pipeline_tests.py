@@ -290,7 +290,7 @@ alias_source += '\n}\n' + r'''
 int main() {
     using Poll=VideoCommon::ControlledTransferPoll;
     using Admission=Common::PhysicalRangeAdmission;
-    for(int mode=0;mode<6;++mode) {
+    for(int mode=0;mode<7;++mode) {
         auto s=std::make_unique<Scenario>();
         auto source=std::make_unique<Vulkan::Buffer>(s->runtime,A,4096);
         auto target=std::make_unique<Vulkan::Buffer>(s->runtime,ALIAS,4096);
@@ -300,6 +300,10 @@ int main() {
         auto* output=reinterpret_cast<Allocation*>(to->Handle());
         std::fill(input->bytes.begin(),input->bytes.end(),u8{99});
         std::fill(output->bytes.begin(),output->bytes.end(),u8{10});
+        auto unaligned=source->PinStagedRepresentation(1,4095);assert(unaligned);
+        const std::array invalid{VideoCommon::AliasCopyRange{0,0,4,0}};
+        assert(!s->runtime.PrepareAliasTransfer(*unaligned,*to,invalid));
+        unaligned.reset();
         const std::array copies{VideoCommon::AliasCopyRange{128,256,256,0}};
         auto transfer=s->runtime.PrepareAliasTransfer(*from,*to,copies);assert(transfer);
         auto domain=s->views.front().physical.Epoch()->ranges;
@@ -314,6 +318,7 @@ int main() {
             assert(transfer->Poll()==Poll::Pending);
             if(mode==1) s->gpu.submit_result=VK_ERROR_UNKNOWN;
             s->scheduler.RunWorker();
+            assert(s->gpu.submissions==1);
             source.reset();target.reset();from.reset();to.reset(); // Real payload pins own both resources.
             if(mode==1) assert(transfer->Poll()==Poll::Unknown);
             else {
@@ -322,6 +327,7 @@ int main() {
                 if(mode==2) s->gpu.counter_result=VK_ERROR_UNKNOWN;
                 if(mode==3) s->gpu.invalidate_result=VK_ERROR_UNKNOWN;
                 if(mode==4) reinterpret_cast<Allocation*>(s->gpu.readback_target)->bytes[256+7]^=1;
+                if(mode==6) s->gpu.wait_result=VK_ERROR_UNKNOWN;
                 if(mode==0) {
                     assert(transfer->Poll()==Poll::Complete && transfer->Poll()==Poll::Complete);
                     for(size_t i=0;i<4096;++i) assert(output->bytes[i]==(i>=256 && i<512?99:10));
@@ -349,7 +355,7 @@ int main() {
         }
     }
     std::cout<<"PASS actual alias transfer fault fixture: exact copy/complements, delayed completion, "
-               "submit/counter/invalidate/corruption/seal failures, one-shot submission, dropped cache "
+               "submit/counter/wait/invalidate/corruption/seal failures, one-shot submission, dropped cache "
                "owners and Unknown quarantine (Vulkan dispatch remains a fixture)\n";
 }
 '''
