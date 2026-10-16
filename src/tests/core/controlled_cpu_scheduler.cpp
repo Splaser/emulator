@@ -672,8 +672,8 @@ TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
               << "; same-DAddr=" << unsigned(same_address)
               << "; remap=" << unsigned(remapped) << '\n';
     if (std::getenv("CITRON_REQUIRE_F3_FIXED")) {
-        REQUIRE(full_alias == 99);
-        REQUIRE(partial_alias == 99);
+        CHECK(full_alias == 99);
+        CHECK(partial_alias == 99);
     } else {
         REQUIRE(full_alias == 10);
         REQUIRE(partial_alias == 10);
