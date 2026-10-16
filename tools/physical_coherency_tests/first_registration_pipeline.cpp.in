@@ -144,6 +144,7 @@ public:
     u64 CpuAddr() const {return base;}u64 SizeBytes() const {return size;}
     void setLRUID(size_t n) {lru=n;}size_t getLRUID() const {return lru;}
     auto PinStagedRepresentation(u64 offset,u64 length) const {return StagedBufferPin::Build(payload,offset,length);}
+    std::weak_ptr<StagedBufferPayload> WeakPayload() const {return payload;}
 };
 class BufferCacheRuntime {
 public:

@@ -294,6 +294,7 @@ int main() {
         auto s=std::make_unique<Scenario>();
         auto source=std::make_unique<Vulkan::Buffer>(s->runtime,A,4096);
         auto target=std::make_unique<Vulkan::Buffer>(s->runtime,ALIAS,4096);
+        const auto source_owner=source->WeakPayload(),target_owner=target->WeakPayload();
         auto from=source->PinStagedRepresentation(0,4096);
         auto to=target->PinStagedRepresentation(0,4096);assert(from && to);
         auto* input=reinterpret_cast<Allocation*>(from->Handle());
@@ -320,6 +321,7 @@ int main() {
             s->scheduler.RunWorker();
             assert(s->gpu.submissions==1);
             source.reset();target.reset();from.reset();to.reset(); // Real payload pins own both resources.
+            assert(!source_owner.expired() && !target_owner.expired());
             if(mode==1) assert(transfer->Poll()==Poll::Unknown);
             else {
                 assert(transfer->Poll()==Poll::Pending); // Callback return is not GPU completion.
@@ -346,9 +348,12 @@ int main() {
             assert(domain->Cancel(reader));
         }
         std::weak_ptr<VideoCommon::ControlledAliasTransfer> retained=transfer;
+        source.reset();target.reset();from.reset();to.reset();
         transfer.reset();ticket.reset();
         if(mode!=0) assert(!retained.expired()); // Unknown domain retains actual native owners.
+        if(mode!=0) assert(!source_owner.expired() && !target_owner.expired());
         s->runtime.RetireControlledTransfersAfterDeviceIdle(); // Fixture trusted-idle boundary.
+        assert(source_owner.expired() && target_owner.expired());
         if(auto alive=retained.lock()) {
             assert(alive->Poll()==Poll::Unknown);
             assert(!alive->SourceIdentity() && !alive->DestinationIdentity());
