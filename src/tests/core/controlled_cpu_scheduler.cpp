@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Native acceptance: real CpuManager/KThread/KScheduler fibers, process Finalize, GPU owner,
 // Vulkan cache and checked transfers. The headless renderer omits presentation only.
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -607,6 +608,8 @@ TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
 
     u8 full_alias{}, same_address{}, partial_alias{}, partial_source{}, untouched{}, disjoint{};
     bool stale_rejected{}, retained_after_retirement{}, fresh_identity{};
+    bool full_source_valid{}, full_alias_uniform{}, partial_source_valid{}, partial_alias_uniform{};
+    bool untouched_valid{}, disjoint_valid{}, retained_valid{}, remapped_valid{};
     u8 remapped{}, retained_value{};
     std::exception_ptr observation_error;
     gpu.RunOnGpuThread([&] {
@@ -635,27 +638,47 @@ TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
         if (!domain->Complete(writer) ||
             domain->TryStart(reader) != Common::PhysicalRangeAdmission::Start::Granted)
             throw std::runtime_error("F3 completed producer did not release reader");
-        same_address = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, A, Page))[0];
-        full_alias = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, B, Page))[0];
+        const auto all_bytes = [](std::span<const u8> bytes, u8 expected) {
+            return std::ranges::all_of(bytes, [expected](u8 value) { return value == expected; });
+        };
+        const auto same = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, A, Page));
+        same_address = same[0];
+        full_source_valid = all_bytes(same, 99);
+        const auto full = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, B, Page));
+        full_alias = full[0];
+        full_alias_uniform = all_bytes(full, full_alias);
         if (!domain->Complete(reader)) throw std::runtime_error("F3 reader completion failed");
         Access::WriteOrdinaryGpu(rasterizer, A + Page + 128, 256, 0x63636363);
-        partial_source = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, A + Page, Page))[128];
+        const auto source = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, A + Page, Page));
+        partial_source = source[128];
+        partial_source_valid = all_bytes(std::span{source}.subspan(128, 256), 99) &&
+                              all_bytes(std::span{source}.first(128), 10) &&
+                              all_bytes(std::span{source}.subspan(384), 10);
         const auto partial = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, C, Page));
         partial_alias = partial[128];
+        partial_alias_uniform = all_bytes(std::span{partial}.subspan(128, 256), partial_alias);
         untouched = partial[0];
-        disjoint = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, D, Page))[0];
+        untouched_valid = all_bytes(std::span{partial}.first(128), 10) &&
+                          all_bytes(std::span{partial}.subspan(384), 10);
+        const auto separate = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, D, Page));
+        disjoint = separate[0];
+        disjoint_valid = all_bytes(separate, 10);
 
         // Supported retire-before-remap control. A retained native allocation is still
         // usable as an OLD resource; it must not qualify the new physical association.
         Access::RetireOrdinary(rasterizer, B);
         retained_after_retirement = old_b.IsUsable();
-        retained_value = Access::ReadPin(rasterizer, old_b)[0];
+        const auto retained = Access::ReadPin(rasterizer, old_b);
+        retained_value = retained[0];
+        retained_valid = all_bytes(retained, 10);
         device_memory.Unmap(B, Footprint);
         device_memory.Map(B, GetInteger(owner.heap) + 2 * Footprint, Footprint, asid);
         stale_rejected = !plan_b->MatchesCurrentDevice(device_memory, B);
         const auto new_b = Access::OrdinaryPin(rasterizer, B, Page);
         fresh_identity = old_b.Identity() != new_b.Identity();
-        remapped = Access::ReadPin(rasterizer, new_b)[0];
+        const auto fresh = Access::ReadPin(rasterizer, new_b);
+        remapped = fresh[0];
+        remapped_valid = all_bytes(fresh, 55);
         } catch (...) {
             observation_error = std::current_exception();
         }
@@ -663,6 +686,14 @@ TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
     if (observation_error) std::rethrow_exception(observation_error);
     REQUIRE(same_address == 99);
     REQUIRE(partial_source == 99);
+    REQUIRE(full_source_valid);
+    REQUIRE(full_alias_uniform);
+    REQUIRE(partial_source_valid);
+    REQUIRE(partial_alias_uniform);
+    REQUIRE(untouched_valid);
+    REQUIRE(disjoint_valid);
+    REQUIRE(retained_valid);
+    REQUIRE(remapped_valid);
     REQUIRE(untouched == 10);
     REQUIRE(disjoint == 10);
     REQUIRE(stale_rejected);
