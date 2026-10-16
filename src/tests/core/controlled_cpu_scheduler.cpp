@@ -3,6 +3,7 @@
 // Vulkan cache and checked transfers. The headless renderer omits presentation only.
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <future>
 #include <iostream>
 #include <thread>
@@ -536,5 +537,142 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     device_memory.UnregisterProcess(asid);
     owner.Close();
     EndThread(keeper);
+}
+TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
+          "[f3][native][known-defect]") {
+    Settings::values.use_multi_core.SetValue(true);
+    Settings::values.use_asynchronous_gpu_emulation.SetValue(true);
+    Settings::values.use_uma_zero_copy.SetValue(false);
+    Settings::values.cpu_debug_mode.SetValue(false);
+    Core::System system;
+    Window window;
+    system.Initialize();
+    TransferRenderer* renderer{};
+    Access::Initialize(system, window, [&](Core::System& initialized) {
+        auto result = std::make_unique<TransferRenderer>(window, initialized);
+        renderer = result.get();
+        return result;
+    });
+    SCOPE_EXIT { system.ShutdownMainProcess(); };
+    auto& gpu = system.GPU();
+    auto& rasterizer = renderer->rasterizer;
+    auto& device_memory = system.Host1x().MemoryManager();
+    auto channel = gpu.AllocateChannel();
+    channel->memory_manager = std::make_shared<Tegra::MemoryManager>(system);
+    gpu.RunOnGpuThread([&] { gpu.InitChannel(*channel, 0); gpu.BindChannel(channel->bind_id); });
+    Process owner{system};
+    auto& memory = owner.process->GetMemory();
+    auto* keeper = owner.Start([&] {
+        auto& kernel = system.Kernel();
+        auto& self = Kernel::GetCurrentThread(kernel);
+        while (!self.IsTerminationRequested())
+            (void)self.Sleep(kernel.HardwareTimer().GetTick() + 1'000'000);
+    });
+    const auto asid = device_memory.RegisterProcess(&memory);
+    constexpr DAddr A = 0x1000000, B = 0x2000000, C = 0x3000000, D = 0x4000000;
+    constexpr u64 Page = 4096;
+    std::vector<u8> initial(4 * Footprint, 10);
+    std::fill(initial.begin() + 2 * Footprint, initial.begin() + 3 * Footprint, u8{55});
+    REQUIRE(memory.WriteBlock(owner.heap, initial.data(), initial.size()));
+    for (DAddr address : {A, B, C, D}) device_memory.AllocateFixed(address, Footprint);
+    device_memory.Map(A, GetInteger(owner.heap), Footprint, asid);
+    device_memory.Map(B, GetInteger(owner.heap), Footprint, asid);
+    device_memory.Map(C, GetInteger(owner.heap) + Page, Footprint, asid);
+    device_memory.Map(D, GetInteger(owner.heap) + 3 * Footprint, Footprint, asid);
+    SCOPE_EXIT {
+        gpu.RunOnGpuThread([&] {
+            for (DAddr address : {A, B, C, D}) device_memory.Unmap(address, Footprint);
+        });
+        device_memory.UnregisterProcess(asid);
+        owner.Close();
+        EndThread(keeper);
+    };
+    auto plan_a = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, A, Footprint);
+    auto plan_b = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, B, Footprint);
+    auto plan_c = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, C, Footprint);
+    REQUIRE(plan_a);
+    REQUIRE(plan_b);
+    REQUIRE(plan_c);
+    REQUIRE(plan_a->Segments()[0].storage.Epoch() == plan_b->Segments()[0].storage.Epoch());
+    REQUIRE(plan_a->Segments()[0].storage.PhysicalOffset() == plan_b->Segments()[0].storage.PhysicalOffset());
+    REQUIRE(plan_a->Segments()[1].storage.PhysicalOffset() == plan_c->Segments()[0].storage.PhysicalOffset());
+
+    u8 full_alias{}, same_address{}, partial_alias{}, partial_source{}, untouched{}, disjoint{};
+    bool stale_rejected{}, retained_after_retirement{}, fresh_identity{};
+    u8 remapped{}, retained_value{};
+    std::exception_ptr observation_error;
+    gpu.RunOnGpuThread([&] {
+        try {
+        // Warm independent ordinary staged resources before any GPU write. No controlled
+        // first-registration or CPU-write transaction is used by this witness.
+        for (DAddr address : {A, B, C, D}) {
+            const auto pin = Access::OrdinaryPin(rasterizer, address, Page);
+            if (Access::ReadPin(rasterizer, pin)[0] != 10)
+                throw std::runtime_error("F3 initial upload control failed");
+        }
+        const auto old_b = Access::OrdinaryPin(rasterizer, B, Page);
+        const auto domain = plan_a->Segments()[0].storage.Epoch()->ranges;
+        const std::array write_access{Common::PhysicalRangeAdmission::Access{
+            plan_a->Segments()[0].storage.PhysicalOffset(), Page,
+            Common::PhysicalRangeAdmission::Mode::Write}};
+        const std::array read_access{Common::PhysicalRangeAdmission::Access{
+            plan_b->Segments()[0].storage.PhysicalOffset(), Page,
+            Common::PhysicalRangeAdmission::Mode::Read}};
+        auto writer = domain->Enqueue(write_access, std::make_shared<int>(1));
+        auto reader = domain->Enqueue(read_access, std::make_shared<int>(2));
+        if (domain->TryStart(writer) != Common::PhysicalRangeAdmission::Start::Granted ||
+            domain->TryStart(reader) != Common::PhysicalRangeAdmission::Start::Park)
+            throw std::runtime_error("F3 alias admission control failed");
+        Access::WriteOrdinaryGpu(rasterizer, A, Page, 0x63636363);
+        if (!domain->Complete(writer) ||
+            domain->TryStart(reader) != Common::PhysicalRangeAdmission::Start::Granted)
+            throw std::runtime_error("F3 completed producer did not release reader");
+        same_address = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, A, Page))[0];
+        full_alias = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, B, Page))[0];
+        if (!domain->Complete(reader)) throw std::runtime_error("F3 reader completion failed");
+        Access::WriteOrdinaryGpu(rasterizer, A + Page + 128, 256, 0x63636363);
+        partial_source = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, A + Page, Page))[128];
+        const auto partial = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, C, Page));
+        partial_alias = partial[128];
+        untouched = partial[0];
+        disjoint = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, D, Page))[0];
+
+        // Supported retire-before-remap control. A retained native allocation is still
+        // usable as an OLD resource; it must not qualify the new physical association.
+        Access::RetireOrdinary(rasterizer, B);
+        retained_after_retirement = old_b.IsUsable();
+        retained_value = Access::ReadPin(rasterizer, old_b)[0];
+        device_memory.Unmap(B, Footprint);
+        device_memory.Map(B, GetInteger(owner.heap) + 2 * Footprint, Footprint, asid);
+        stale_rejected = !plan_b->MatchesCurrentDevice(device_memory, B);
+        const auto new_b = Access::OrdinaryPin(rasterizer, B, Page);
+        fresh_identity = old_b.Identity() != new_b.Identity();
+        remapped = Access::ReadPin(rasterizer, new_b)[0];
+        } catch (...) {
+            observation_error = std::current_exception();
+        }
+    });
+    if (observation_error) std::rethrow_exception(observation_error);
+    REQUIRE(same_address == 99);
+    REQUIRE(partial_source == 99);
+    REQUIRE(untouched == 10);
+    REQUIRE(disjoint == 10);
+    REQUIRE(stale_rejected);
+    REQUIRE(retained_after_retirement);
+    REQUIRE(retained_value == 10);
+    REQUIRE(fresh_identity);
+    REQUIRE(remapped == 55);
+    std::cout << "F3 full-page expected=99 observed=" << unsigned(full_alias)
+              << "; partial-alias expected=99 observed=" << unsigned(partial_alias)
+              << "; same-DAddr=" << unsigned(same_address)
+              << "; remap=" << unsigned(remapped) << '\n';
+    if (std::getenv("CITRON_REQUIRE_F3_FIXED")) {
+        REQUIRE(full_alias == 99);
+        REQUIRE(partial_alias == 99);
+    } else {
+        REQUIRE(full_alias == 10);
+        REQUIRE(partial_alias == 10);
+        std::cout << "F3 REPRODUCED (not fixed); real ordinary cache and Vulkan transfers\n";
+    }
 }
 } // namespace
