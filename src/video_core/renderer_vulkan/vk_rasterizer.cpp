@@ -1073,6 +1073,38 @@ VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64
     return new_area;
 }
 
+Core::Memory::PreparedCpuWriteResult RasterizerVulkan::CommitControlledCpuWrite8(
+    const ControlledCpuWritePtr& transaction, Core::Memory::Memory& memory, u8 value) {
+    return buffer_cache.CommitControlledCpuTransaction(transaction, sizeof(value),
+        [&](const auto& view, auto& write, u64 address) {
+            return memory.WritePreparedCached8(view, write, Common::ProcessAddress{address}, value);
+        });
+}
+
+Core::Memory::PreparedCpuWriteResult RasterizerVulkan::CommitControlledCpuWrite16(
+    const ControlledCpuWritePtr& transaction, Core::Memory::Memory& memory, u16 value) {
+    return buffer_cache.CommitControlledCpuTransaction(transaction, sizeof(value),
+        [&](const auto& view, auto& write, u64 address) {
+            return memory.WritePreparedCached16(view, write, Common::ProcessAddress{address}, value);
+        });
+}
+
+Core::Memory::PreparedCpuWriteResult RasterizerVulkan::CommitControlledCpuWrite32(
+    const ControlledCpuWritePtr& transaction, Core::Memory::Memory& memory, u32 value) {
+    return buffer_cache.CommitControlledCpuTransaction(transaction, sizeof(value),
+        [&](const auto& view, auto& write, u64 address) {
+            return memory.WritePreparedCached32(view, write, Common::ProcessAddress{address}, value);
+        });
+}
+
+Core::Memory::PreparedCpuWriteResult RasterizerVulkan::CommitControlledCpuWrite64(
+    const ControlledCpuWritePtr& transaction, Core::Memory::Memory& memory, u64 value) {
+    return buffer_cache.CommitControlledCpuTransaction(transaction, sizeof(value),
+        [&](const auto& view, auto& write, u64 address) {
+            return memory.WritePreparedCached64(view, write, Common::ProcessAddress{address}, value);
+        });
+}
+
 Core::Memory::PreparedCpuWriteResult RasterizerVulkan::WriteControlledCached8(
     const ControlledRegistrationPtr& operation, Core::Memory::Memory& memory,
     const Core::Memory::PreparedCpuPage& view,

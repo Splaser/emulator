@@ -1,5 +1,69 @@
 # M3B production integration progress
 
+## Write-transaction ownership and GPU preservation slice: 2026-10-16 — F2 Open
+
+Resumed from `89665bef71`, fast-forwarding the clean home checkout from `8ca6197c67`.
+The next-stage target remains ordinary scalar CPU write enrollment. This slice implements its
+cache-owner transaction/preservation boundary first; it does **not** install an ordinary
+`Memory::Write` caller, replace a refused write with legacy memcpy, or close that target.
+
+`BeginControlledCpuWrite` binds one cached prepared view, physical page, normalized VA and scalar
+width to the registered immutable full-buffer plan. Its privately owned write admission retains
+the registration, physical pins and a separate one-shot Vulkan readback. The registration is
+Writing until commit; protected readiness, new writes and refresh refuse. Caller drop/uncertainty
+quarantines it and the range retains the accepted owners. The GPU owner must poll outside cache/
+PTE locks and continue excluding producers which do not participate in this explicit protocol.
+
+The readback copies the retained GPU buffer to a dedicated mapped allocation, records a real
+transfer-to-host visibility barrier, and uses exact checked queue submission, timeline query,
+zero-timeout host wait and checked invalidation. Callback return cannot advance preservation.
+After completion, a short device guard validates ALL physical destinations and aliases before
+copying into pinned backing. Whole-buffer preservation requires a clean CPU footprint and one
+authoritative GPU representation; mixed CPU/GPU data and GPU-dirty alternative aliases remain
+ineligible. No ordinary device mapping is reread to choose a copy destination.
+
+The transaction retains GPU dirty flags and exact download ranges through the actual prepared
+store AND all post-store physical-alias tracker publication. Only then are GPU dirty/download
+obligations cleared and admission released. A store/publication exception retains Unknown and
+the GPU dirty obligation. Typed Rasterizer commit endpoints bind the stored width to the
+transaction's declared extent. The old cached adapter also checks capability ownership.
+
+Actual `SynchronizeBuffer` checks exclusion before `ForEachUploadRange` can consume real CPU
+dirty state, including physical device aliases. An overlap or unqualified mapping guard throws
+before consumption; the legacy bool cannot represent a deferred operation safely. This is a
+fail-closed explicit-owner endpoint, **not** an ordinary-game suspension/retry policy. Other GPU
+bindings, existing bound draws, GC/download/mapping producers and unknown CPU writers have not
+all been enrolled. They must not run against the isolated footprint during this continuation;
+this slice does not prove safe concurrent general game execution.
+
+Also corrected the old controlled-path null check: `NULL_BUFFER_ID{0}` is a valid SlotId in a
+boolean context. Ready/refresh/cached-write qualification now compares it explicitly, so a
+reused/replaced slot cannot pass qualification through that null sentinel.
+
+Windows validation: `run_first_registration_tests.py --repeat 10` and
+`run_registration_pipeline_tests.py --repeat 10` passed with all negative controls (71/72/75
+and 82-87), using the existing Boost headers under `.diagnostics/lazy-backing-tests/deps/usr/include`.
+`run_write_coherency_witnesses.py --case f2 --repeat 1 --require-fixed` still failed as required,
+reporting `F2 expected=77 observed=10 backing=77`; its unmap/preservation prerequisite regressions
+passed. Native Android/Linux CI must be matched to the resulting source commit and is not yet
+validation of this slice. No local full Android build was run.
+The pipeline suite adds checked GPU work -> preservation -> actual CPU store ->
+real tracker publication -> refresh, with `[99,77,99]` in backing and the observed cache. Upload
+attempts through actual SynchronizeBuffer before/between store/publication must refuse, and an
+admitted physical reader remains parked until commit. Missing preservation fails 85; bypassing
+upload exclusion fails 86; omitting transaction tracker publication fails 87. Native API/remap/
+slot failures, interrupted post-store publication, width mismatch and dropped transactions
+retain their failure boundaries. Both earlier registration orderings and controls remain.
+Vulkan dispatch/allocation/device execution, cache binding teardown and async download/range
+containers in this extraction remain fixtures; HostMemory, prepared CPU stores, real tracker,
+cache/transfer/checked Scheduler bodies are real. Driver/device acceptance is still required.
+
+Next: connect ordinary scalar write ownership to a GPU-owner/deferred continuation without
+holding CPU/PTE/cache locks across a wait; enforce eligibility and exclusion of every producer
+which can touch the accepted footprint; add trusted recovery and exact-source device evidence.
+The unchanged ordinary F2 witness still reports backing77/cache10 with `--require-fixed` failing.
+No DMA, Texture Cache or NCE expansion is included. F2 remains **Open**.
+
 ## End-of-day checkpoint: 2026-10-15 — F2 Open
 
 Development is stopped for today; this checkpoint is documentation only. The next stage is

@@ -16,6 +16,13 @@ public:
     [[nodiscard]] virtual const void* DestinationIdentity() const = 0;
     [[nodiscard]] virtual bool Submit(const Tegra::PhysicalAccessPlan& plan) = 0;
     [[nodiscard]] virtual ControlledTransferPoll Poll(const Tegra::PhysicalAccessPlan& plan) = 0;
+    /// Separate, one-shot GPU preservation. The caller owns admission and must validate all
+    /// pinned destinations before applying this checked, host-visible readback to CPU backing.
+    [[nodiscard]] virtual bool SubmitPreserve() { return false; }
+    [[nodiscard]] virtual ControlledTransferPoll PollPreserve() {
+        return ControlledTransferPoll::Unknown;
+    }
+    [[nodiscard]] virtual std::span<const u8> PreservedBytes() const { return {}; }
     /// Renderer owner only, after all producers joined and checked successful device idle.
     virtual void RetireAfterDeviceIdle() = 0;
 };

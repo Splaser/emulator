@@ -181,6 +181,10 @@ public:
         return CachedWrite{resources, domain, std::move(write)};
     }
 
+    [[nodiscard]] bool OwnsCachedWrite(const CachedWrite& write) const noexcept {
+        return ready && resources == write.resources && domain == write.domain;
+    }
+
     template <typename T>
         requires(std::is_trivially_copyable_v<T> && sizeof(T) <= 16)
     [[nodiscard]] static PhysicalStoreResult StoreCached(CachedWrite& write,

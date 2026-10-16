@@ -1,5 +1,14 @@
 # M3B - Controlled First Registration Integration
 
+Continuation 2026-10-16 (Asia/Singapore): the cache-owner write transaction now has a separate
+checked Vulkan GPU preservation readback and holds admission through actual store/all-alias
+publication. Actual upload tracker consumption excludes active/Unknown transactions. See the
+[current progress](../tools/physical_coherency_tests/M3B_PROGRESS.md) for eligibility, fixture
+boundaries and failure tests. Ordinary scalar caller/deferred ownership, complete producer
+exclusion, trusted recovery and real-device proof remain open. **F2 remains Open.**
+The end-of-day handoff below is historical; do not interpret the new explicit transaction as
+ordinary Memory::Write enrollment or safe concurrent whole-game execution.
+
 Handoff updated 2026-10-15 (Asia/Taipei). **The explicit controlled BufferCache/Vulkan path is
 implemented; end-to-end acceptance and ordinary-game F2 repair are NOT complete. F2 remains open.**
 Native compilation and dispatch fixtures do not replace real driver/device evidence.

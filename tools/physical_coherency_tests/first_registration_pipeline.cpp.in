@@ -36,6 +36,7 @@ public:
     explicit operator bool() const {return bool(allocation);}
     VkBuffer operator*() const {return reinterpret_cast<VkBuffer>(allocation.get());}
     std::span<u8> Mapped() {return allocation?std::span<u8>{allocation->bytes}:std::span<u8>{};}
+    std::span<const u8> Mapped() const {return allocation?std::span<const u8>{allocation->bytes}:std::span<const u8>{};}
     VkResult FlushChecked() const {return driver->flush_result;}
     VkResult InvalidateChecked() const {return driver->invalidate_result;}
     void reset() {allocation.reset();}
@@ -157,6 +158,7 @@ Buffer::Buffer(BufferCacheRuntime& runtime,u64 address,u64 length)
 // @TRANSFER_METHODS@
 }
 using DAddr=u64;
+using VideoCommon::BufferCopy;
 constexpr u64 DEVICE_PAGESIZE=4096,C=65536,A=65536,ALIAS=3*C,B=0x80000000;
 using Result=Core::Memory::PreparedCpuWriteResult;
 using BufferId=Common::SlotId;constexpr BufferId NULL_BUFFER_ID{0};
@@ -218,6 +220,14 @@ public:
     void SetPageBufferId(u64 page,BufferId id) {page_table[page]=id;}
     bool IsRegionRegistered(u64 address,u64 size) const {return size && bool(GetPageBufferId(address/C)) && bool(GetPageBufferId((address+size-1)/C));}
     void NotifyGatherWrite(u64,u64) {}
+    struct Ranges {void Subtract(u64,u64) {}} gpu_modified_ranges; // Exact range container collaborator.
+    void ClearDownload(u64,u64) {} // Pending async download container collaborator.
+    void CheckControlledSynchronization(DAddr,u64);
+    bool SynchronizeBuffer(Buffer&,DAddr,u32);
+    bool IsDirectGuest(Buffer&) {return false;}
+    void EndGuestCpuAccess(Buffer&) {}
+    void GuestMemoryBarrier(bool) {assert(false);}
+    void UploadMemory(Buffer&,u64,u64,std::span<VideoCommon::BufferCopy>) {assert(false);}
     void MarkGpuUse(Buffer&,u64,u64) {} // Usage/renderer collaborators, not completion evidence.
     void DeleteBuffer(BufferId id,bool) {Unregister(id);slot_buffers.erase(id);} // Binding teardown fixture.
     void Register(BufferId);void Unregister(BufferId);
@@ -230,6 +240,9 @@ public:
     template<class Store> Result CommitControlledCpuWrite(Common::PhysicalRegistrationBundle::CachedWrite&,std::span<const DAddr>,u64,Store&&);
     template<class Store> Result CommitControlledCachedWrite(const ControlledRegistrationPtr&,
         const Core::Memory::PreparedCpuPage&,Common::PhysicalRegistrationBundle::CachedWrite&,u64,u64,Store&&);
+    ControlledCpuWritePtr BeginControlledCpuWrite(const ControlledRegistrationPtr&,const Core::Memory::PreparedCpuPage&,u64,u64);
+    typename ControlledCpuWrite::Phase PollControlledCpuWrite(const ControlledCpuWritePtr&);
+    template<class Store> Result CommitControlledCpuTransaction(const ControlledCpuWritePtr&,u64,Store&&);
     void ReuseHidden(const ControlledRegistrationPtr& op) {
         auto id=op->id;slot_buffers.erase(id);auto replacement=slot_buffers.insert(runtime,op->address,C);assert(replacement==id);
     }
@@ -314,6 +327,134 @@ void registration_first() {
     assert(s->cached(op,off)==77 && !s->cache->memory_tracker.IsRegionCpuModified(A,C));
     assert(s->gpu.submissions==2);
 }
+void production_write_transaction() {
+    auto s=std::make_unique<Scenario>();constexpr u64 off=4096+7;
+    auto op=s->cache->BeginControlledFirstRegistration(A+off,1,s->views);assert(op);
+    assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
+    // The fixture driver executes GPU work in submission order; CPU backing still holds 10.
+    const auto id=s->cache->ControlledReadyBuffer(op);
+    auto pin=s->cache->slot_buffers[id].PinStagedRepresentation(0,C);assert(pin);
+    auto& native=reinterpret_cast<Allocation*>(pin->Handle())->bytes;
+    s->gpu.recorded.push_back([&native] {std::fill(native.begin(),native.end(),99);});
+    auto gpu_write=s->scheduler.FlushChecked();s->scheduler.RunWorker();s->gpu.Complete();
+    assert(s->scheduler.PollChecked(gpu_write)==VK_SUCCESS);
+    s->cache->memory_tracker.MarkRegionAsGpuModified(A,C);
+    s->cache->memory_tracker.ForEachUploadRange(ALIAS,C,[](u64,u64) {});
+    auto view=s->cpu.PrepareControlledCpuPage(4096+4096);assert(view);
+    auto tx=s->cache->BeginControlledCpuWrite(op,*view,4096+off,1);assert(tx);
+    using Tx=Cache::ControlledCpuWrite::Phase;
+    assert(s->cache->PollControlledCpuWrite(tx)==Tx::Submitted);
+    assert(s->cache->PollControlledRegistration(op)==Phase::Writing);
+    assert(!op->BeginCachedWrite() && !s->cache->BeginControlledRefresh(op));
+    assert(s->cache->ControlledReadyBuffer(op)==NULL_BUFFER_ID);
+    const auto expect_upload_blocked=[&] {
+        bool blocked=false;
+        try {s->cache->SynchronizeBuffer(s->cache->slot_buffers[id],A,C);}
+        catch(const std::runtime_error&) {blocked=true;}
+        if(!blocked) {std::cerr<<"upload consumed publication inside write transaction\n";std::exit(86);}
+        blocked=false;
+        try {s->cache->SynchronizeBuffer(s->cache->slot_buffers[id],ALIAS,C);}
+        catch(const std::runtime_error&) {blocked=true;}
+        assert(blocked);
+    };
+    expect_upload_blocked();
+    s->scheduler.RunWorker();
+    assert(s->cache->PollControlledCpuWrite(tx)==Tx::Submitted);
+    assert(s->backing(off)==10 && s->cache->memory_tracker.IsRegionGpuModified(A,C));
+    s->gpu.Complete();
+    assert(s->cache->PollControlledCpuWrite(tx)==Tx::Preserved);
+    const auto domain=view->physical.Epoch()->ranges;
+    const std::array access{Common::PhysicalRangeAdmission::Access{4096,4096,Common::PhysicalRangeAdmission::Mode::Read}};
+    auto reader=domain->Enqueue(access,std::make_shared<int>(1));assert(reader);
+    assert(domain->TryStart(reader)==Common::PhysicalRangeAdmission::Start::Park);
+    assert(s->cache->CommitControlledCpuTransaction(tx,2,[&](const auto&,auto&,u64) {
+        assert(false);return Result::Stored;
+    })==Result::Invalid);
+    bool stored=false;
+    assert(s->cache->CommitControlledCpuTransaction(tx,1,[&](const auto& target,auto& write,u64 address) {
+        expect_upload_blocked();
+        auto result=s->cpu.WriteCached<u8>(target,write,address,77);stored=result==Result::Stored;
+        assert(s->cache->memory_tracker.IsRegionGpuModified(A,C));
+        expect_upload_blocked(); // Actual store happened, real tracker publication has not.
+        assert(domain->TryStart(reader)==Common::PhysicalRangeAdmission::Start::Park);
+        return result;
+    })==Result::Stored && stored);
+    if(s->backing(off-1)!=99 || s->backing(off)!=77 || s->backing(off+1)!=99) {
+        std::cerr<<"GPU dirty complement lost before CPU store\n";std::exit(85);
+    }
+    assert(tx->State()==Tx::Committed);
+    assert(!s->cache->memory_tracker.IsRegionGpuModified(A,C));
+    if(!s->cache->memory_tracker.IsRegionCpuModified(A+off,1) ||
+       !s->cache->memory_tracker.IsRegionCpuModified(ALIAS+off,1)) {
+        std::cerr<<"transaction omitted real tracker publication\n";std::exit(87);
+    }
+    assert(domain->TryStart(reader)==Common::PhysicalRangeAdmission::Start::Granted);
+    assert(domain->Complete(reader));
+    assert(s->cache->BeginControlledRefresh(op));
+    assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
+    assert(s->cached(op,off-1)==99 && s->cached(op,off)==77 && s->cached(op,off+1)==99);
+    assert(!s->cache->memory_tracker.IsRegionCpuModified(A,C));
+}
+
+void transaction_faults() {
+    using Tx=Cache::ControlledCpuWrite::Phase;
+    for(int fault=0;fault<6;++fault) {
+        auto s=std::make_unique<Scenario>();
+        auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
+        assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
+        s->cache->memory_tracker.MarkRegionAsGpuModified(A,C);
+        auto view=s->cpu.PrepareControlledCpuPage(4096);assert(view);
+        auto tx=s->cache->BeginControlledCpuWrite(op,*view,4103,1);assert(tx);
+        assert(s->cache->PollControlledCpuWrite(tx)==Tx::Submitted);
+        if(fault==0) s->gpu.submit_result=VK_ERROR_DEVICE_LOST;
+        s->scheduler.RunWorker();s->gpu.Complete();
+        if(fault==1) s->gpu.counter_result=VK_ERROR_DEVICE_LOST;
+        if(fault==2) s->gpu.invalidate_result=VK_ERROR_MEMORY_MAP_FAILED;
+        if(fault==3) ++s->cache->device_memory.epoch->generation;
+        if(fault==4) s->cache->ReuseHidden(op);
+        if(fault<5) {
+            assert(s->cache->PollControlledCpuWrite(tx)==Tx::Unknown);
+            assert(s->backing(7)==10 && s->cache->memory_tracker.IsRegionGpuModified(A,C));
+        } else {
+            assert(s->cache->PollControlledCpuWrite(tx)==Tx::Preserved);
+            assert(s->cache->memory_tracker.IsRegionGpuModified(A,C));
+            bool caught=false;
+            try { (void)s->cache->CommitControlledCpuTransaction(tx,1,[&](const auto& target,auto& write,u64 address)->Result {
+                assert(s->cpu.WriteCached<u8>(target,write,address,77)==Result::Stored);
+                throw std::runtime_error("store effected, publication interrupted");
+            }); } catch(const std::runtime_error&) {caught=true;}
+            assert(caught && tx->State()==Tx::Unknown && s->backing(7)==77);
+            assert(s->cache->memory_tracker.IsRegionGpuModified(A,C));
+        }
+        assert(op->State()==Phase::Unknown && s->cache->ControlledReadyBuffer(op)==NULL_BUFFER_ID);
+        const auto domain=view->physical.Epoch()->ranges;
+        const std::array access{Common::PhysicalRangeAdmission::Access{0,4096,Common::PhysicalRangeAdmission::Mode::Read}};
+        auto reader=domain->Enqueue(access,std::make_shared<int>(1));assert(reader);
+        tx.reset(); // Uncertain native/physical owners remain retained by the admission request.
+        assert(domain->TryStart(reader)==Common::PhysicalRangeAdmission::Start::Park);
+        assert(domain->Cancel(reader));
+    }
+    {auto s=std::make_unique<Scenario>();
+     auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
+     assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
+     auto view=s->cpu.PrepareControlledCpuPage(4096);assert(view);
+     s->cache->ReuseHidden(op);
+     assert(!s->cache->BeginControlledCpuWrite(op,*view,4103,1));
+     assert(!s->cache->BeginControlledRefresh(op));
+     assert(s->cache->PollControlledRegistration(op)==Phase::Cancelled);}
+    {auto s=std::make_unique<Scenario>();
+     auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
+     assert(s->cache->PollControlledRegistration(op)==Phase::Submitted);s->finish(op);
+     s->cache->memory_tracker.MarkRegionAsGpuModified(A,C);
+     auto view=s->cpu.PrepareControlledCpuPage(4096);assert(view);
+     auto tx=s->cache->BeginControlledCpuWrite(op,*view,4103,1);assert(tx);
+     assert(s->cache->PollControlledCpuWrite(tx)==Tx::Submitted);
+     tx.reset();
+     assert(op->State()==Phase::Unknown);
+     assert(s->cache->memory_tracker.IsRegionGpuModified(A,C));
+     assert(!s->runtime.controlled_transfers.back().expired());}
+}
+
 void faults() {
     {auto s=std::make_unique<Scenario>();s->device.timeline=false;
      assert(!s->cache->BeginControlledFirstRegistration(A,1,s->views));
@@ -383,7 +524,7 @@ int main(int argc,char** argv) {
         assert(!aliases.GatherValuesBounded(0,values,count));
     }
     const int repeats=argc>1?std::atoi(argv[1]):1;
-    for(int i=0;i<repeats;++i) {writer_first(1);writer_first(15);registration_first();}
-    faults();
-    std::cout<<"PASS actual cache registration pipeline: writer-first and registration-first cached continuation, immutable upload/readback, exact checked submission/counter, delayed completion, remap/slot reuse/failure quarantine; repeat="<<repeats<<" (Vulkan dispatch/device execution remain fixtures)\n";
+    for(int i=0;i<repeats;++i) {writer_first(1);writer_first(15);registration_first();production_write_transaction();}
+    faults();transaction_faults();
+    std::cout<<"PASS actual cache pipeline: both 77 registration orderings, GPU dirty complement [99,77,99], transaction upload exclusion, post-store real tracker publication, delayed checked native completion and failure/drop quarantine; repeat="<<repeats<<" (Vulkan dispatch/device execution remain fixtures)\n";
 }

@@ -80,6 +80,7 @@ start = head.index('    void SynchronizeBuffer(Buffer& b, u64 d, u32 size) {')
 end = head.index('    void ClearDownload(', start)
 head = head[:start] + '''    static constexpr bool USE_MEMORY_MAPS=true,USE_MEMORY_MAPS_FOR_UPLOADS=false;
     bool SynchronizeBuffer(Buffer&,u64,u32);
+    void CheckControlledSynchronization(u64,u64) {} // No controlled transaction in this legacy fixture.
     void UploadMemory(Buffer&,u64,u64,std::span<BufferCopy>);
     void MappedUploadMemory(Buffer&,u64,std::span<BufferCopy>);
     void ImmediateUploadMemory(Buffer& b,u64,std::span<BufferCopy> copies) {

@@ -50,6 +50,8 @@ cache_path = 'src/video_core/buffer_cache/buffer_cache.h'
 base = read('src/video_core/buffer_cache/buffer_cache_base.h')
 registration = body('src/video_core/buffer_cache/buffer_cache_base.h', '    class ControlledRegistration {')
 registration += ';\n    using ControlledRegistrationPtr=std::shared_ptr<ControlledRegistration>;\n'
+registration += body('src/video_core/buffer_cache/buffer_cache_base.h', '    class ControlledCpuWrite {')
+registration += ';\n    using ControlledCpuWritePtr=std::shared_ptr<ControlledCpuWrite>;\n'
 declarations = read('src/video_core/renderer_vulkan/vk_scheduler.h')
 checked = body('src/video_core/renderer_vulkan/vk_scheduler.h', '    class CheckedSubmission {')
 checked += ';\n    using Submission=std::shared_ptr<CheckedSubmission>;\n'
@@ -78,6 +80,11 @@ for marker in ['auto BufferCache<P>::BeginControlledFirstRegistration(',
                'bool BufferCache<P>::BeginControlledRefresh(',
                'auto BufferCache<P>::PollControlledRegistration(',
                'Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCachedWrite(',
+               'auto BufferCache<P>::BeginControlledCpuWrite(',
+               'auto BufferCache<P>::PollControlledCpuWrite(',
+               'Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuTransaction(',
+               'void BufferCache<P>::CheckControlledSynchronization(',
+               'bool BufferCache<P>::SynchronizeBuffer(',
                'void BufferCache<P>::Register(', 'void BufferCache<P>::Unregister(',
                'void BufferCache<P>::ChangeRegister(',
                'BufferCache<P>::CommitControlledCpuWrite(']:
@@ -136,13 +143,37 @@ if result.returncode != 83 or 'missed a real tracker alias' not in result.stderr
     raise RuntimeError(f'Missing alias publication control failed incorrectly: {result.returncode} {result.stderr}')
 print('PASS negative control: dropping a real device alias from post-store publication fails (83)')
 barrier = '.dstAccessMask = VK_ACCESS_HOST_READ_BIT'
-assert source.count(barrier) == 1
+assert source.count(barrier) == 2
 control.write_text(source.replace(barrier, '.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT'))
 subprocess.run(cmd + [str(control), '-o', str(exe)], check=True)
 result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout=60)
 if result.returncode != 84 or 'missing explicit host visibility barrier' not in result.stderr:
     raise RuntimeError(f'Missing host barrier control failed incorrectly: {result.returncode} {result.stderr}')
 print('PASS negative control: missing explicit transfer-to-host read visibility fails (84)')
+preserve = 'std::memcpy(target.data(), bytes.data() + segment.logical_offset, target.size());'
+assert source.count(preserve) == 1
+control.write_text(source.replace(preserve, '(void)target;'))
+subprocess.run(cmd + [str(control), '-o', str(exe)], check=True)
+result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout=60)
+if result.returncode != 85 or 'GPU dirty complement lost' not in result.stderr:
+    raise RuntimeError(f'Missing preservation control failed incorrectly: {result.returncode} {result.stderr}')
+print('PASS negative control: dropping checked GPU preservation loses complement bytes (85)')
+guard = 'CheckControlledSynchronization(device_addr, size);'
+assert source.count(guard) == 1
+control.write_text(source.replace(guard, '/* deliberately bypass transaction exclusion */'))
+subprocess.run(cmd + [str(control), '-o', str(exe)], check=True)
+result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout=60)
+if result.returncode != 86 or 'upload consumed publication' not in result.stderr:
+    raise RuntimeError(f'Missing upload exclusion control failed incorrectly: {result.returncode} {result.stderr}')
+print('PASS negative control: upload inside preservation/store/publication is rejected (86)')
+publication = 'memory_tracker.MarkRegionAsCpuModified(alias, tx.size);'
+assert source.count(publication) == 1
+control.write_text(source.replace(publication, '(void)alias;'))
+subprocess.run(cmd + [str(control), '-o', str(exe)], check=True)
+result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout=60)
+if result.returncode != 87 or 'transaction omitted real tracker publication' not in result.stderr:
+    raise RuntimeError(f'Missing transaction publication control failed incorrectly: {result.returncode} {result.stderr}')
+print('PASS negative control: transaction must publish each physical device alias after store (87)')
 inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
                'src/video_core/buffer_cache/controlled_transfer.h', 'src/video_core/physical_access_plan.h',
                'src/video_core/renderer_vulkan/vk_buffer_payload.h'])

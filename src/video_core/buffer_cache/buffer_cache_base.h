@@ -227,7 +227,7 @@ public:
         friend class BufferCache;
 
     public:
-        enum class Phase { Waiting, Admitted, Submitted, Ready, Unknown, Cancelled };
+        enum class Phase { Waiting, Admitted, Submitted, Ready, Writing, Unknown, Cancelled };
         [[nodiscard]] Phase State() const { return phase; }
         [[nodiscard]] std::optional<Common::PhysicalRegistrationBundle::CachedWrite>
         BeginCachedWrite() const {
@@ -249,6 +249,44 @@ public:
         Phase phase{Phase::Waiting};
     };
     using ControlledRegistrationPtr = std::shared_ptr<ControlledRegistration>;
+
+    /// GPU-owner continuation, with no cache/PTE lock across polling. Admission and physical/
+    /// native owners survive caller drop or uncertain effects. Not an ordinary CPU dispatcher.
+    class ControlledCpuWrite {
+        friend class BufferCache;
+    public:
+        enum class Phase { Waiting, Submitted, Preserved, Committed, Cancelled, Unknown };
+        [[nodiscard]] Phase State() const { return phase; }
+        ~ControlledCpuWrite() {
+            if (phase != Phase::Committed && phase != Phase::Cancelled) {
+                (void)write.MarkUnknown();
+                operation->phase = ControlledRegistration::Phase::Unknown;
+            }
+        }
+    private:
+        ControlledCpuWrite(ControlledRegistrationPtr operation_,
+                           const Core::Memory::PreparedCpuPage& view_, u64 address_, u64 size_,
+                           std::shared_ptr<ControlledBufferTransfer> preservation_,
+                           Common::PhysicalRegistrationBundle::CachedWrite write_)
+            : operation{std::move(operation_)}, view{view_}, address{address_}, size{size_},
+              preservation{std::move(preservation_)}, write{std::move(write_)} {}
+        ControlledRegistrationPtr operation;
+        Core::Memory::PreparedCpuPage view;
+        u64 address, size;
+        std::shared_ptr<ControlledBufferTransfer> preservation;
+        Common::PhysicalRegistrationBundle::CachedWrite write;
+        Phase phase{Phase::Waiting};
+    };
+    using ControlledCpuWritePtr = std::shared_ptr<ControlledCpuWrite>;
+
+    [[nodiscard]] ControlledCpuWritePtr BeginControlledCpuWrite(
+        const ControlledRegistrationPtr&, const Core::Memory::PreparedCpuPage&, u64 address,
+        u64 size);
+    [[nodiscard]] typename ControlledCpuWrite::Phase PollControlledCpuWrite(
+        const ControlledCpuWritePtr&);
+    template <typename Store>
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult CommitControlledCpuTransaction(
+        const ControlledCpuWritePtr&, u64 size, Store&& store);
 
     /// GPU/cache owner only, without a cache/PTE lock across retries. Explicit controlled
     /// endpoint, not ordinary game routing. Overlaps, unsupported backends and unqualified
@@ -413,6 +451,7 @@ public:
 
 private:
     BufferId ControlledBufferId(const ControlledRegistrationPtr& operation, bool require_clean);
+    void CheckControlledSynchronization(DAddr address, u64 size);
     template <typename Func>
     static void ForEachEnabledBit(u32 enabled_mask, Func&& func) {
         for (u32 index = 0; enabled_mask != 0; ++index, enabled_mask >>= 1) {

@@ -118,7 +118,9 @@ BufferId BufferCache<P>::ControlledBufferId(const ControlledRegistrationPtr& ope
     if constexpr (!requires(const Buffer& buffer) { buffer.PinStagedRepresentation(0, 1); }) {
         return NULL_BUFFER_ID;
     } else {
-        if (!operation || operation->phase != ControlledRegistration::Phase::Ready ||
+        if (!operation ||
+            (operation->phase != ControlledRegistration::Phase::Ready &&
+             (require_clean || operation->phase != ControlledRegistration::Phase::Writing)) ||
             std::ranges::find(controlled_registrations, operation) ==
                 controlled_registrations.end() ||
             !slot_buffers.contains(operation->id))
@@ -142,7 +144,8 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCachedWrite
     const ControlledRegistrationPtr& operation, const Core::Memory::PreparedCpuPage& view,
     Common::PhysicalRegistrationBundle::CachedWrite& write, u64 address, u64 size, Store&& store) {
     using Result = Core::Memory::PreparedCpuWriteResult;
-    if (!ControlledBufferId(operation, false) || !write.Granted() || !size ||
+    if (ControlledBufferId(operation, false) == NULL_BUFFER_ID || !write.Granted() ||
+        !operation->admission->OwnsCachedWrite(write) || !size ||
         size > DEVICE_PAGESIZE - address % DEVICE_PAGESIZE ||
         view.physical.Epoch()->generation != operation->plan.BackingGeneration())
         return Result::NeedSlow;
@@ -185,11 +188,179 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCachedWrite
 }
 
 template <class P>
+auto BufferCache<P>::BeginControlledCpuWrite(
+    const ControlledRegistrationPtr& operation, const Core::Memory::PreparedCpuPage& view,
+    u64 address, u64 size) -> ControlledCpuWritePtr {
+    if constexpr (!requires { runtime.PrepareControlledTransfer(std::declval<const Buffer&>()); }) {
+        return {};
+    } else {
+        address &= 0xffffffffffffULL;
+        if (!operation || operation->phase != ControlledRegistration::Phase::Ready ||
+            ControlledBufferId(operation, false) == NULL_BUFFER_ID ||
+            (size != 1 && size != 2 && size != 4 && size != 8) ||
+            size > DEVICE_PAGESIZE - address % DEVICE_PAGESIZE ||
+            (address & ~(DEVICE_PAGESIZE - 1)) != view.mapping.virtual_page ||
+            view.mapping.type != Common::PageType::RasterizerCachedMemory ||
+            !view.IsCurrentForRegistration() ||
+            std::ranges::none_of(operation->plan.Segments(), [&](const auto& segment) {
+                return segment.storage.Epoch() == view.physical.Epoch() &&
+                       segment.storage.PhysicalOffset() == view.physical.PhysicalOffset();
+            }))
+            return {};
+        auto preservation = runtime.PrepareControlledTransfer(slot_buffers[operation->id]);
+        if (!preservation) return {};
+        struct Owners {
+            ControlledRegistrationPtr operation;
+            std::shared_ptr<ControlledBufferTransfer> preservation;
+        };
+        auto write = operation->admission->BeginCachedWrite(
+            std::make_shared<const Owners>(Owners{operation, preservation}));
+        if (!write) return {};
+        auto transaction = ControlledCpuWritePtr{new ControlledCpuWrite{
+            operation, view, address, size, std::move(preservation), std::move(*write)}};
+        operation->phase = ControlledRegistration::Phase::Writing;
+        return transaction;
+    }
+}
+
+template <class P>
+auto BufferCache<P>::PollControlledCpuWrite(const ControlledCpuWritePtr& transaction)
+    -> typename ControlledCpuWrite::Phase {
+    using Phase = typename ControlledCpuWrite::Phase;
+    if (!transaction) return Phase::Unknown;
+    auto& tx = *transaction;
+    if (tx.phase != Phase::Waiting && tx.phase != Phase::Submitted) return tx.phase;
+    auto& op = *tx.operation;
+    const auto unknown = [&] {
+        (void)tx.write.MarkUnknown();
+        op.phase = ControlledRegistration::Phase::Unknown;
+        return tx.phase = Phase::Unknown;
+    };
+    try {
+        if (tx.phase == Phase::Waiting && !tx.write.Granted()) {
+            const auto start = tx.write.TryStart();
+            if (start == Common::PhysicalRangeAdmission::Start::Park) return tx.phase;
+            if (start != Common::PhysicalRangeAdmission::Start::Granted) return unknown();
+        }
+        if (ControlledBufferId(tx.operation, false) == NULL_BUFFER_ID ||
+            tx.preservation->DestinationIdentity() != op.transfer->DestinationIdentity() ||
+            !tx.view.IsCurrentForRegistration() || scatter_busy ||
+            std::ranges::any_of(gather_buffers, [](const auto& item) {
+                return item.second.scatter_pending;
+            }))
+            return unknown();
+        const bool submitted = tx.phase == Phase::Submitted;
+        if (submitted) {
+            const auto result = tx.preservation->PollPreserve();
+            if (result == ControlledTransferPoll::Pending) return tx.phase;
+            if (result != ControlledTransferPoll::Complete) return unknown();
+        }
+        bool qualified = true;
+        const bool locked = device_memory.WithControlledMapping(
+            op.plan.DeviceEpoch(), op.plan.DeviceGeneration(), [&](const auto& aliases_for) {
+                std::array<DAddr, 64> aliases{};
+                // Whole-buffer readback is allowed only for a clean CPU footprint with a
+                // single authoritative GPU representation. Mixed/other GPU aliases refuse.
+                for (const auto& segment : op.plan.Segments()) {
+                    size_t count{};
+                    if (!segment.storage.OwnerAlive() ||
+                        !aliases_for(segment.storage.PhysicalOffset(), aliases, count)) {
+                        qualified = false;
+                        return;
+                    }
+                    for (size_t i = 0; i < count; ++i) {
+                        const auto alias = aliases[i];
+                        if ((IsRegionRegistered(alias, DEVICE_PAGESIZE) &&
+                             memory_tracker.IsRegionCpuModified(alias, DEVICE_PAGESIZE)) ||
+                            (alias != op.address + segment.logical_offset &&
+                             memory_tracker.IsRegionGpuModified(alias, DEVICE_PAGESIZE))) {
+                            qualified = false;
+                            return;
+                        }
+                    }
+                }
+                if (!submitted) return; // Never record/submit while holding this guard.
+                const auto bytes = tx.preservation->PreservedBytes();
+                if (bytes.size() != op.plan.Size()) {
+                    qualified = false;
+                    return;
+                }
+                // All destinations validated BEFORE the first copy. Only immutable owned pins
+                // are written; remapping cannot redirect preservation to another allocation.
+                for (const auto& segment : op.plan.Segments()) {
+                    const auto target = segment.storage.Bytes();
+                    std::memcpy(target.data(), bytes.data() + segment.logical_offset, target.size());
+                }
+                // Backing now contains every GPU byte. Keep GPU dirty state AND exact download
+                // ranges until the CPU store and every alias's tracker publication succeed.
+            });
+        if (!locked) return tx.phase;
+        if (!qualified) return unknown();
+        if (submitted) return tx.phase = Phase::Preserved;
+        if (!tx.preservation->SubmitPreserve()) return unknown();
+        return tx.phase = Phase::Submitted;
+    } catch (...) {
+        return unknown();
+    }
+}
+
+template <class P>
+template <typename Store>
+Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuTransaction(
+    const ControlledCpuWritePtr& transaction, u64 size, Store&& store) {
+    using Result = Core::Memory::PreparedCpuWriteResult;
+    using Phase = typename ControlledCpuWrite::Phase;
+    if (!transaction || transaction->phase != Phase::Preserved) return Result::NeedSlow;
+    if (transaction->size != size) return Result::Invalid;
+    auto& tx = *transaction;
+    auto& op = *tx.operation;
+    try {
+        Result result = Result::Busy;
+        if (ControlledBufferId(tx.operation, false) == NULL_BUFFER_ID || !tx.write.Granted())
+            return Result::NeedSlow;
+        const bool qualified = device_memory.WithControlledPhysicalAliases(
+            tx.view.physical.PhysicalOffset() + tx.address % DEVICE_PAGESIZE,
+            op.plan.DeviceEpoch(), op.plan.DeviceGeneration(), [&](auto aliases) {
+                // The preservation continuation owns the complete footprint. Unlike the old
+                // adapter, it need not clear GPU dirtiness merely to permit this actual store.
+                result = store(tx.view, tx.write, tx.address);
+                if (result != Result::Stored) return;
+                for (const auto alias : aliases) {
+                    NotifyGatherWrite(alias, tx.size);
+                    memory_tracker.MarkRegionAsCpuModified(alias, tx.size);
+                }
+            });
+        if (!qualified) result = Result::Busy;
+        if (result != Result::Stored) {
+            // Prepared refusal has no store effects; successful preservation is already in
+            // backing. Do not expose the old GPU representation after a mapping change.
+            (void)tx.write.MarkUnknown();
+            op.phase = ControlledRegistration::Phase::Unknown;
+            tx.phase = Phase::Unknown;
+            return result;
+        }
+        ClearDownload(op.address, op.plan.Size());
+        gpu_modified_ranges.Subtract(op.address, op.plan.Size());
+        memory_tracker.UnmarkRegionAsGpuModified(op.address, op.plan.Size());
+        if (!tx.write.CompleteAfterTrackerPublication()) throw std::runtime_error("CPU write admission lost");
+        tx.phase = Phase::Committed;
+        op.phase = ControlledRegistration::Phase::Ready;
+        return result;
+    } catch (...) {
+        (void)tx.write.MarkUnknown();
+        op.phase = ControlledRegistration::Phase::Unknown;
+        tx.phase = Phase::Unknown;
+        throw;
+    }
+}
+
+template <class P>
 bool BufferCache<P>::BeginControlledRefresh(const ControlledRegistrationPtr& operation) {
     if constexpr (!requires { runtime.PrepareControlledTransfer(std::declval<const Buffer&>()); }) {
         return false;
     } else {
-        if (!ControlledBufferId(operation, false) || !runtime.SupportsControlledTransfers() ||
+        if (!operation || operation->phase != ControlledRegistration::Phase::Ready ||
+            ControlledBufferId(operation, false) == NULL_BUFFER_ID || !runtime.SupportsControlledTransfers() ||
             !operation->plan.MatchesCurrentDevice(device_memory, operation->address))
             return false;
         // Refresh into a NEW hidden allocation. Existing bindings cannot read uninitialized data.
@@ -254,8 +425,10 @@ auto BufferCache<P>::PollControlledRegistration(const ControlledRegistrationPtr&
         return true;
     };
     if (op.phase == Phase::Ready)
-        return ControlledBufferId(operation, false) ? Phase::Ready : (op.phase = Phase::Cancelled);
-    if (op.phase == Phase::Unknown || op.phase == Phase::Cancelled) return op.phase;
+        return ControlledBufferId(operation, false) != NULL_BUFFER_ID
+                   ? Phase::Ready : (op.phase = Phase::Cancelled);
+    if (op.phase == Phase::Writing || op.phase == Phase::Unknown || op.phase == Phase::Cancelled)
+        return op.phase;
     bool registered = false;
     try {
         if (op.phase == Phase::Waiting || op.phase == Phase::Admitted) {
@@ -2632,7 +2805,39 @@ void BufferCache<P>::MarkGpuUse(Buffer& buffer, u64 offset, u64 size) {
 }
 
 template <class P>
+void BufferCache<P>::CheckControlledSynchronization(DAddr device_addr, u64 size) {
+    if (!size) return;
+    // This owner-thread continuation must run before consuming the real tracker. A failure
+    // cannot be represented by the legacy bool (whose false also means successful upload).
+    for (const auto& operation : controlled_registrations) {
+        if (operation->phase != ControlledRegistration::Phase::Writing &&
+            operation->phase != ControlledRegistration::Phase::Unknown)
+            continue;
+        bool overlaps = false;
+        const bool qualified = device_memory.WithControlledMapping(
+            operation->plan.DeviceEpoch(), operation->plan.DeviceGeneration(),
+            [&](const auto& aliases_for) {
+                std::array<DAddr, 64> aliases{};
+                for (const auto& segment : operation->plan.Segments()) {
+                    size_t count{};
+                    if (!aliases_for(segment.storage.PhysicalOffset(), aliases, count)) {
+                        overlaps = true; // Unknown aliases cannot qualify an upload.
+                        return;
+                    }
+                    for (size_t i = 0; i < count; ++i)
+                        if (device_addr < aliases[i] + DEVICE_PAGESIZE &&
+                            aliases[i] < device_addr + size)
+                            overlaps = true;
+                }
+            });
+        if (!qualified || overlaps)
+            throw std::runtime_error("controlled CPU write excludes buffer synchronization");
+    }
+}
+
+template <class P>
 bool BufferCache<P>::SynchronizeBuffer(Buffer& buffer, DAddr device_addr, u32 size) {
+    CheckControlledSynchronization(device_addr, size);
     boost::container::small_vector<BufferCopy, 4> copies;
     u64 total_size_bytes = 0;
     u64 largest_copy = 0;

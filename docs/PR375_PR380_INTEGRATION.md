@@ -1,5 +1,20 @@
 # PR #375 / #380 integration roadmap
 
+## Current continuation: 2026-10-16 — transaction boundary implemented, ordinary caller pending
+
+The home checkout has resumed from `89665bef71`. The first slice of the next stage below adds
+an owned cache-side scalar write transaction, checked Vulkan GPU-dirty preservation, exact
+post-store alias publication and exclusion before actual upload tracker consumption. It retains
+GPU dirty obligations and owners through failures, and corrects controlled null-buffer sentinel
+checks. See the [progress entry](../tools/physical_coherency_tests/M3B_PROGRESS.md#write-transaction-ownership-and-gpu-preservation-slice-2026-10-16--f2-open).
+
+**This is preparatory integration, not completion of the ordinary production write stage.**
+Ordinary Memory::Write has no transaction caller yet; other bound GPU work/GC/download and
+uncontrolled producers still require enrollment/exclusion, and trusted recovery/device evidence
+remain open. The explicit GPU-owner continuation requires its footprint isolated from those
+producers. The unchanged ordinary F2 witness still exposes backing77/cache10. F2 remains Open.
+The 2026-10-15 checkpoint below is historical; its next-stage acceptance gates remain binding.
+
 ## Current handoff: 2026-10-15 end of day
 
 Development stops here for today. This update records progress and the next scope only;

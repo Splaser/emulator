@@ -188,6 +188,48 @@ public:
         return Result::Complete;
     }
 
+    bool SubmitPreserve() override {
+        if (retired || submitted || !target || !target->IsUsable() ||
+            readback.Mapped().size() < target->Size())
+            return false;
+        submitted = preserving = true;
+        try {
+            const std::array copies{VideoCommon::BufferCopy{target->Offset(), 0, target->Size()}};
+            runtime.CopyBuffer(*readback, target->Handle(), copies, true, false);
+            scheduler.Record([](vk::CommandBuffer cmdbuf) {
+                static constexpr VkMemoryBarrier PRESERVE_HOST_READ{
+                    .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                    .pNext = nullptr,
+                    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                    .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+                };
+                cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+                                       0, PRESERVE_HOST_READ);
+            });
+            submission = scheduler.FlushChecked();
+            return bool(submission);
+        } catch (...) {
+            return false;
+        }
+    }
+
+    VideoCommon::ControlledTransferPoll PollPreserve() override {
+        using Result = VideoCommon::ControlledTransferPoll;
+        if (retired || !preserving || !target || !target->IsUsable() || !submission)
+            return Result::Unknown;
+        if (verified) return Result::Complete;
+        const auto result = scheduler.PollChecked(submission);
+        if (result == VK_NOT_READY) return Result::Pending;
+        if (result != VK_SUCCESS || readback.InvalidateChecked() != VK_SUCCESS)
+            return Result::Unknown;
+        verified = true;
+        return Result::Complete;
+    }
+
+    std::span<const u8> PreservedBytes() const override {
+        return preserving && verified && !retired ? readback.Mapped() : std::span<const u8>{};
+    }
+
     void RetireAfterDeviceIdle() override {
         retired = true;
         target.reset();
@@ -202,7 +244,7 @@ private:
     std::optional<StagedBufferPin> target;
     vk::Buffer upload, readback;
     Scheduler::Submission submission;
-    bool submitted{}, verified{}, retired{};
+    bool submitted{}, verified{}, retired{}, preserving{};
 };
 } // namespace
 

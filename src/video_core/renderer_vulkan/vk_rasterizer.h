@@ -135,6 +135,24 @@ public:
 
     /// Explicit GPU-owner controlled endpoint. Ordinary game routing remains unenrolled.
     using ControlledRegistrationPtr = BufferCache::ControlledRegistrationPtr;
+    using ControlledCpuWritePtr = BufferCache::ControlledCpuWritePtr;
+    [[nodiscard]] ControlledCpuWritePtr BeginControlledCpuWrite(
+        const ControlledRegistrationPtr& operation, const Core::Memory::PreparedCpuPage& view,
+        u64 address, u64 size) {
+        return buffer_cache.BeginControlledCpuWrite(operation, view, address, size);
+    }
+    [[nodiscard]] BufferCache::ControlledCpuWrite::Phase PollControlledCpuWrite(
+        const ControlledCpuWritePtr& transaction) {
+        return buffer_cache.PollControlledCpuWrite(transaction);
+    }
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult CommitControlledCpuWrite8(
+        const ControlledCpuWritePtr&, Core::Memory::Memory&, u8);
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult CommitControlledCpuWrite16(
+        const ControlledCpuWritePtr&, Core::Memory::Memory&, u16);
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult CommitControlledCpuWrite32(
+        const ControlledCpuWritePtr&, Core::Memory::Memory&, u32);
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult CommitControlledCpuWrite64(
+        const ControlledCpuWritePtr&, Core::Memory::Memory&, u64);
     [[nodiscard]] ControlledRegistrationPtr BeginControlledBufferRegistration(
         DAddr address, u32 size, std::span<const Core::Memory::PreparedCpuPage> views) {
         return buffer_cache.BeginControlledFirstRegistration(address, size, views);

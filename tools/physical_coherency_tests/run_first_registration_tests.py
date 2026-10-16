@@ -212,6 +212,7 @@ template<class P> struct BufferCache {
     void Register(BufferId);
     template<bool insert> void ChangeRegister(BufferId);
     bool SynchronizeBuffer(Buffer&,u64,u32);
+    void CheckControlledSynchronization(u64,u64) {} // No production transaction is enrolled here.
     void UploadMemory(Buffer&,u64,u64,std::span<BufferCopy>);
     void ImmediateUploadMemory(Buffer&,u64,std::span<const BufferCopy>);
     void MappedUploadMemory(Buffer&,u64,std::span<BufferCopy>) {assert(false);}
