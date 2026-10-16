@@ -13,6 +13,7 @@
 #include "core/memory.h"
 #include "core/hle/kernel/k_process.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
+#include "video_core/renderer_vulkan/vk_scheduler.h"
 
 namespace Core {
 struct SchedulerTestAccess : SystemTestAccess {
