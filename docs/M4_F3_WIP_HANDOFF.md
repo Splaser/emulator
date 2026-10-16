@@ -1,7 +1,8 @@
 # M4 physical alias coherency: WIP handoff
 
-Checkpoint date: 2026-10-16. Work stopped at the user's requested 5-hour usage
-threshold. This is a continuation checkpoint, not M4 acceptance.
+Initial checkpoint date: 2026-10-16, at the user's requested 5-hour usage
+threshold. Evening continuation established a stable native F3 reproduction.
+This is a continuation checkpoint, not M4 acceptance or a production F3 fix.
 
 ## Status and constraints
 
@@ -10,8 +11,10 @@ threshold. This is a continuation checkpoint, not M4 acceptance.
   [producer inventory](M3B_F2_PRODUCER_INVENTORY.md).
 - Ordinary `Memory::Write` routing and selective UMA zero-copy remain inactive.
 - No new coordinator or broad BufferCache rewrite has been introduced.
-- This checkpoint adds a native F3 witness candidate and test observation helpers.
-  **They have not been compiled or run. F3 reproduction is not yet established.**
+- The native F3 witness and test observation helpers have compiled remotely. The
+  standalone `[f3]` processes reproduce stale full/partial aliases with whole-byte
+  controls, remap rejection and physically equivalent representation qualification.
+  Final remote validation is tracked below. **F3 is reproduced, not fixed.**
 - No local Android build was attempted; validation continues through remote workflow.
 
 ## Last verified baseline
@@ -38,14 +41,15 @@ The checkpoint starts from `3462bbadcf`, previously pushed to both `main` and
 | Native resource pin | `src/video_core/renderer_vulkan/vk_buffer_payload.h`: pins retain allocation and byte bounds. They do not prove cache membership, current physical association, authoritative content, admission or completion. |
 | Representation qualification | `PinExistingDmaRepresentation` validates physical geometry and takes/revalidates a fresh mapping snapshot around pin acquisition. It does not simply reject every historical plan generation change; existing physical-equivalence behavior must be preserved. |
 
-Working F3 explanation: warm two independent staged buffers A/B from physical
+Observed F3 sequence: warm two independent staged buffers A/B from physical
 backing 10, then complete a GPU write of 99 through A. Ordinary synchronization
 through B can still consult B's DAddr-local tracking and serve its old staged
 value 10. Completing physical range admission establishes ordering but does not
 itself transfer authoritative content between staged aliases. This explanation
-is source-derived and awaits execution of the new native witness.
+matches the standalone native result. See
+[source cause and bounded authority plan](M4_F3_ALIAS_AUTHORITY_PLAN.md).
 
-## Unverified native witness candidate
+## Native witness and process-isolation correction
 
 `src/tests/core/controlled_cpu_scheduler.cpp` adds the `[f3]` case to the existing
 `controlled_cpu_scheduler_tests` target. `src/core/scheduler_test_access.h` adds
@@ -58,7 +62,7 @@ staged pins and cache retirement.
 | Partial alias | C starts one physical page into A; a 256-byte GPU fill within that page reads 99 through A, currently expected stale 10 through C. Adjacent untouched bytes stay 10. |
 | Disjoint control | Separate physical backing D remains 10. |
 | Admission control | Existing physical range admission parks the B reader behind A's writer and grants it after completion; no new coordinator is used. |
-| Retirement/remap | Retire B before remapping it to backing 55; a retained old pin remains an old allocation, the old physical plan fails current-device validation, and a fresh representation has a new identity and reads 55. |
+| Retirement/remap | Retire B before remapping it to backing 55; a retained old pin remains an old allocation, the old physical plan and representation query reject the new mapping, and a fresh representation has a new identity and reads 55. A's unchanged physical association still qualifies despite the global mapping-generation change. |
 
 The driver uses actual System/Kernel/process objects, device mappings, ordinary
 BufferCache code and native Vulkan transfer execution through the existing
@@ -68,46 +72,78 @@ GPUVAddr translation witness, or proof that ordinary producers participate in
 production admission. Existing extracted cache/pin and renderer fixtures remain
 fixtures; do not report their results as this native F3 reproduction.
 
-Candidate commands on the remote Linux build:
+Commands on the remote Linux build:
 
 ```sh
 build-integration/bin/controlled_cpu_scheduler_tests '[f3]'
 CITRON_REQUIRE_F3_FIXED=1 build-integration/bin/controlled_cpu_scheduler_tests '[f3]'
 ```
 
+The F3 case is hidden from an unfiltered Catch2 invocation and explicitly selected
+by its own CTest process. KernelCore's host dummy KThread is thread-local and
+retains the first Kernel; creating two complete System instances sequentially
+in the same host test thread reused stale kernel state. Run `ctest`, the original
+unfiltered scheduler executable, or the explicit `[f3]` process; do not select both
+System lifetimes in one executable invocation.
+
 Default mode intentionally requires stale alias values 10 and prints
 `F3 REPRODUCED (not fixed)` only after positive controls pass. The second command
-requires coherent values 99 and should fail until F3 is fixed. Neither command
-has been executed for this checkpoint. Catch assertions outside the GPU callback
+requires coherent values 99 and should fail until F3 is fixed. The repeat driver
+`python tools/physical_coherency_tests/run_native_f3_tests.py --repeat 3` retains
+each normal log and explicitly rejects crashes, timeouts, failed positive controls
+and unexpected negative-mode failures. Catch assertions outside the GPU callback
 receive captured setup/observation exceptions rather than terminating the GPU
 worker on an uncaught test exception.
 
 ## Resume roadmap
 
-1. Review and compile the witness remotely. Resolve test setup/build issues first;
-   do not change production coherency to make an unproven witness pass.
-2. Dispatch `pr375-pr380-integration.yml` on `codex/issue-372-fixes` with
-   `validation_scope=linux-only`. Run the normal native suite, then explicitly
-   run `[f3]` with `CITRON_REQUIRE_F3_FIXED=1`; retain output and exit status.
-   A green default known-defect test alone is not F3 acceptance.
-3. Establish deterministic repeated full-page and partial-alias stale results
-   with same-address, untouched, disjoint and retirement/remap controls. If
-   observations differ from the hypothesis, diagnose the actual path before
-   planning a fix. Audit higher-level remap/retirement callers and missing
-   stale-representation cases; the retire-before-remap control is not exhaustive.
-4. Preserve all existing M3B native/integration/mutation regressions. Re-run the
-   original F2 command below and its expected-failing `--require-fixed` variant:
-   `python tools/physical_coherency_tests/run_write_coherency_witnesses.py --case f2 --repeat 3`.
-5. Once reproduced, publish exact logs, source-level cause and a bounded
-   implementation plan. Reuse epoch/range admission and immutable physical pins;
-   distinguish representation lifetime from current mapping/content authority.
-6. Proposed implementation direction, pending witness: attach physical association
-   metadata to staged representations; publish GPU-written physical subranges;
-   resolve authoritative content for alias consumers under existing admission;
-   revalidate mapping/retirement before effects. Keep DAddr resource lookup and
-   preserve GPU dirty complements. Do not widen activation or add a coordinator.
-7. Add fixed-mode passing controls only after an implementation exists, while
-   retaining a reproducible pre-fix negative witness and the original F2 defect.
+1. Follow the [bounded authority implementation plan](M4_F3_ALIAS_AUTHORITY_PLAN.md):
+   associate staged payloads with physical geometry, publish exact GPU-written
+   subranges, resolve authoritative alias content under existing admission and
+   revalidate before effects. Preserve DAddr resource lookup and GPU dirty
+   complements. Do not widen activation or add a coordinator.
+2. Cover alternating alias writers, disjoint writes within one page, merge/GC,
+   concurrent remap/retirement, submission failure and Unknown retention. The
+   existing sequential retire-before-remap witness is not exhaustive.
+3. Preserve the original ordinary F3 negative witness and F2 defect. A manually
+   driven copy adapter cannot count as an ordinary-path coherency fix. Only after
+   the implementation exists may fixed-mode passing controls replace this gate.
+4. Run the complete `pr375-pr380-integration.yml` gates after source changes.
+   Preserve M3B native/integration/mutation regressions; Android production source
+   changes require the remote full scope, without a local Android build.
 
-No remote workflow has been dispatched for this WIP checkpoint. Resume from this
-commit; the earlier baseline's green builds do not cover the new test code.
+## Continuation evidence: 2026-10-16 evening
+
+- Initial run [38891421101](https://github.com/Splaser/emulator/actions/runs/38891421101)
+  compiled production and native targets, passed the 130-case ordinary test suite,
+  and printed full/partial stale 10, same-DAddr 99 and remap 55. Its combined native
+  executable timed out; this was not clean witness acceptance.
+- Diagnostic run [38896969297](https://github.com/Splaser/emulator/actions/runs/38896969297)
+  confirmed standalone F3 normal exit under GDB (28 assertions). Both native
+  cases in one process failed in whichever complete System lifetime ran second.
+  Test process isolation is implemented at `0fd0f17c9e`.
+- Run [38897769357](https://github.com/Splaser/emulator/actions/runs/38897769357)
+  at `f6ab101715` passed all three CTest processes (130 ordinary cases, 1708
+  scheduler assertions, 36 F3 assertions) and three additional standalone F3
+  repetitions. Fixed mode produced precisely the two expected alias failures;
+  the wrapper incorrectly assumed the older Catch2 exit convention. `62259c5dbd`
+  recognizes Catch2 3.16's test-failure status 42 and records process exit codes.
+- Final validation of `48d95a8ba3`, with two additional native mapping qualification
+  controls, passed in run
+  [38898475861](https://github.com/Splaser/emulator/actions/runs/38898475861).
+  All three CTest processes passed: 130 ordinary cases, 1708 scheduler assertions,
+  and 38 F3 assertions. Three additional F3 processes each passed 38 assertions
+  and exited 0. Fixed mode exited 42 with exactly the two expected alias failures
+  (36 passing/2 failing assertions), after normal guest teardown. F2 reproduced
+  three times and its negative mode exited 1 as required. Real Linux HostMemory/
+  import lifetime and every configured coherency/lifecycle/mutation regression
+  passed. Android was intentionally skipped because production code is unchanged.
+  Downloaded source stamp, CTest logs, each F3 process log, F2 negative log and
+  complete job output are retained in `.diagnostics/ci-38898475861/`.
+- Local Windows extracted F2 witness ran three repetitions: backing 77, cache 10;
+  invoking its compiled `f2 require-fixed` returned 1 as expected. This is fixture
+  regression evidence, not native Vulkan or Android acceptance.
+
+Production coherency code has not changed in this continuation. The next source
+slice is the bounded representation/content authority plan linked above; automatic
+ordinary routing and general producer eligibility remain blocked.

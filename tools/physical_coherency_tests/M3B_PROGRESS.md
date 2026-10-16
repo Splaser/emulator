@@ -1,5 +1,23 @@
 # M3B production integration progress
 
+## M4 F3 native alias witness reproduced; production fix remains open
+
+Remote Linux run [38898475861](https://github.com/Splaser/emulator/actions/runs/38898475861)
+at `48d95a8ba3` passed all production/native/integration/lifecycle gates. CTest
+passed 130 ordinary cases, 1708 scheduler assertions and the 38-assertion native
+F3 witness. Three more independent F3 processes passed; fixed mode returned 42
+with exactly two expected alias failures. Full-page and partial aliases retained
+10 after an actual Vulkan write of 99; same-address reads, untouched complements,
+disjoint backing, retired/remapped identities and physical-equivalence queries
+passed their controls. F2 reproduced three times; its fixed-mode negative returned 1.
+
+The new test setup isolates complete System lifetimes in separate processes because
+the host TLS dummy KThread retains its original Kernel. No production coherency code
+changed. F2/F3 remain Open, restricted eligibility remains blocked and ordinary
+Memory::Write/UMA activation remains off. Continue from the
+[M4 handoff](../../docs/M4_F3_WIP_HANDOFF.md) and
+[bounded content-authority plan](../../docs/M4_F3_ALIAS_AUTHORITY_PLAN.md).
+
 ## Restricted eligibility: blocked; readback isolation verified
 
 The requested ordinary scalar production-eligibility acceptance is **not achieved**. The
