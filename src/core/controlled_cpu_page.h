@@ -28,11 +28,15 @@ struct CpuWriteOwner {
         return true;
     }
     [[nodiscard]] bool Track(const std::shared_ptr<ControlledCpuWriteRequest>& request);
+    [[nodiscard]] bool TryAccept(const std::shared_ptr<ControlledCpuWriteRequest>& request);
     void Close();
 private:
     mutable std::shared_mutex mutex;
     Memory* memory;
     std::array<std::weak_ptr<ControlledCpuWriteRequest>, 256> requests;
+    // Acceptance retains identity even if transaction construction throws before admission
+    // can retain it. Unknown has no implicit recovery/reap; other terminals reap cold/at Close.
+    std::array<std::shared_ptr<ControlledCpuWriteRequest>, 256> accepted;
 };
 
 enum class PreparedCpuWriteResult { Stored, NeedSlow, Stale, Busy, Retired, Invalid };
@@ -251,10 +255,8 @@ private:
         no_effects.store(true, std::memory_order_relaxed);
         Publish(Phase::Refused);
     }
-    [[nodiscard]] bool TryAccept() noexcept {
-        auto expected = Phase::Prepared;
-        return phase.compare_exchange_strong(expected, Phase::Accepted,
-                                              std::memory_order_acq_rel);
+    [[nodiscard]] bool TryAccept(const std::shared_ptr<ControlledCpuWriteRequest>& self) {
+        return self.get() == this && owner->TryAccept(self);
     }
     void Publish(Phase terminal, PreparedCpuWriteResult outcome = PreparedCpuWriteResult::NeedSlow) {
         if (State() != Phase::Accepted) return; // terminal results are immutable
@@ -276,8 +278,26 @@ using ControlledCpuWriteRequestPtr = std::shared_ptr<ControlledCpuWriteRequest>;
 inline bool CpuWriteOwner::Track(const ControlledCpuWriteRequestPtr& request) {
     std::unique_lock lock{mutex, std::try_to_lock};
     if (!lock.owns_lock() || !memory || request->Owner().get() != this) return false;
+    for (auto& entry : accepted) {
+        if (entry && entry->State() != ControlledCpuWriteRequest::Phase::Accepted &&
+            entry->State() != ControlledCpuWriteRequest::Phase::Unknown) entry.reset();
+    }
     for (auto& entry : requests) {
         if (entry.expired()) { entry = request; return true; }
+    }
+    return false;
+}
+
+inline bool CpuWriteOwner::TryAccept(const ControlledCpuWriteRequestPtr& request) {
+    std::unique_lock lock{mutex, std::try_to_lock};
+    if (!lock.owns_lock() || !memory || request->Owner().get() != this) return false;
+    for (size_t i = 0; i < requests.size(); ++i) {
+        if (requests[i].lock() != request) continue;
+        auto expected = ControlledCpuWriteRequest::Phase::Prepared;
+        if (!request->phase.compare_exchange_strong(expected,
+                ControlledCpuWriteRequest::Phase::Accepted, std::memory_order_acq_rel)) return false;
+        accepted[i] = request;
+        return true;
     }
     return false;
 }
@@ -285,9 +305,10 @@ inline bool CpuWriteOwner::Track(const ControlledCpuWriteRequestPtr& request) {
 inline void CpuWriteOwner::Close() {
     std::unique_lock lock{mutex};
     memory = nullptr;
-    for (auto& entry : requests) {
-        if (auto request = entry.lock()) {
+    for (size_t i = 0; i < requests.size(); ++i) {
+        if (auto request = requests[i].lock()) {
             if (!request->Cancel()) request->Publish(ControlledCpuWriteRequest::Phase::Unknown);
+            if (request->State() != ControlledCpuWriteRequest::Phase::Unknown) accepted[i].reset();
         }
     }
 }

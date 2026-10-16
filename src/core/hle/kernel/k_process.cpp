@@ -194,6 +194,7 @@ void KProcess::Finalize() {
 
     // Perform inherited finalization.
     KSynchronizationObject::Finalize();
+    m_memory.Finalize(); // Slab destruction skips C++ member destructors.
 }
 
 Result KProcess::Initialize(const Svc::CreateProcessParameter& params, KResourceLimit* res_limit,

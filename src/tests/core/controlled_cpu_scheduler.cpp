@@ -179,6 +179,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
         memory.RasterizerMarkRegionCached(owner.heap, 4096, true);
         auto request = memory.PrepareControlledWrite8(owner.heap + 7, 77);
         REQUIRE(request);
+        std::weak_ptr<Core::Memory::CpuWriteOwner> released_owner = request->Owner();
         auto domain = request->View().mapping.domain;
         std::atomic<bool> entered{}, interrupted{};
         auto* thread = owner.Start([&] {
@@ -200,6 +201,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
         owner.Close(); // Waits for guest exit; PTE is not finalized until the thread ref closes.
         EndThread(thread);
         REQUIRE(Until([&] { return !domain->alive.load(); }));
+        REQUIRE_FALSE(request->View().context->alive.load());
         REQUIRE(interrupted);
         REQUIRE(request->State() == Request::Phase::Cancelled);
         REQUIRE(!request->Owner()->TryVisit([](auto&) {}));
@@ -210,6 +212,8 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
         release = true;
         REQUIRE(Until([&] { return retired.load(); }));
         gpu.SynchronizeGPUThread();
+        request.reset();
+        REQUIRE(Until([&] { return released_owner.expired(); }));
     }
 
     Process owner{system};
@@ -247,6 +251,8 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     gpu.RunOnGpuThread([&] { Access::FillGpu(rasterizer, operation, address, Footprint); });
     auto request = memory.PrepareControlledWrite8(owner.heap + 7, 77);
     REQUIRE(request);
+    REQUIRE_FALSE(system.GetCpuManager().AwaitControlledCpuWrite(request).has_value());
+    REQUIRE(request->State() == Request::Phase::Prepared); // host observer cannot wait or consume it
     std::atomic<bool> producer_entered{}, consumer_done{}, queued{};
     std::optional<Action> observed;
     // Contend on REAL production sys-core and device counter locks. These must not occur
@@ -334,7 +340,9 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
 
     // Restore the GPU representation before another controlled request. This is an actual
     // checked upload/readback, not a fabricated completion or a native queue drain.
-    gpu.RunOnGpuThread([&] { REQUIRE(rasterizer.RefreshControlledBufferRegistration(operation)); });
+    bool refresh_started{};
+    gpu.RunOnGpuThread([&] { refresh_started = rasterizer.RefreshControlledBufferRegistration(operation); });
+    REQUIRE(refresh_started);
     registered = false;
     REQUIRE(gpu.TryQueueCpuWrite([&] {
         if (rasterizer.PollControlledBufferRegistration(operation) ==
@@ -435,6 +443,9 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     }));
     REQUIRE(Until([&] { return registered.load(); }));
     REQUIRE(pending_operation);
+    gpu.RunOnGpuThread([&] {
+        Access::FillGpu(rasterizer, pending_operation, pending_address, Footprint);
+    });
     auto pending = pending_memory.PrepareControlledWrite8(pending_owner.heap + 7, 77);
     REQUIRE(pending);
     const auto pending_pin = system.DeviceMemory().buffer.PinPhysicalRange(
@@ -456,23 +467,31 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     auto exit = std::async(std::launch::async, [&] {
         system.RegisterHostThread();
         pending_owner.Close();
+        const bool terminated = R_SUCCEEDED(pending_thread->Terminate());
+        pending_thread->Close(); // Last thread/process references, including actual PTE Finalize.
+        return terminated && Until([&] { return !pending_domain->alive.load(); });
     });
     const bool exited_without_gpu_drain = exit.wait_for(500ms) == std::future_status::ready;
     if (!exited_without_gpu_drain) submit_lock.unlock(); // break a regression's dependency cycle
-    exit.get();
-    EndThread(pending_thread);
+    REQUIRE(exit.get());
     REQUIRE(exited_without_gpu_drain);
     REQUIRE(Until([&] { return !pending_domain->alive.load(); }));
     REQUIRE(pending->State() == Request::Phase::Unknown);
     REQUIRE(pending->Action() == Action::Quarantine);
     REQUIRE(!pending->Owner()->TryVisit([](auto&) {}));
+    // Model reuse of a returned kernel frame through its independently owned physical pin.
+    // Delayed preservation must not write the former process's GPU99 over this new content.
+    std::fill(pending_pin->Bytes().begin(), pending_pin->Bytes().end(), u8{55});
     marker = false;
     REQUIRE(gpu.TryQueueCpuWrite([&] { marker = true; return true; }));
     const bool unrelated_during_native_wait = Until([&] { return marker.load(); }, 500ms);
     submit_lock.unlock();
     REQUIRE(unrelated_during_native_wait);
     gpu.SynchronizeGPUThread();
-    REQUIRE(pending_pin->Bytes()[7] != 77);
+    gpu.RunOnGpuThread([&] { renderer->scheduler.Finish(); }); // trusted device drain AFTER exit
+    REQUIRE(pending_pin->Bytes()[6] == 55);
+    REQUIRE(pending_pin->Bytes()[7] == 55);
+    REQUIRE(pending->View().physical.PublicationSequence() == 0);
     gpu.RunOnGpuThread([&] { device_memory.Unmap(pending_address, Footprint); });
 
     std::cout << "PASS native guest KThread/KScheduler suspend/resume, all terminal observations, "

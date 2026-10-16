@@ -9,10 +9,14 @@ certified Refused and Unknown have distinct scheduler actions; Unknown never per
 The five requested assertion groups, queue dependency-cycle mutation and lifetime-close mutation
 are in the [current progress entry](../tools/physical_coherency_tests/M3B_PROGRESS.md).
 
-This does not switch ordinary game writes. Actual guest CPU fiber suspension/resume, full kernel
-teardown, production lock-context proof, alias-process lifetime qualification, full producer
-exclusion and device acceptance remain gated. Host tests use real GPU owner scheduling code but
-retain explicit engine/driver/lock-spy fixture boundaries. F2 stays Open.
+The native executable now uses CpuManager/KThread/KScheduler service fibers, complete initialized
+KProcess teardown and real cache/sys-core/PTE/counter locks with Vulkan checked transfers.
+Its first Linux run passed at `202eb74500` in
+[38861935399](https://github.com/Splaser/emulator/actions/runs/38861935399), including 64 process
+teardowns and GPU99/CPU77/GPU99. Final owner-retention/slab-cleanup hardening awaits its own CI.
+The no-presentation renderer uses software Vulkan; it does not execute an ARM game image.
+Automatic ordinary-game routing, alias-process qualification, full producer exclusion, trusted
+Unknown recovery and Android hardware evidence remain gates. F2 stays Open.
 
 ### Earlier continuation: CPU request/completion owned, automatic dispatch pending
 

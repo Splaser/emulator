@@ -1,6 +1,14 @@
 # M3B production integration progress
 
-## Native guest scheduler acceptance: implementation submitted, remote result pending
+## Native guest scheduler acceptance: first native run passed, final lifecycle hardening pending
+
+CI [38861935399](https://github.com/Splaser/emulator/actions/runs/38861935399) at `202eb74500`
+passed the complete Linux job, including the new native acceptance executable (0.77 seconds),
+production unit tests and all configured integration regressions. Its native log confirms
+64 process teardowns, real guest suspend/resume, all terminal observations, actual lock
+contention/negative witnesses, GPU99/CPU77/GPU99 and accepted native teardown without queue
+drain. This verifies that revision; the final lifecycle changes below require their own run.
+The Android native job also completed successfully; the full workflow is green.
 
 `controlled_cpu_scheduler_tests` links the real CpuManager/KThread/KScheduler, kernel process
 and page-table teardown, GPU ThreadManager, Vulkan Rasterizer/BufferCache and checked transfers.
@@ -14,7 +22,12 @@ teardowns with pending Prepared requests, and an accepted native request whose s
 blocked during process exit. It checks actual PTE-domain retirement before releasing delayed
 GPU work, unrelated GPU progress during exit, and CPU77/GPU99 complement with a real Vulkan fill.
 Actual cache/sys-core/counter/PTE contention and blocking legacy negative witnesses exercise
-the reverse dependencies. These are executable assertions, not yet a claim of a passing run.
+the reverse dependencies. The final stress assertions also require context retirement and
+release of Cancelled owners: slab finalization skips ordinary C++ destructors, so KProcess
+explicitly finalizes Memory after its inherited/PTE cleanup. Unknown retains a sealed gate.
+The accepted-native teardown deadline includes the last thread references and actual PTE
+retirement. Delayed GPU99 preservation must leave a test-reused physical frame's sentinel55
+unchanged after exit and subsequent trusted device completion.
 
 The execution lease no longer encloses device tracker callbacks or blocking range completion.
 Controlled request publication retains existing page protection/cache references and updates
@@ -23,6 +36,14 @@ short owner visits; final local metadata publication uses nonblocking admission 
 Request mapping qualification and cache entry also use try-locks. Guest observation sleeps on
 the kernel timer; GPU completion never has to acquire the guest scheduler lock to wake a CPU.
 Termination interrupts observation without cancelling an accepted request or authorizing replay.
+Host observers and dispatch-disabled/locked contexts refuse observation without waiting.
+Acceptance now retains identity in the bounded owner registry before transaction allocation;
+Unknown before allocation or before admission cannot lose its identity/native owners. Cold
+preparation/Close reap ordinary terminal identities, but Unknown has no implicit reap/recovery.
+Negative controls 93/94 exercise parked admission and construction failure respectively.
+Final host validation passed three repetitions of registration/pipeline cases and all controls
+82-90/92-94; the physical-admission suite includes Pending-to-Unknown retention and rejected
+completion/cancellation, and the insertion candidate suite passed 24 cases x 3 repetitions.
 Ordinary Memory writes are still not automatically routed here; global F2 remains Open.
 
 Previous CI 38844806313 passed Android/Linux native compilation and unit tests, but failed the
@@ -41,7 +62,7 @@ An already suspended channel refuses a new continuation before request acceptanc
 destroys captures while the renderer remains alive: Prepared requests cancel and accepted
 uncertainty quarantines. No second dispatcher or recursive queue pump was introduced.
 
-Each Memory now has a bounded weak request registry and an independently retained execution
+Each Memory now has a bounded request registry and an independently retained execution
 gate. Cold preparation registers its immutable request. Close seals only that Memory: it
 cancels Prepared requests, marks non-completed Accepted requests Unknown, and joins only an
 entered CPU store/publication visit. It does not drain the GPU queue or wait for native
@@ -49,7 +70,8 @@ preservation. Queued closures contain no Memory/process raw pointer; final commi
 nonblocking execution visit. Actual KProcess::Finalize closes the gate BEFORE TLS/page-table
 finalization; Memory destruction, reset and move also close the old execution identity. Reset/
 move cannot redirect an old request to a replacement Memory. This is revocable execution
-qualification, not an assertion that the request pins the entire KProcess.
+qualification, not an assertion that the request pins the entire KProcess. Accepted identities
+have explicit strong retention; other terminal identities can be reaped cold or at Close.
 
 Terminal request classification is explicit and cannot be downgraded by teardown:
 
@@ -85,7 +107,8 @@ running. A mutation which inserts synchronous queue acknowledgement recreates th
 producer cycle and fails the topology gate. Omitting Close fails lifecycle control 92. Earlier
 candidate insertion/whole-owner deadlock witnesses remain required and unchanged in meaning.
 
-Evidence boundaries: ThreadManager, RunThread, bounded queue, CPU preparation, scoped ordinary
+Earlier host evidence boundaries (superseded by the native acceptance section above):
+ThreadManager, RunThread, bounded queue, CPU preparation, scoped ordinary
 store, physical admission/pins, PageTable, tracker, cache/Vulkan advance and checked transfer
 bodies are production code. Driver/device execution and engine/platform collaborators remain
 fixtures. The sys-core probe and cache object surrounding extracted bodies are harness

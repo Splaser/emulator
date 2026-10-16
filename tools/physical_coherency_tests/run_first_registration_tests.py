@@ -109,7 +109,7 @@ for bits in [8, 16, 32, 64]:
     cpu += f'    void Write{bits}(Common::ProcessAddress,u{bits});\n'
     cpu += f'    PreparedCpuWriteResult WriteOrdinaryControlled{bits}(const PreparedCpuPage&,Common::PhysicalRegistrationBundle::CachedWrite&,Common::ProcessAddress,u{bits});\n'
 cpu += '};\n'
-cpu += method('src/core/memory.cpp', 'void Memory::SealControlledCpuWrites()', closing=' }') + '\n'
+cpu += method('src/core/memory.cpp', 'void Memory::SealControlledCpuWrites()', closing='\n}') + '\n'
 cpu += method('src/core/memory.cpp', 'std::optional<PreparedCpuPage> Memory::PrepareControlledCpuPage(', closing='\n}') + '\n'
 cpu += method('src/core/memory.cpp', 'ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite(', closing='\n}') + '\n'
 for bits in [8, 16, 32, 64]:

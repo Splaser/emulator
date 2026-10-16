@@ -31,8 +31,9 @@ CpuManager::AwaitControlledCpuWrite(const Memory::ControlledCpuWriteRequestPtr& 
     if (!request) return Action::DoNotExecute;
     auto& kernel = system.Kernel();
     auto& thread = Kernel::GetCurrentThread(kernel);
-    assert(!Kernel::KScheduler::IsSchedulerLockedByCurrentThread(kernel));
-    assert(!thread.IsDummyThread()); // host waits are not a guest-fiber handoff
+    if (Kernel::KScheduler::IsSchedulerLockedByCurrentThread(kernel) ||
+        thread.IsDummyThread() || thread.GetDisableDispatchCount() != 0)
+        return std::nullopt; // unsupported/locked context cannot become a host wait
     while (true) {
         const auto action = request->Action();
         if (action != Action::AwaitOwner) return action;

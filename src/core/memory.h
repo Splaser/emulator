@@ -126,6 +126,9 @@ public:
     /// Owner teardown only, before process PTE finalization or Memory reset/destruction.
     /// Closes short CPU execution visits, without waiting for GPU requests to finish.
     void SealControlledCpuWrites();
+    /// KProcess slab finalization does not invoke Memory's destructor. Call after closing
+    /// execution and finalizing process mappings, to release the context/owner explicitly.
+    void Finalize();
 
     /// GPU-owner continuation only, AFTER preservation and admission. Invokes the actual
     /// ordinary Write8/16/32/64 with one bounded thread-local capability; every refusal is

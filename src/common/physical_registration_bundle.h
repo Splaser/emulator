@@ -149,7 +149,7 @@ public:
             return true;
         }
         [[nodiscard]] bool MarkUnknown() {
-            if (!active || !domain->MarkUnknown(ticket)) return false;
+            if (!domain->Quarantine(ticket)) return false;
             active = false;
             return true;
         }

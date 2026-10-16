@@ -146,6 +146,15 @@ int main() {
     assert(domain->TryStart(blocked)==Start::Park);
     assert(domain->TryStart(outside)==Start::Granted && domain->Complete(outside));
     assert(!domain->Complete(unknown) && !domain->Cancel(unknown));
+    // Unknown before TryStart must retain the accepted identity and owners too.
+    auto parked_owner=std::make_shared<int>(77);std::weak_ptr<int> parked_retained=parked_owner;
+    const std::array parked_access{Domain::Access{3*C,64,Mode::Write}};
+    auto parked=domain->Enqueue(parked_access,parked_owner);assert(parked);
+    assert(domain->Quarantine(parked) && domain->StateOf(parked)==Phase::Unknown);
+    assert(!domain->TryComplete(parked) && !domain->Complete(parked) && !domain->Cancel(parked));
+    parked.reset();parked_owner.reset();assert(!parked_retained.expired());
+    auto parked_reader=enqueue(3*C,1,Mode::Read);
+    assert(domain->TryStart(parked_reader)==Start::Park);
     domain->Seal();assert(domain->StateOf(blocked)==Phase::Cancelled);
     assert(domain->StateOf(unknown)==Phase::Unknown && !enqueue(0,1,Mode::Read));
     // A separate real arena's retirement seals pending admission before its epoch dies.

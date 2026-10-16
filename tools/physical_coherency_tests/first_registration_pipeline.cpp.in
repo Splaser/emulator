@@ -14,6 +14,7 @@ struct Driver {
     u64 counter=0,submitted_tick=0;
     size_t submissions=0,barriers=0;
     bool corrupt=false;
+    bool fail_allocation=false;
     bool host_read_barrier=false;
     VkBuffer readback_target=VK_NULL_HANDLE;
     std::vector<std::function<void()>> recorded,submitted;
@@ -128,6 +129,7 @@ public:
 // @SUBMISSION_METHODS@
 enum class MemoryUsage {Upload,Download};
 struct Allocator {vk::Buffer CreateBuffer(const VkBufferCreateInfo& ci,MemoryUsage usage) {
+    if(driver->fail_allocation) throw std::bad_alloc{};
     vk::Buffer buffer(ci.size);if(usage==MemoryUsage::Download) driver->readback_target=*buffer;
     return buffer;
 }};
@@ -490,7 +492,7 @@ void production_write_transaction(u64 width,bool deferred=false) {
 
 void request_lifecycle() {
     using Request=Core::Memory::ControlledCpuWriteRequest;
-    for(int mode=0;mode<4;++mode) {
+    for(int mode=0;mode<6;++mode) {
         auto s=std::make_unique<Scenario>();Core::Memory::Memory memory{&s->cpu};
         assert(!memory.PrepareControlledWrite8(4103,77)); // Uncached target cannot qualify.
         auto op=s->cache->BeginControlledFirstRegistration(A,1,s->views);assert(op);
@@ -510,6 +512,38 @@ void request_lifecycle() {
             assert(request->State()==Request::Phase::Refused && request->Outcome()==Result::NeedSlow);
             assert(request->Action()==Request::SchedulerAction::ReprepareCertified);
             assert(s->gpu.submissions==1 && s->backing(7)==10);continue;
+        }
+        if(mode==5) {
+            s->gpu.fail_allocation=true;
+            bool failed=false;
+            try {(void)s->cache->BeginControlledCpuWriteRequest(op,request);}
+            catch(const std::bad_alloc&) {failed=true;}
+            s->gpu.fail_allocation=false;assert(failed);
+            assert(request->State()==Request::Phase::Unknown);
+            memory.SealControlledCpuWrites();
+            std::weak_ptr<Request> retained=request;request.reset();
+            if(retained.expired()) {
+                std::cerr<<"accepted construction failure lost request identity\n";std::exit(94);
+            }
+            continue;
+        }
+        if(mode==4) {
+            const auto domain=request->View().physical.Epoch()->ranges;
+            const std::array access{Common::PhysicalRangeAdmission::Access{
+                0,4096,Common::PhysicalRangeAdmission::Mode::Write}};
+            auto predecessor=domain->Enqueue(access,std::make_shared<int>(1));assert(predecessor);
+            assert(domain->TryStart(predecessor)==Common::PhysicalRangeAdmission::Start::Granted);
+            auto tx=s->cache->BeginControlledCpuWriteRequest(op,request);assert(tx);
+            assert(s->cache->PollControlledCpuWrite(tx)==Cache::ControlledCpuWrite::Phase::Waiting);
+            memory.SealControlledCpuWrites();
+            assert(s->cache->PollControlledCpuWrite(tx)==Cache::ControlledCpuWrite::Phase::Unknown);
+            assert(domain->Complete(predecessor));
+            std::weak_ptr<ControlledBufferTransfer> native=s->runtime.controlled_transfers.back();
+            std::weak_ptr<Request> retained=request;request.reset();tx.reset();
+            if(retained.expired() || native.expired()) {
+                std::cerr<<"accepted parked Unknown lost its execution identity\n";std::exit(93);
+            }
+            continue;
         }
         s->cache->memory_tracker.MarkRegionAsGpuModified(A,C);
         auto tx=s->cache->BeginControlledCpuWriteRequest(op,request);assert(tx);

@@ -235,7 +235,7 @@ auto BufferCache<P>::BeginControlledCpuWriteRequest(
     const ControlledRegistrationPtr& operation,
     const Core::Memory::ControlledCpuWriteRequestPtr& request) -> ControlledCpuWritePtr {
     using Request = Core::Memory::ControlledCpuWriteRequest;
-    if (!request || !request->TryAccept()) return {};
+    if (!request || !request->TryAccept(request)) return {};
     if (!request->Owner()->TryVisit([](auto&) {})) {
         request->RefuseBeforeEffects();
         return {};

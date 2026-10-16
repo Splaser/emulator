@@ -162,6 +162,18 @@ public:
         return true;
     }
 
+    /// An accepted scheduler request may become uncertain before admission starts. Preserve
+    /// its identity/owners too; Pending is not proof permitting cancellation after Unknown.
+    [[nodiscard]] bool Quarantine(const Ticket& request) {
+        std::scoped_lock lock{state->mutex};
+        if (!Owns(request) || (request->phase != Phase::Pending &&
+                               request->phase != Phase::Running)) return false;
+        request->phase = Phase::Unknown;
+        state->retained = state;
+        Notify();
+        return true;
+    }
+
     void Seal() {
         std::list<Ticket> reaped;
         {

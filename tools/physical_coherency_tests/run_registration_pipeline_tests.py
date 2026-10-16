@@ -219,7 +219,14 @@ print('PASS negative control: completed readback cannot acknowledge a still-unpe
 owner = 'Owners{operation, preservation, std::move(extra_owner)}'
 assert source.count(owner) == 1
 control.write_text(source.replace(owner, 'Owners{operation, preservation, {}}'))
-subprocess.run(cmd + [str(control), '-o', str(exe)], check=True)
+accept_stubs = out / 'missing-accept-retention/core'
+accept_stubs.mkdir(parents=True, exist_ok=True)
+owner_header = read('src/core/controlled_cpu_page.h')
+accept_retention = 'accepted[i] = request;'
+assert owner_header.count(accept_retention) == 1
+accept_stubs.joinpath('controlled_cpu_page.h').write_text(owner_header.replace(accept_retention, ''))
+accept_cmd = cmd[:1] + ['-I', str(accept_stubs.parent)] + cmd[1:]
+subprocess.run(accept_cmd + [str(control), '-o', str(exe)], check=True)
 result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout=60)
 if result.returncode != 90 or 'accepted request owner escaped Unknown retention' not in result.stderr:
     raise RuntimeError(f'Dropped request retention control failed incorrectly: {result.returncode} {result.stderr}')
@@ -236,6 +243,24 @@ result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout
 if result.returncode != 92 or 'closed Memory owner executed a queued CPU store' not in result.stderr:
     raise RuntimeError(f'Missing owner close control failed incorrectly: {result.returncode} {result.stderr}')
 print('PASS negative lifecycle control: bypassing per-Memory Close permits a forbidden queued store (92)')
+pending_stubs = out / 'pending-unknown-control/common'
+pending_stubs.mkdir(parents=True, exist_ok=True)
+bundle = read('src/common/physical_registration_bundle.h')
+pending_guard = 'if (!domain->Quarantine(ticket)) return false;'
+assert bundle.count(pending_guard) == 1
+pending_stubs.joinpath('physical_registration_bundle.h').write_text(bundle.replace(
+    pending_guard, 'if (!active || !domain->MarkUnknown(ticket)) return false;'))
+pending_cmd = cmd[:1] + ['-I', str(pending_stubs.parent)] + cmd[1:]
+subprocess.run(pending_cmd + [str(cpp), '-o', str(exe)], check=True)
+result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout=60)
+if result.returncode != 93 or 'accepted parked Unknown lost its execution identity' not in result.stderr:
+    raise RuntimeError(f'Parked Unknown control failed incorrectly: {result.returncode} {result.stderr}')
+print('PASS negative lifecycle control: parked accepted Unknown must retain its execution identity (93)')
+subprocess.run(accept_cmd + [str(cpp), '-o', str(exe)], check=True)
+result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout=60)
+if result.returncode != 94 or 'accepted construction failure lost request identity' not in result.stderr:
+    raise RuntimeError(f'Construction Unknown control failed incorrectly: {result.returncode} {result.stderr}')
+print('PASS negative lifecycle control: pre-transaction Unknown must retain the accepted request (94)')
 inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
                'src/video_core/gpu_thread.cpp','src/video_core/gpu_thread.h',
                'src/core/hle/kernel/k_process.cpp','src/core/memory.h',

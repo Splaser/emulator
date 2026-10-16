@@ -973,6 +973,7 @@ Memory::Memory(Core::System& system_) : system{system_} {
 
 std::optional<PreparedCpuPage> Memory::PrepareControlledCpuPage(
     Common::ProcessAddress page_address) const {
+    if (!impl) return std::nullopt;
     return impl->PrepareControlledCpuPage(page_address);
 }
 
@@ -983,13 +984,21 @@ Memory::Memory(Memory&& other) : system{other.system} {
     impl = std::move(other.impl);
 }
 
-void Memory::SealControlledCpuWrites() { controlled_owner->Close(); }
+void Memory::SealControlledCpuWrites() {
+    if (controlled_owner) controlled_owner->Close();
+}
+
+void Memory::Finalize() {
+    SealControlledCpuWrites();
+    impl.reset();
+    controlled_owner.reset(); // Unknown identities retain their sealed gate independently.
+}
 
 ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite(
     Common::ProcessAddress target, ControlledCpuWriteRequest::Value value) {
     const u64 address = GetInteger(target) & 0xffffffffffffULL;
     const auto size = std::visit([](const auto& scalar) { return sizeof(scalar); }, value);
-    if (!controlled_owner->TryVisit([](Memory&) {})) return {};
+    if (!controlled_owner || !controlled_owner->TryVisit([](Memory&) {})) return {};
     if (size > CITRON_PAGESIZE - address % CITRON_PAGESIZE) return {};
     auto page = PrepareControlledCpuPage(address & ~(CITRON_PAGESIZE - 1));
     if (!page || page->mapping.type != Common::PageType::RasterizerCachedMemory ||

@@ -55,7 +55,7 @@ public:
 
     /// Explicit guest-fiber consumer. Invoke after releasing all producer/cache/PTE guards.
     /// Enqueue success is not completion: cancelled/refused/unknown remain distinct actions.
-    /// nullopt means guest termination interrupted observation; retain the request identity.
+    /// nullopt means termination or an unsupported/locked context; retain request identity.
     [[nodiscard]] std::optional<Memory::ControlledCpuWriteRequest::SchedulerAction>
     AwaitControlledCpuWrite(const Memory::ControlledCpuWriteRequestPtr& request);
 
