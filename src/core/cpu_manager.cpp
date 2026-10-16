@@ -31,8 +31,8 @@ CpuManager::AwaitControlledCpuWrite(const Memory::ControlledCpuWriteRequestPtr& 
     if (!request) return Action::DoNotExecute;
     auto& kernel = system.Kernel();
     auto& thread = Kernel::GetCurrentThread(kernel);
-    ASSERT(!Kernel::KScheduler::IsSchedulerLockedByCurrentThread(kernel));
-    ASSERT(!thread.IsDummyThread()); // host waits are not a guest-fiber handoff
+    assert(!Kernel::KScheduler::IsSchedulerLockedByCurrentThread(kernel));
+    assert(!thread.IsDummyThread()); // host waits are not a guest-fiber handoff
     while (true) {
         const auto action = request->Action();
         if (action != Action::AwaitOwner) return action;

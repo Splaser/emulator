@@ -11,6 +11,7 @@
 #include "common/settings.h"
 #include "common/scope_exit.h"
 #include "core/cpu_manager.h"
+#include "core/device_memory.h"
 #include "core/frontend/emu_window.h"
 #include "core/frontend/graphics_context.h"
 #include "core/hle/kernel/k_hardware_timer.h"
@@ -22,6 +23,10 @@
 #include "video_core/control/channel_state.h"
 #include "video_core/memory_manager.h"
 #include "video_core/renderer_base.h"
+#include "video_core/buffer_cache/buffer_cache.h"
+#include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/renderer_vulkan/vk_state_tracker.h"
+#include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/vulkan_common/vulkan_instance.h"
 #include "video_core/vulkan_common/vulkan_library.h"
 
@@ -273,7 +278,10 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     REQUIRE(Until([&] { return consumer_done.load(); }));
     REQUIRE(observed == Action::Complete);
     REQUIRE(request->Outcome() == Core::Memory::PreparedCpuWriteResult::Stored);
-    const auto bytes = request->View().physical.storage.Bytes();
+    const auto pin = system.DeviceMemory().buffer.PinPhysicalRange(
+        request->View().physical.PhysicalOffset(), 4096);
+    REQUIRE(pin);
+    const auto bytes = pin->Bytes();
     REQUIRE(bytes[6] == 99);
     REQUIRE(bytes[7] == 77);
     REQUIRE(bytes[8] == 99);
@@ -429,6 +437,9 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     REQUIRE(pending_operation);
     auto pending = pending_memory.PrepareControlledWrite8(pending_owner.heap + 7, 77);
     REQUIRE(pending);
+    const auto pending_pin = system.DeviceMemory().buffer.PinPhysicalRange(
+        pending->View().physical.PhysicalOffset(), 4096);
+    REQUIRE(pending_pin);
     auto pending_domain = pending->View().mapping.domain;
     std::unique_lock submit_lock{renderer->scheduler.submit_mutex};
     std::atomic<bool> pending_entered{};
@@ -440,6 +451,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     REQUIRE(Until([&] { return pending_entered.load() && pending->State() == Request::Phase::Accepted; }));
     REQUIRE(queued);
     gpu.SynchronizeGPUThread(); // FIFO acknowledgement only; native submission is still blocked.
+    REQUIRE_FALSE(pending->Cancel()); // accepted uncertainty cannot be certified away
     device_memory.UnregisterProcess(pending_asid);
     auto exit = std::async(std::launch::async, [&] {
         system.RegisterHostThread();
@@ -460,7 +472,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     submit_lock.unlock();
     REQUIRE(unrelated_during_native_wait);
     gpu.SynchronizeGPUThread();
-    REQUIRE(pending->View().physical.storage.Bytes()[7] != 77);
+    REQUIRE(pending_pin->Bytes()[7] != 77);
     gpu.RunOnGpuThread([&] { device_memory.Unmap(pending_address, Footprint); });
 
     std::cout << "PASS native guest KThread/KScheduler suspend/resume, all terminal observations, "

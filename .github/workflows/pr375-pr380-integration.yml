@@ -54,6 +54,11 @@ jobs:
     runs-on: ubuntu-24.04
     container: ghcr.io/pkgforge-dev/archlinux:latest
     timeout-minutes: 120
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
+      CCACHE_SLOPPINESS: pch_defines,time_macros
     steps:
       - name: Install native build dependencies
         run: |
@@ -85,15 +90,19 @@ jobs:
           cmake -S . -B build-integration -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_FLAGS=-fpch-preprocess \
             -DCITRON_USE_CPM=OFF -DCITRON_USE_BUNDLED_VCPKG=OFF \
             -DENABLE_QT=OFF -DENABLE_SDL2=ON -DCITRON_USE_EXTERNAL_SDL2=OFF \
             -DENABLE_CUBEB=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_LIBUSB=OFF \
             -DCITRON_ROOM=OFF -DCITRON_TESTS=ON -DCITRON_CRASH_DUMPS=OFF
+      - name: Check native scheduler integration translation units first
+        run: |
+          cmake --build build-integration --parallel 3 --target \
+            src/tests/CMakeFiles/controlled_cpu_scheduler_tests.dir/core/controlled_cpu_scheduler.cpp.o \
+            src/core/CMakeFiles/core.dir/core.cpp.o \
+            src/core/CMakeFiles/core.dir/memory.cpp.o \
+            src/core/CMakeFiles/core.dir/cpu_manager.cpp.o -- -k 0
       - name: Build CLI, shader tool and unit tests
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/.ccache
-          CCACHE_COMPILERCHECK: content
-          CCACHE_MAXSIZE: 2G
         run: cmake --build build-integration --target citron-cmd shader_tool tests controlled_cpu_scheduler_tests --parallel 3 -- -k 0
       - uses: actions/cache/save@v4
         if: always()

@@ -477,7 +477,7 @@ public:
     [[nodiscard]] bool IsQLaunchSession() const;
 
 private:
-    friend struct SchedulerTestAccess;
+    friend struct SystemTestAccess;
     struct Impl;
     std::unique_ptr<Impl> impl;
 };

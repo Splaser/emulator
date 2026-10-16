@@ -438,12 +438,14 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuTransact
             if (tx.request) tx.request->Publish(Core::Memory::ControlledCpuWriteRequest::Phase::Unknown);
             return result;
         }
+        // Cache range containers may reclaim allocations. They need no Memory pointer and
+        // must not lengthen the process execution lease, even when highly fragmented.
+        ClearDownload(op.address, op.plan.Size());
+        gpu_modified_ranges.Subtract(op.address, op.plan.Size());
+        memory_tracker.UnmarkRegionAsGpuModified(op.address, op.plan.Size());
         const auto finish = [&] {
-            ClearDownload(op.address, op.plan.Size());
-            gpu_modified_ranges.Subtract(op.address, op.plan.Size());
-            memory_tracker.UnmarkRegionAsGpuModified(op.address, op.plan.Size());
-            // Only local GPU-owner metadata above; GPU/PTE/range-counter callbacks are
-            // forbidden. Range admission completion below uses one try-lock attempt.
+            // Only bounded range-ticket finalization and terminal publication here. No
+            // cache-container reclamation, tracker/device/PTE callbacks or blocking locks.
             if (!(tx.request ? tx.write.TryCompleteAfterTrackerPublication()
                              : tx.write.CompleteAfterTrackerPublication())) return false;
             tx.phase = Phase::Committed;

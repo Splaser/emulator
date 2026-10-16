@@ -8,15 +8,13 @@
 #include <mutex>
 
 #include "core/core.h"
+#include "core/scheduler_system_test_access.h"
 #include "core/memory.h"
 #include "core/hle/kernel/k_process.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 namespace Core {
-struct SchedulerTestAccess {
-    using RendererFactory = std::function<std::unique_ptr<VideoCore::RendererBase>(System&)>;
-    static void Initialize(System&, Frontend::EmuWindow&, RendererFactory);
-    static std::unique_lock<std::mutex> LockSysCore(Memory::Memory&);
+struct SchedulerTestAccess : SystemTestAccess {
     static auto& Cache(Vulkan::RasterizerVulkan& rasterizer) { return rasterizer.buffer_cache; }
     static auto& CounterGuard(Tegra::MaxwellDeviceMemoryManager& memory) {
         return memory.counter_guard;

@@ -1247,8 +1247,8 @@ u64 System::GetMainApplicationAruid() const {
 } // namespace Core
 
 #ifdef CITRON_SCHEDULER_TESTS
-#include "core/scheduler_test_access.h"
-void Core::SchedulerTestAccess::Initialize(System& system, Frontend::EmuWindow& window,
+#include "core/scheduler_system_test_access.h"
+void Core::SystemTestAccess::Initialize(System& system, Frontend::EmuWindow& window,
                                           RendererFactory factory) {
     system.impl->InitializeKernel(system, window);
     system.impl->host1x_core.emplace(system);

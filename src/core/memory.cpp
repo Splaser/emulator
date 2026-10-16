@@ -1327,8 +1327,8 @@ bool Memory::InvalidateSeparateHeap(void* fault_address) {
 } // namespace Core::Memory
 
 #ifdef CITRON_SCHEDULER_TESTS
-#include "core/scheduler_test_access.h"
-std::unique_lock<std::mutex> Core::SchedulerTestAccess::LockSysCore(Memory::Memory& memory) {
+#include "core/scheduler_system_test_access.h"
+std::unique_lock<std::mutex> Core::SystemTestAccess::LockSysCore(Memory::Memory& memory) {
     return std::unique_lock{memory.impl->sys_core_guard};
 }
 #endif
