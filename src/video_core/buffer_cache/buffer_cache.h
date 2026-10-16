@@ -190,7 +190,7 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCachedWrite
 template <class P>
 auto BufferCache<P>::BeginControlledCpuWrite(
     const ControlledRegistrationPtr& operation, const Core::Memory::PreparedCpuPage& view,
-    u64 address, u64 size) -> ControlledCpuWritePtr {
+    u64 address, u64 size, std::shared_ptr<const void> extra_owner) -> ControlledCpuWritePtr {
     if constexpr (!requires { runtime.PrepareControlledTransfer(std::declval<const Buffer&>()); }) {
         return {};
     } else {
@@ -212,15 +212,60 @@ auto BufferCache<P>::BeginControlledCpuWrite(
         struct Owners {
             ControlledRegistrationPtr operation;
             std::shared_ptr<ControlledBufferTransfer> preservation;
+            std::shared_ptr<const void> extra;
         };
         auto write = operation->admission->BeginCachedWrite(
-            std::make_shared<const Owners>(Owners{operation, preservation}));
+            std::make_shared<const Owners>(Owners{operation, preservation, std::move(extra_owner)}));
         if (!write) return {};
         auto transaction = ControlledCpuWritePtr{new ControlledCpuWrite{
             operation, view, address, size, std::move(preservation), std::move(*write)}};
         operation->phase = ControlledRegistration::Phase::Writing;
         return transaction;
     }
+}
+
+template <class P>
+auto BufferCache<P>::BeginControlledCpuWriteRequest(
+    const ControlledRegistrationPtr& operation,
+    const Core::Memory::ControlledCpuWriteRequestPtr& request) -> ControlledCpuWritePtr {
+    using Request = Core::Memory::ControlledCpuWriteRequest;
+    if (!request || !request->TryAccept()) return {};
+    try {
+        auto transaction = BeginControlledCpuWrite(operation, request->View(), request->Address(),
+                                                    request->Size(), request);
+        if (!transaction) {
+            request->Publish(Request::Phase::Refused);
+            return {};
+        }
+        transaction->request = request;
+        return transaction;
+    } catch (...) {
+        request->Publish(Request::Phase::Unknown);
+        throw;
+    }
+}
+
+template <class P>
+template <typename Execute>
+Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuWriteRequest(
+    const ControlledCpuWritePtr& transaction, Execute&& execute) {
+    using Result = Core::Memory::PreparedCpuWriteResult;
+    if (!transaction || !transaction->request || transaction->executing_request)
+        return Result::Invalid;
+    if (transaction->phase != ControlledCpuWrite::Phase::Preserved) return Result::NeedSlow;
+    // Request-backed writes may commit only their immutable accepted payload, never a later
+    // caller-supplied scalar via the old typed endpoint. No binding survives this short call.
+    transaction->executing_request = true;
+    struct Reset {
+        bool& flag;
+        ~Reset() { flag = false; }
+    } reset{transaction->executing_request};
+    return std::visit([&](const auto& value) {
+        return CommitControlledCpuTransaction(transaction, sizeof(value),
+            [&](const auto& view, auto& write, u64 address) {
+                return execute(view, write, address, value);
+            });
+    }, transaction->request->Payload());
 }
 
 template <class P>
@@ -234,6 +279,7 @@ auto BufferCache<P>::PollControlledCpuWrite(const ControlledCpuWritePtr& transac
     const auto unknown = [&] {
         (void)tx.write.MarkUnknown();
         op.phase = ControlledRegistration::Phase::Unknown;
+        if (tx.request) tx.request->Publish(Core::Memory::ControlledCpuWriteRequest::Phase::Unknown);
         return tx.phase = Phase::Unknown;
     };
     try {
@@ -311,14 +357,14 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuTransact
     using Result = Core::Memory::PreparedCpuWriteResult;
     using Phase = typename ControlledCpuWrite::Phase;
     if (!transaction || transaction->phase != Phase::Preserved) return Result::NeedSlow;
+    if (transaction->request && !transaction->executing_request) return Result::Invalid;
     if (transaction->size != size) return Result::Invalid;
     auto& tx = *transaction;
     auto& op = *tx.operation;
     try {
         Result result = Result::Busy;
-        if (ControlledBufferId(tx.operation, false) == NULL_BUFFER_ID || !tx.write.Granted())
-            return Result::NeedSlow;
-        const bool qualified = device_memory.WithControlledPhysicalAliases(
+        const bool valid = ControlledBufferId(tx.operation, false) != NULL_BUFFER_ID && tx.write.Granted();
+        const bool qualified = valid && device_memory.WithControlledPhysicalAliases(
             tx.view.physical.PhysicalOffset() + tx.address % DEVICE_PAGESIZE,
             op.plan.DeviceEpoch(), op.plan.DeviceGeneration(), [&](auto aliases) {
                 // The preservation continuation owns the complete footprint. Unlike the old
@@ -337,6 +383,7 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuTransact
             (void)tx.write.MarkUnknown();
             op.phase = ControlledRegistration::Phase::Unknown;
             tx.phase = Phase::Unknown;
+            if (tx.request) tx.request->Publish(Core::Memory::ControlledCpuWriteRequest::Phase::Unknown);
             return result;
         }
         ClearDownload(op.address, op.plan.Size());
@@ -345,11 +392,13 @@ Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuTransact
         if (!tx.write.CompleteAfterTrackerPublication()) throw std::runtime_error("CPU write admission lost");
         tx.phase = Phase::Committed;
         op.phase = ControlledRegistration::Phase::Ready;
+        if (tx.request) tx.request->Publish(Core::Memory::ControlledCpuWriteRequest::Phase::Stored, result);
         return result;
     } catch (...) {
         (void)tx.write.MarkUnknown();
         op.phase = ControlledRegistration::Phase::Unknown;
         tx.phase = Phase::Unknown;
+        if (tx.request) tx.request->Publish(Core::Memory::ControlledCpuWriteRequest::Phase::Unknown);
         throw;
     }
 }

@@ -1,6 +1,21 @@
 # PR #375 / #380 integration roadmap
 
-## Current continuation: 2026-10-16 — ordinary body bound, automatic enrollment pending
+## Current continuation: 2026-10-16 — CPU request/completion owned, automatic dispatch pending
+
+CI [38839879554](https://github.com/Splaser/emulator/actions/runs/38839879554) passed both Android
+and Linux at `273bfb2f5d`. The next slice adds actual CPU-owner immutable scalar request
+preparation, single-use GPU acceptance/cancellation, and completion publication only after the
+actual ordinary store, alias tracker publication and admission release. The actual Vulkan
+advance endpoint consumes the request's owned value; callback/readback return cannot acknowledge
+CPU success. Accepted Unknown requests remain retained with physical/native admission owners.
+See the [current progress entry](../tools/physical_coherency_tests/M3B_PROGRESS.md).
+
+The handoff is nonblocking and explicit. Automatic game-CPU scheduling/suspension and full
+producer exclusion remain pending, along with trusted recovery/device proof. Stored means CPU
+commit; GPU readiness still requires checked refresh. Unbound F2 remains backing77/cache10.
+F2 stays Open, and the next-stage acceptance gates below remain binding.
+
+### Earlier continuation: ordinary body bound, automatic enrollment pending
 
 Native [38835727709](https://github.com/Splaser/emulator/actions/runs/38835727709) passed both
 jobs and all configured regressions at `17f1e65977`. The continuation now makes typed transaction

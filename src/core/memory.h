@@ -114,6 +114,14 @@ public:
                           Common::PhysicalRegistrationBundle::CachedWrite& write,
                           Common::ProcessAddress addr, u64 data);
 
+    /// Cold CPU-owner preparation, before effects and outside sys-core/PTE/cache guards.
+    /// Copies the scalar and retains immutable physical/context identity; no admission, store
+    /// or wait. Only single-page cached targets qualify. Caller keeps process/Memory alive.
+    [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite8(Common::ProcessAddress, u8);
+    [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite16(Common::ProcessAddress, u16);
+    [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite32(Common::ProcessAddress, u32);
+    [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite64(Common::ProcessAddress, u64);
+
     /// GPU-owner continuation only, AFTER preservation and admission. Invokes the actual
     /// ordinary Write8/16/32/64 with one bounded thread-local capability; every refusal is
     /// returned without legacy callbacks/fallback. Caller retains admission through publication.
@@ -557,6 +565,8 @@ public:
     bool InvalidateSeparateHeap(void* fault_address);
 
 private:
+    [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite(
+        Common::ProcessAddress, ControlledCpuWriteRequest::Value);
     Core::System& system;
 
     struct Impl;

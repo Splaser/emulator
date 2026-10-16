@@ -257,10 +257,14 @@ public:
     public:
         enum class Phase { Waiting, Submitted, Preserved, Committed, Cancelled, Unknown };
         [[nodiscard]] Phase State() const { return phase; }
+        [[nodiscard]] const Core::Memory::ControlledCpuWriteRequestPtr& Request() const {
+            return request;
+        }
         ~ControlledCpuWrite() {
             if (phase != Phase::Committed && phase != Phase::Cancelled) {
                 (void)write.MarkUnknown();
                 operation->phase = ControlledRegistration::Phase::Unknown;
+                if (request) request->Publish(Core::Memory::ControlledCpuWriteRequest::Phase::Unknown);
             }
         }
     private:
@@ -276,12 +280,19 @@ public:
         std::shared_ptr<ControlledBufferTransfer> preservation;
         Common::PhysicalRegistrationBundle::CachedWrite write;
         Phase phase{Phase::Waiting};
+        Core::Memory::ControlledCpuWriteRequestPtr request;
+        bool executing_request{};
     };
     using ControlledCpuWritePtr = std::shared_ptr<ControlledCpuWrite>;
 
     [[nodiscard]] ControlledCpuWritePtr BeginControlledCpuWrite(
         const ControlledRegistrationPtr&, const Core::Memory::PreparedCpuPage&, u64 address,
-        u64 size);
+        u64 size, std::shared_ptr<const void> extra_owner = {});
+    [[nodiscard]] ControlledCpuWritePtr BeginControlledCpuWriteRequest(
+        const ControlledRegistrationPtr&, const Core::Memory::ControlledCpuWriteRequestPtr&);
+    template <typename Execute>
+    [[nodiscard]] Core::Memory::PreparedCpuWriteResult CommitControlledCpuWriteRequest(
+        const ControlledCpuWritePtr&, Execute&& execute);
     [[nodiscard]] typename ControlledCpuWrite::Phase PollControlledCpuWrite(
         const ControlledCpuWritePtr&);
     template <typename Store>

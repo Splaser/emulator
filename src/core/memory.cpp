@@ -978,6 +978,35 @@ std::optional<PreparedCpuPage> Memory::PrepareControlledCpuPage(
 
 Memory::~Memory() = default;
 
+ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite(
+    Common::ProcessAddress target, ControlledCpuWriteRequest::Value value) {
+    const u64 address = GetInteger(target) & 0xffffffffffffULL;
+    const auto size = std::visit([](const auto& scalar) { return sizeof(scalar); }, value);
+    if (size > CITRON_PAGESIZE - address % CITRON_PAGESIZE) return {};
+    auto page = PrepareControlledCpuPage(address & ~(CITRON_PAGESIZE - 1));
+    if (!page || page->mapping.type != Common::PageType::RasterizerCachedMemory ||
+        !page->IsCurrentForRegistration())
+        return {};
+    return ControlledCpuWriteRequestPtr{
+        new ControlledCpuWriteRequest{std::move(*page), address, std::move(value)}};
+}
+
+ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite8(Common::ProcessAddress address, u8 value) {
+    return PrepareControlledWrite(address, value);
+}
+
+ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite16(Common::ProcessAddress address, u16 value) {
+    return PrepareControlledWrite(address, value);
+}
+
+ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite32(Common::ProcessAddress address, u32 value) {
+    return PrepareControlledWrite(address, value);
+}
+
+ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite64(Common::ProcessAddress address, u64 value) {
+    return PrepareControlledWrite(address, value);
+}
+
 void Memory::Reset() {
     impl = std::make_unique<Impl>(system);
 }

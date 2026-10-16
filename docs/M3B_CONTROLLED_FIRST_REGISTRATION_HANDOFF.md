@@ -1,5 +1,14 @@
 # M3B - Controlled First Registration Integration
 
+Current continuation: [38839879554](https://github.com/Splaser/emulator/actions/runs/38839879554)
+passed Android and Linux at `273bfb2f5d`. CPU-owner scalar preparation now supplies an immutable
+request to the actual cache/Vulkan continuation, with cancellation/acceptance ownership and
+CPU completion only after store/publication/admission release. Accepted Unknown requests remain
+retained. Automatic game-CPU dispatch/suspension, full producer exclusion, recovery and device
+proof remain pending; this adds no blocking wait or second dispatcher. Stored is CPU-commit
+evidence, not GPU refresh completion. See [current progress](../tools/physical_coherency_tests/M3B_PROGRESS.md).
+**F2 remains Open.** Earlier continuation notes below are historical.
+
 Latest continuation: native CI [38835727709](https://github.com/Splaser/emulator/actions/runs/38835727709)
 passed at `17f1e65977`. Typed cache transactions now invoke actual ordinary Memory Write8/16/32/64
 through a one-attempt thread-local binding, with explicit refusal and no legacy fallback. This

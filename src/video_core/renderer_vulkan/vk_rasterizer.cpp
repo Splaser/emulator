@@ -1073,6 +1073,27 @@ VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64
     return new_area;
 }
 
+Core::Memory::ControlledCpuWriteRequest::Phase RasterizerVulkan::AdvanceControlledCpuWriteRequest(
+    const ControlledCpuWritePtr& transaction, Core::Memory::Memory& memory) {
+    using Request = Core::Memory::ControlledCpuWriteRequest;
+    if (!transaction || !transaction->Request()) return Request::Phase::Unknown;
+    if (buffer_cache.PollControlledCpuWrite(transaction) == BufferCache::ControlledCpuWrite::Phase::Preserved) {
+        (void)buffer_cache.CommitControlledCpuWriteRequest(transaction,
+            [&](const auto& view, auto& write, u64 address, const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<T, u8>)
+                    return memory.WriteOrdinaryControlled8(view, write, Common::ProcessAddress{address}, value);
+                else if constexpr (std::is_same_v<T, u16>)
+                    return memory.WriteOrdinaryControlled16(view, write, Common::ProcessAddress{address}, value);
+                else if constexpr (std::is_same_v<T, u32>)
+                    return memory.WriteOrdinaryControlled32(view, write, Common::ProcessAddress{address}, value);
+                else
+                    return memory.WriteOrdinaryControlled64(view, write, Common::ProcessAddress{address}, value);
+            });
+    }
+    return transaction->Request()->State();
+}
+
 Core::Memory::PreparedCpuWriteResult RasterizerVulkan::CommitControlledCpuWrite8(
     const ControlledCpuWritePtr& transaction, Core::Memory::Memory& memory, u8 value) {
     return buffer_cache.CommitControlledCpuTransaction(transaction, sizeof(value),

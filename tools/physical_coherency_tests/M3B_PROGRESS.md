@@ -1,5 +1,60 @@
 # M3B production integration progress
 
+## Owned CPU requests and completion handoff: 2026-10-16 — automatic dispatch pending
+
+CI [38839879554](https://github.com/Splaser/emulator/actions/runs/38839879554) completed successfully
+at `273bfb2f5d82a96565595ac160b558faef3861ac`: Android native compilation, Linux production/unit
+tests and all configured backing/coherency/lifecycle regressions. Its earlier Android-only
+observation is superseded by the completed two-job result. It does not validate this new source.
+
+Actual CPU-owner `Memory::PrepareControlledWrite8/16/32/64` now creates an immutable single-page
+cached write request before effects, outside sys-core/PTE/cache guards. It copies the typed
+scalar, normalizes VA, rejects cross-page/uncached/unqualified views, and retains the existing
+physical/context snapshot. No binding, data admission, CPU store, dispatcher or wait is created
+by preparation. The request stores no raw Memory/process pointer; the actual commit still
+requires a live Memory supplied by its owner. Keeping Memory/process alive remains the caller's
+lifetime responsibility, not an implicit process pin.
+
+CPU cancellation and GPU-owner acceptance race through one atomic Prepared transition. A
+cancelled request cannot execute later; acceptance is single-use and late cancellation cannot
+revoke its write/native obligations. `BeginControlledCpuWriteRequest` binds the immutable request
+to the existing real BufferCache transaction and retains it in the same physical admission
+owners as the registration and native preservation allocations. Caller drop cannot free an
+accepted Unknown request. Pre-effect qualification failure reports Refused; uncertain effects,
+store/publication failure and dropped active transactions report Unknown, never Stored.
+
+The actual Vulkan `AdvanceControlledCpuWriteRequest` endpoint polls the checked preservation
+continuation and commits only the request's owned scalar through actual ordinary Memory Write.
+The older value-taking endpoint cannot substitute another scalar into a request-backed
+transaction. Neither queued callback return nor completed readback acknowledges CPU success.
+Only successful actual store, all-alias tracker publication and admission release publish
+Stored with release/acquire visibility to the CPU observer. Stored acknowledges **CPU commit**;
+the protected GPU representation remains dirty/inaccessible until checked refresh/upload.
+
+The pipeline suite now composes the actual Memory preparation, private request state machine,
+BufferCache acceptance/commit and actual Vulkan advance body. An independent CPU producer
+prepares all four widths; changing its source variable cannot alter the queued payload. CPU
+observers stay Accepted through submission/readback and post-store tracker publication, then
+observe Stored and backing77. Both manual and request-backed four-width transactions retain
+the GPU 99 complement and reach cache77/clean tracker after checked refresh. It also checks
+pre-accept cancellation, cancellation/acceptance races, duplicate acceptance, stale queued
+views, invalid target eligibility, wrong Memory context, native failure and retained Unknown
+owners. Early readback-as-success fails 89; omitted accepted-request retention fails 90.
+
+Windows first-registration and pipeline suites each passed `--repeat 10`, with controls
+71/72/75 and 82-90. Original unbound F2 `--require-fixed` still fails as required with
+`expected=77 observed=10 backing=77`; its unmap/preservation prerequisites passed. Native
+compilation for this continuation needs its own exact-source workflow. Driver dispatch/device
+execution, device-mapping/tag fanout and some cache collaborators remain fixtures in extraction.
+
+**Automatic game-CPU routing and suspension remain pending.** The request is a nonblocking
+handoff/completion object for the explicit isolated GPU-owner endpoint, not a new command queue,
+GPU wait or automatic request lookup in ordinary Write. No locks/binding are retained across its
+polling boundary. Next, connect the real CPU caller to existing owner scheduling/continuations
+without sys-core/PTE/cache guards spanning suspension, and qualify all GPU/GC/download/mapping/
+unknown producers before activation. Trusted recovery and exact-source device evidence are
+still required. No DMA, Texture Cache, NCE or full-game safety expansion is included. F2 is Open.
+
 ## Ordinary scalar body binding: 2026-10-16 — automatic producer enrollment pending
 
 Native [38835727709](https://github.com/Splaser/emulator/actions/runs/38835727709) passed Android

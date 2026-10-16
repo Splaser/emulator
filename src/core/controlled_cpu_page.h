@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 
+#include <variant>
+
 #include "common/page_table.h"
 #include "common/physical_cpu_page.h"
 #include "common/physical_registration_bundle.h"
+
+namespace VideoCommon {
+template <class P> class BufferCache;
+}
 
 namespace Core::Memory {
 
@@ -171,5 +177,54 @@ private:
     bool attempted{};
     PreparedCpuWriteResult outcome{PreparedCpuWriteResult::NeedSlow};
 };
+
+/// Immutable CPU-side request, not a binding/lease across suspension. GPU-owner acceptance is
+/// single-use. Only actual cache commit may publish Stored after post-store tracker publication
+/// and admission release. Callers poll terminal state; this object never waits or dispatches.
+class ControlledCpuWriteRequest {
+    friend class Memory;
+    template <class P> friend class VideoCommon::BufferCache;
+public:
+    using Value = std::variant<u8, u16, u32, u64>;
+    enum class Phase { Prepared, Accepted, Stored, Refused, Cancelled, Unknown };
+    [[nodiscard]] Phase State() const noexcept { return phase.load(std::memory_order_acquire); }
+    [[nodiscard]] std::optional<PreparedCpuWriteResult> Outcome() const noexcept {
+        const auto state = State();
+        if (state != Phase::Stored && state != Phase::Refused) return std::nullopt;
+        return result.load(std::memory_order_relaxed);
+    }
+    /// Cancellation may win only before the GPU owner accepts responsibility. A late caller
+    /// cancellation cannot release an admitted/native request or replay its CPU store.
+    [[nodiscard]] bool Cancel() noexcept {
+        auto expected = Phase::Prepared;
+        return phase.compare_exchange_strong(expected, Phase::Cancelled,
+                                              std::memory_order_acq_rel);
+    }
+    [[nodiscard]] const PreparedCpuPage& View() const { return view; }
+    [[nodiscard]] u64 Address() const { return address; }
+    [[nodiscard]] u64 Size() const {
+        return std::visit([](const auto& scalar) { return sizeof(scalar); }, value);
+    }
+    [[nodiscard]] const Value& Payload() const { return value; }
+
+private:
+    ControlledCpuWriteRequest(PreparedCpuPage view_, u64 address_, Value value_)
+        : view{std::move(view_)}, address{address_}, value{std::move(value_)} {}
+    [[nodiscard]] bool TryAccept() noexcept {
+        auto expected = Phase::Prepared;
+        return phase.compare_exchange_strong(expected, Phase::Accepted,
+                                              std::memory_order_acq_rel);
+    }
+    void Publish(Phase terminal, PreparedCpuWriteResult outcome = PreparedCpuWriteResult::NeedSlow) {
+        result.store(outcome, std::memory_order_relaxed);
+        phase.store(terminal, std::memory_order_release);
+    }
+    const PreparedCpuPage view;
+    const u64 address;
+    const Value value;
+    std::atomic<Phase> phase{Phase::Prepared};
+    std::atomic<PreparedCpuWriteResult> result{PreparedCpuWriteResult::NeedSlow};
+};
+using ControlledCpuWriteRequestPtr = std::shared_ptr<ControlledCpuWriteRequest>;
 
 } // namespace Core::Memory

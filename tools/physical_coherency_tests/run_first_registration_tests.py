@@ -98,12 +98,18 @@ cpu += '''
 namespace Core::Memory {
 struct Memory {
     Cpu* impl;
+    std::optional<PreparedCpuPage> PrepareControlledCpuPage(Common::ProcessAddress) const;
+    ControlledCpuWriteRequestPtr PrepareControlledWrite(Common::ProcessAddress,ControlledCpuWriteRequest::Value);
 '''
 for bits in [8, 16, 32, 64]:
+    cpu += f'    ControlledCpuWriteRequestPtr PrepareControlledWrite{bits}(Common::ProcessAddress,u{bits});\n'
     cpu += f'    void Write{bits}(Common::ProcessAddress,u{bits});\n'
     cpu += f'    PreparedCpuWriteResult WriteOrdinaryControlled{bits}(const PreparedCpuPage&,Common::PhysicalRegistrationBundle::CachedWrite&,Common::ProcessAddress,u{bits});\n'
 cpu += '};\n'
+cpu += method('src/core/memory.cpp', 'std::optional<PreparedCpuPage> Memory::PrepareControlledCpuPage(', closing='\n}') + '\n'
+cpu += method('src/core/memory.cpp', 'ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite(', closing='\n}') + '\n'
 for bits in [8, 16, 32, 64]:
+    cpu += method('src/core/memory.cpp', f'ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite{bits}(', closing='\n}') + '\n'
     cpu += method('src/core/memory.cpp', f'void Memory::Write{bits}(', closing='\n}') + '\n'
     cpu += method('src/core/memory.cpp', f'PreparedCpuWriteResult Memory::WriteOrdinaryControlled{bits}(', closing='\n}') + '\n'
 cpu += '}\n'

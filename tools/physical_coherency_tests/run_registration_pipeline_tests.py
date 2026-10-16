@@ -81,6 +81,8 @@ for marker in ['auto BufferCache<P>::BeginControlledFirstRegistration(',
                'auto BufferCache<P>::PollControlledRegistration(',
                'Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCachedWrite(',
                'auto BufferCache<P>::BeginControlledCpuWrite(',
+               'auto BufferCache<P>::BeginControlledCpuWriteRequest(',
+               'Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuWriteRequest(',
                'auto BufferCache<P>::PollControlledCpuWrite(',
                'Core::Memory::PreparedCpuWriteResult BufferCache<P>::CommitControlledCpuTransaction(',
                'void BufferCache<P>::CheckControlledSynchronization(',
@@ -106,7 +108,9 @@ for name, value in [('POLL_TIMELINE', timeline), ('CHECKED_SUBMISSION', checked)
                     ('ALIAS_CONTAINER', body('src/core/device_memory_manager.inc', 'class MultiAddressContainer {') + ';'),
                     ('SUBMISSION_METHODS', submission), ('TRANSFER_METHODS', transfer),
                     ('DEVICE_TRACKER', tracker), ('REGISTRATION_CLASS', registration),
-                    ('CACHE_METHODS', cache)]:
+                    ('CACHE_METHODS', cache),
+                    ('REQUEST_ADVANCE', body('src/video_core/renderer_vulkan/vk_rasterizer.cpp',
+                        'Core::Memory::ControlledCpuWriteRequest::Phase RasterizerVulkan::AdvanceControlledCpuWriteRequest('))]:
     marker = '// @' + name + '@'
     assert template.count(marker) == 1
     template = template.replace(marker, value)
@@ -182,6 +186,26 @@ result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout
 if result.returncode != 88 or 'bound ordinary Write bypassed its transaction' not in result.stderr:
     raise RuntimeError(f'Ordinary routing bypass control failed incorrectly: {result.returncode} {result.stderr}')
 print('PASS negative control: bypassing the actual ordinary Write transaction branch fails (88)')
+preserved = 'if (submitted) return tx.phase = Phase::Preserved;'
+assert source.count(preserved) == 1
+control.write_text(source.replace(preserved, '''if (submitted) {
+    if(tx.request) tx.request->Publish(Core::Memory::ControlledCpuWriteRequest::Phase::Stored,
+                                     Core::Memory::PreparedCpuWriteResult::Stored);
+    return tx.phase = Phase::Preserved;
+}'''))
+subprocess.run(cmd + [str(control), '-o', str(exe)], check=True)
+result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout=60)
+if result.returncode != 89 or 'request completed before actual store publication' not in result.stderr:
+    raise RuntimeError(f'Early request success control failed incorrectly: {result.returncode} {result.stderr}')
+print('PASS negative control: completed readback cannot acknowledge a still-unperformed CPU store (89)')
+owner = 'Owners{operation, preservation, std::move(extra_owner)}'
+assert source.count(owner) == 1
+control.write_text(source.replace(owner, 'Owners{operation, preservation, {}}'))
+subprocess.run(cmd + [str(control), '-o', str(exe)], check=True)
+result = subprocess.run([str(exe), '1'], capture_output=True, text=True, timeout=60)
+if result.returncode != 90 or 'accepted request owner escaped Unknown retention' not in result.stderr:
+    raise RuntimeError(f'Dropped request retention control failed incorrectly: {result.returncode} {result.stderr}')
+print('PASS negative control: Unknown admission must retain the accepted CPU request after caller drop (90)')
 inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
                'src/video_core/buffer_cache/controlled_transfer.h', 'src/video_core/physical_access_plan.h',
                'src/video_core/renderer_vulkan/vk_buffer_payload.h'])
