@@ -11,12 +11,18 @@ are in the [current progress entry](../tools/physical_coherency_tests/M3B_PROGRE
 
 The native executable now uses CpuManager/KThread/KScheduler service fibers, complete initialized
 KProcess teardown and real cache/sys-core/PTE/counter locks with Vulkan checked transfers.
-Its first Linux run passed at `202eb74500` in
-[38861935399](https://github.com/Splaser/emulator/actions/runs/38861935399), including 64 process
-teardowns and GPU99/CPU77/GPU99. Final owner-retention/slab-cleanup hardening awaits its own CI.
+Its final lifecycle-hardened revision `02610e1766` passed Android and Linux in
+[38864622309](https://github.com/Splaser/emulator/actions/runs/38864622309), including 64 process
+teardowns, GPU99/CPU77/GPU99, Cancelled-owner release and delayed preservation/frame-reuse safety.
+The native executable passed 1,696 assertions; production tests passed 130 cases.
 The no-presentation renderer uses software Vulkan; it does not execute an ARM game image.
 Automatic ordinary-game routing, alias-process qualification, full producer exclusion, trusted
 Unknown recovery and Android hardware evidence remain gates. F2 stays Open.
+
+The [producer inventory](M3B_F2_PRODUCER_INVENTORY.md) classifies ordinary CPU writes,
+CAS/NCE/JIT, DMA, buffer/texture transfers, deferred callbacks, raw pointers and mapping/lifetime
+mutations. Its forbidden rows are activation requirements, not currently enforced exclusions.
+See also the [native acceptance and execution-lease lock audit](M3B_CPU_SCHEDULER_ACCEPTANCE.md).
 
 ### Earlier continuation: CPU request/completion owned, automatic dispatch pending
 

@@ -1,14 +1,16 @@
 # M3B production integration progress
 
-## Native guest scheduler acceptance: first native run passed, final lifecycle hardening pending
+## Native guest scheduler acceptance: final lifecycle hardening passed
 
-CI [38861935399](https://github.com/Splaser/emulator/actions/runs/38861935399) at `202eb74500`
-passed the complete Linux job, including the new native acceptance executable (0.77 seconds),
-production unit tests and all configured integration regressions. Its native log confirms
+CI [38864622309](https://github.com/Splaser/emulator/actions/runs/38864622309) at `02610e1766`
+passed both Android and Linux, including the native acceptance executable (1,696 assertions,
+0.82 seconds), production unit tests (130 cases, 3,878,778 assertions) and all configured
+integration regressions. Its downloaded native log confirms
 64 process teardowns, real guest suspend/resume, all terminal observations, actual lock
 contention/negative witnesses, GPU99/CPU77/GPU99 and accepted native teardown without queue
-drain. This verifies that revision; the final lifecycle changes below require their own run.
-The Android native job also completed successfully; the full workflow is green.
+drain, including the final owner-retention/slab-cleanup and reused-frame sentinel assertions.
+The full workflow is green. The earlier complete run at `202eb74500` also passed in
+[38861935399](https://github.com/Splaser/emulator/actions/runs/38861935399).
 
 `controlled_cpu_scheduler_tests` links the real CpuManager/KThread/KScheduler, kernel process
 and page-table teardown, GPU ThreadManager, Vulkan Rasterizer/BufferCache and checked transfers.
@@ -45,6 +47,12 @@ Final host validation passed three repetitions of registration/pipeline cases an
 82-90/92-94; the physical-admission suite includes Pending-to-Unknown retention and rejected
 completion/cancellation, and the insertion candidate suite passed 24 cases x 3 repetitions.
 Ordinary Memory writes are still not automatically routed here; global F2 remains Open.
+
+The complete [producer inventory](../../docs/M3B_F2_PRODUCER_INVENTORY.md) records which CPU,
+GPU/cache, deferred, raw-pointer and mapping/lifetime paths actually participate and which
+must be excluded before restricted activation. Existing notifications, snapshots and pins
+are not a global exclusion mechanism. The [native acceptance and lock audit](../../docs/M3B_CPU_SCHEDULER_ACCEPTANCE.md)
+records the execution-lease boundaries and the CPU terminal-action contract.
 
 Previous CI 38844806313 passed Android/Linux native compilation and unit tests, but failed the
 older GPU-stop extraction harness because it omitted the new continuation/monostate variants.

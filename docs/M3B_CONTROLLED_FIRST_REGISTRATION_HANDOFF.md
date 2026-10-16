@@ -4,13 +4,19 @@ Current scope is **M3B-F2 CPU Scheduler Handoff**: explicit nonblocking existing
 continuations, per-Memory execution closure before process PTE finalization, distinct
 Cancelled/Refused/Unknown actions, and the five concurrency/lifecycle assertion groups.
 See [current progress](../tools/physical_coherency_tests/M3B_PROGRESS.md) for production-code and
-fixture boundaries. Close isolates this Memory's requests, not the entire GPU queue. The first
-native Linux acceptance at `202eb74500` passed real guest service-fiber sleep/resume, 64 full
-process teardowns, actual lock contention and software-Vulkan complement preservation. Final
-owner-retention/slab-cleanup hardening awaits CI. The test renderer omits presentation and the
-CPU entrypoint is a service fiber rather than an ARM game image. Alias-process qualification,
+fixture boundaries. Close isolates this Memory's requests, not the entire GPU queue. Final
+revision `02610e1766` passed both Android and Linux in
+[38864622309](https://github.com/Splaser/emulator/actions/runs/38864622309): real guest service-fiber
+sleep/resume, 64 full process teardowns, actual lock contention, software-Vulkan complement
+preservation, Cancelled-owner release and delayed preservation/frame-reuse safety. The test
+renderer omits presentation and the CPU entrypoint is a service fiber rather than an ARM game
+image. Alias-process qualification,
 full producer exclusion and Android hardware acceptance remain pending. Automatic game routing
 stays off; F2 remains Open. The older notes below are historical.
+
+Current review references: [producer inventory](M3B_F2_PRODUCER_INVENTORY.md) and
+[native acceptance / execution-lease audit](M3B_CPU_SCHEDULER_ACCEPTANCE.md). The inventory
+distinguishes enforced guards from the exclusion policy still required before activation.
 
 Current continuation: [38839879554](https://github.com/Splaser/emulator/actions/runs/38839879554)
 passed Android and Linux at `273bfb2f5d`. CPU-owner scalar preparation now supplies an immutable

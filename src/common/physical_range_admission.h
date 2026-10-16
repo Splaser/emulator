@@ -88,7 +88,8 @@ public:
     }
 
     /// All intervals grant atomically or none do. Earlier conflicting pending requests order
-    /// later requests; disjoint requests and shared readers can still proceed. Never waits.
+    /// later requests; disjoint requests and shared readers can still proceed. Never waits for
+    /// a predecessor to finish; the short metadata mutex critical section still serializes.
     [[nodiscard]] Start TryStart(const Ticket& request) {
         std::scoped_lock lock{state->mutex};
         if (!Owns(request)) return Start::Invalid;
