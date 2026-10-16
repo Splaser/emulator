@@ -129,6 +129,13 @@ jobs:
               > .diagnostics/pr375-pr380/f3-transfer-$repeat.txt 2>&1
             cat .diagnostics/pr375-pr380/f3-transfer-$repeat.txt
           done
+      - name: Repeat checked write provenance on native Vulkan
+        run: |
+          for repeat in 1 2 3; do
+            timeout 30 build-integration/bin/controlled_cpu_scheduler_tests '[f3-provenance]' \
+              > .diagnostics/pr375-pr380/f3-provenance-$repeat.txt 2>&1
+            cat .diagnostics/pr375-pr380/f3-provenance-$repeat.txt
+          done
       - name: Preserve original F2 defect and fixed-mode negative control
         run: |
           python tools/physical_coherency_tests/run_write_coherency_witnesses.py --case f2 --repeat 3

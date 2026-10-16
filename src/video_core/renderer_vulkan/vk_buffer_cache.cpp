@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cerrno>
 #include <span>
+#include <stdexcept>
 #include <vector>
 #ifdef __linux__
 #include <unistd.h>
@@ -998,10 +999,8 @@ void BufferCacheRuntime::PostCopyBarrier() {
     });
 }
 
-void BufferCacheRuntime::ClearBuffer(VkBuffer dest_buffer, u32 offset, size_t size, u32 value) {
-    if (dest_buffer == VK_NULL_HANDLE) {
-        return;
-    }
+namespace {
+auto MakeBufferClear(VkBuffer dest_buffer, u32 offset, size_t size, u32 value) {
     static constexpr VkMemoryBarrier READ_BARRIER{
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
         .pNext = nullptr,
@@ -1015,14 +1014,36 @@ void BufferCacheRuntime::ClearBuffer(VkBuffer dest_buffer, u32 offset, size_t si
         .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
     };
 
-    scheduler.RequestOutsideRenderPassSyncedOperationContext();
-    scheduler.Record([dest_buffer, offset, size, value](vk::CommandBuffer cmdbuf) {
+    return [dest_buffer, offset, size, value](vk::CommandBuffer cmdbuf) {
         cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                                0, READ_BARRIER);
         cmdbuf.FillBuffer(dest_buffer, offset, size, value);
         cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                                0, WRITE_BARRIER);
-    });
+        return true;
+    };
+}
+} // namespace
+
+void BufferCacheRuntime::ClearBuffer(VkBuffer dest_buffer, u32 offset, size_t size, u32 value) {
+    if (dest_buffer == VK_NULL_HANDLE) return;
+    scheduler.RequestOutsideRenderPassSyncedOperationContext();
+    scheduler.Record(MakeBufferClear(dest_buffer, offset, size, value));
+}
+
+Scheduler::Write BufferCacheRuntime::ClearBufferChecked(StagedBufferPin pin, u64 intent_revision, u32 value,
+                                                       std::function<bool()> emit) {
+    if (!pin.IsUsable() || !pin.Size() || pin.Offset() > std::numeric_limits<u32>::max() ||
+        ((pin.Offset() | pin.Size()) % 4) != 0) return {};
+    auto owner = std::make_shared<StagedBufferPin>(std::move(pin));
+    scheduler.RequestOutsideRenderPassSyncedOperationContext();
+    return scheduler.RecordCheckedWrite(owner, owner->Identity(), owner->Offset(), owner->Size(), intent_revision,
+        [clear = MakeBufferClear(owner->Handle(), static_cast<u32>(owner->Offset()), owner->Size(), value),
+         owner, emit = std::move(emit)](vk::CommandBuffer cmdbuf) {
+            if (!owner->IsUsable()) throw std::runtime_error("checked writer pin sealed before emission");
+            if (emit && !emit()) return false;
+            return clear(cmdbuf);
+        });
 }
 
 void BufferCacheRuntime::BindIndexBuffer(PrimitiveTopology topology, IndexFormat index_format,

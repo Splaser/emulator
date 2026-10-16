@@ -68,6 +68,9 @@ registration += ';\n    using ControlledCpuWritePtr=std::shared_ptr<ControlledCp
 declarations = read('src/video_core/renderer_vulkan/vk_scheduler.h')
 checked = body('src/video_core/renderer_vulkan/vk_scheduler.h', '    class CheckedSubmission {')
 checked += ';\n    using Submission=std::shared_ptr<CheckedSubmission>;\n'
+checked += 'enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };\n'
+checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    class CheckedWrite {')
+checked += ';\n    using Write=std::shared_ptr<CheckedWrite>;\n'
 timeline = body('src/video_core/renderer_vulkan/vk_master_semaphore.h',
                 '    [[nodiscard]] VkResult PollTimeline(')
 scheduler_path = 'src/video_core/renderer_vulkan/vk_scheduler.cpp'
@@ -76,7 +79,10 @@ submission = body('src/video_core/renderer_vulkan/vk_master_semaphore.cpp',
 submission += body('src/video_core/renderer_vulkan/vk_master_semaphore.cpp',
                    'VkResult MasterSemaphore::SubmitQueueTimeline(') + '\n'
 for marker in ['Scheduler::Submission Scheduler::FlushChecked(',
-               'VkResult Scheduler::PollChecked(', 'u64 Scheduler::SubmitExecution(']:
+               'VkResult Scheduler::PollChecked(', 'u64 Scheduler::SubmitExecution(',
+               'Scheduler::Write Scheduler::RecordCheckedWrite(',
+               'Scheduler::WriteState Scheduler::PollCheckedWrite(',
+               'void Scheduler::RetireCheckedWritesAfterDeviceIdle(']:
     submission += body(scheduler_path, marker) + '\n'
 runtime_path = 'src/video_core/renderer_vulkan/vk_buffer_cache.cpp'
 transfer = body(runtime_path, 'VkBufferCopy MakeBufferCopy(') + '\n'
@@ -369,6 +375,81 @@ alias_cpp.write_text(alias_source)
 alias_exe = out / ('alias_transfer.exe' if os.name == 'nt' else 'alias_transfer')
 subprocess.run(cmd + [str(alias_cpp), '-o', str(alias_exe)], check=True)
 subprocess.run([str(alias_exe)], check=True, timeout=60)
+
+# Separate checked-write provenance fixture. The scheduler, fill recorder and
+# direct Draw worker command are extracted actual bodies; GPU execution is fake.
+provenance = source.rsplit('int main(int argc,char** argv) {', 1)[0]
+provenance += '\nnamespace Vulkan {\n' + body(runtime_path, 'auto MakeBufferClear(') + '\n'
+provenance += body(runtime_path, 'Scheduler::Write BufferCacheRuntime::ClearBufferChecked(') + '\n}\n'
+draw = body('src/video_core/renderer_vulkan/vk_rasterizer.cpp',
+            '        scheduler.Record([draw_params, draw_pipeline]')
+draw = draw[draw.index('{') + 1:-1]
+provenance += r'''
+struct DrawParams {bool is_indexed=false;u32 num_vertices=3,num_instances=1,first_index=0,base_vertex=0,base_instance=0;};
+struct Pipeline {bool failed=false;bool IsFailed() const {return failed;}};
+bool ActualDrawWorker(vk::CommandBuffer cmdbuf,const Pipeline* draw_pipeline,DrawParams draw_params) {
+''' + draw + '\n}\n'
+provenance += r'''
+int main() {
+    using State=Vulkan::Scheduler::WriteState;
+    for(int mode=0;mode<9;++mode) {
+        auto s=std::make_unique<Scenario>();
+        auto buffer=std::make_unique<Vulkan::Buffer>(s->runtime,A,4096);
+        auto weak_payload=buffer->WeakPayload();
+        auto pin=buffer->PinStagedRepresentation(0,4096);assert(pin);
+        const auto identity=pin->Identity();
+        const auto handle=pin->Handle();
+        auto* bytes=reinterpret_cast<Allocation*>(handle);
+        std::fill(bytes->bytes.begin(),bytes->bytes.end(),u8{10});
+        auto resources=std::make_shared<Vulkan::StagedBufferPin>(*pin);
+        Pipeline pipeline{mode==5};
+        driver->draw_target=handle;
+        if(mode==1) driver->submit_result=VK_ERROR_DEVICE_LOST;
+        Vulkan::Scheduler::Write write;
+        if(mode==0 || mode==8) write=s->runtime.ClearBufferChecked(*pin,7,0x63636363);
+        else write=s->scheduler.RecordCheckedWrite(resources,identity,0,4096,7,
+            [&,handle](vk::CommandBuffer command) {
+                if(mode==5 || mode==6) return ActualDrawWorker(command,&pipeline,DrawParams{mode==6});
+                Vulkan::MakeBufferClear(handle,0,4096,0x63636363)(command);
+                if(mode==4) throw std::runtime_error("partial command recording");
+                return true;
+            });
+        assert(write && write->ResourceIdentity()==identity && write->Offset()==0 && write->Size()==4096);
+        assert(write->IntentRevision()==7);
+        assert(write->SubmissionIdentity()!=nullptr);
+        assert(s->scheduler.PollCheckedWrite(write)==State::Pending);
+        if(mode==8) s->runtime.staged_pin_domain->Seal();
+        buffer.reset();pin.reset();resources.reset();
+        assert(!weak_payload.expired());
+        s->scheduler.RunWorker();
+        if(mode==1 || mode==4 || mode==8) assert(s->scheduler.PollCheckedWrite(write)==State::Unknown);
+        else assert(s->scheduler.PollCheckedWrite(write)==State::Submitted); // Queue acceptance is not completion.
+        s->gpu.Complete();
+        if(mode==2) driver->counter_result=VK_ERROR_DEVICE_LOST;
+        if(mode==3) driver->wait_result=VK_ERROR_DEVICE_LOST;
+        if(mode==7) s->scheduler.submission_owner->store(false);
+        const auto expected=mode==5?State::Skipped:((mode==0 || mode==6)?State::Complete:State::Unknown);
+        assert(s->scheduler.PollCheckedWrite(write)==expected);
+        driver->submit_result=driver->counter_result=driver->wait_result=VK_SUCCESS;
+        assert(s->scheduler.PollCheckedWrite(write)==expected); // Unknown cannot recover into Complete.
+        if(mode==0 || mode==6) for(auto byte:bytes->bytes) assert(byte==99);
+        if(mode==5) {assert(driver->draws==0);for(auto byte:bytes->bytes) assert(byte==10);}
+        if(mode==6) assert(driver->draws==1);
+        assert(!weak_payload.expired()); // Scheduler retains accepted evidence even if cache owners disappear.
+        s->scheduler.RetireCheckedWritesAfterDeviceIdle();
+        assert(weak_payload.expired() && write->ResourceIdentity()==nullptr);
+        assert(s->scheduler.PollCheckedWrite(write)==State::Unknown);
+    }
+    std::cout<<"PASS actual checked-write provenance fixture: skipped failed-pipeline Draw, indexed emission, "
+               "delayed completion, submit/counter/wait/partial-record/seal/owner failures, sticky Unknown "
+               "and retained payload until trusted idle (Vulkan execution remains a fixture)\n";
+}
+'''
+provenance_cpp = out / 'write_provenance.cpp'
+provenance_cpp.write_text(provenance)
+provenance_exe = out / ('write_provenance.exe' if os.name == 'nt' else 'write_provenance')
+subprocess.run(cmd + [str(provenance_cpp), '-o', str(provenance_exe)], check=True)
+subprocess.run([str(provenance_exe)], check=True, timeout=60)
 inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
                'src/video_core/buffer_cache/controlled_conflict.h', 'src/common/range_sets.inc',
                'src/video_core/gpu_thread.cpp','src/video_core/gpu_thread.h',

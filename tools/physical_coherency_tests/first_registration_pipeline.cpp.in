@@ -19,6 +19,8 @@ struct Driver {
     bool fail_allocation=false;
     bool host_read_barrier=false;
     VkBuffer readback_target=VK_NULL_HANDLE;
+    VkBuffer draw_target=VK_NULL_HANDLE;
+    size_t draws{};
     std::vector<std::function<void()>> recorded,submitted;
     void Complete() {
         for(auto& command:submitted) {command();}
@@ -45,6 +47,14 @@ public:
     void reset() {allocation.reset();}
 };
 struct CommandBuffer {
+    void FillBuffer(VkBuffer destination,u64 offset,u64 size,u32 value) {
+        driver->recorded.push_back([=] {
+            auto& bytes=reinterpret_cast<Allocation*>(destination)->bytes;
+            for(u64 i=0;i<size;++i) bytes[offset+i]=static_cast<u8>(value >> (8*(i%4)));
+        });
+    }
+    template<class... T> void Draw(T...) {++driver->draws;FillBuffer(driver->draw_target,0,4096,0x63636363);}
+    template<class... T> void DrawIndexed(T... args) {Draw(args...);}
     void Begin(...) {} void End() {}
     VkCommandBuffer operator*() const {return reinterpret_cast<VkCommandBuffer>(uintptr_t{1});}
     void PipelineBarrier(VkPipelineStageFlags,VkPipelineStageFlags dst,u32,const VkMemoryBarrier& barrier) {
@@ -117,6 +127,10 @@ public:
     std::deque<std::function<void(vk::CommandBuffer,vk::CommandBuffer)>> commands;
     explicit Scheduler(Device& device_):device{device_},master_semaphore{std::make_unique<MasterSemaphore>(device_)} {}
     Submission FlushChecked();VkResult PollChecked(const Submission&) const noexcept;
+    std::vector<Write> checked_writes;
+    Write RecordCheckedWrite(std::shared_ptr<const void>,const void*,u64,u64,u64,std::function<bool(vk::CommandBuffer)>);
+    WriteState PollCheckedWrite(const Write&) const noexcept;
+    void RetireCheckedWritesAfterDeviceIdle();
     u64 SubmitExecution(VkSemaphore,VkSemaphore,Submission checked={});
     void EndPendingOperations() {} void InvalidateState() {} void AllocateNewContext() {}
     std::function<void()> on_submit;
@@ -155,6 +169,7 @@ public:
     struct Staging {VkBuffer StreamBuf() const {return VK_NULL_HANDLE;}} staging_pool;
     BufferCacheRuntime(Device& device_,Scheduler& scheduler_):device{device_},scheduler{scheduler_} {}
     bool SupportsControlledTransfers() const;
+    Scheduler::Write ClearBufferChecked(StagedBufferPin,u64,u32,std::function<bool()> = {});
     std::shared_ptr<VideoCommon::ControlledBufferTransfer> PrepareControlledTransfer(const Buffer&);
     void RetireControlledTransfersAfterDeviceIdle();
     void CopyBuffer(VkBuffer,VkBuffer,std::span<const VideoCommon::BufferCopy>,bool,bool=false);

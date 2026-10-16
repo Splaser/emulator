@@ -806,7 +806,7 @@ void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
         const GraphicsPipeline* const draw_pipeline{pipeline_cache.CurrentGraphicsPipeline()};
         scheduler.Record([draw_params, draw_pipeline](vk::CommandBuffer cmdbuf) {
             if (draw_pipeline->IsFailed()) {
-                return;
+                return false;
             }
             if (draw_params.is_indexed) {
                 cmdbuf.DrawIndexed(draw_params.num_vertices, draw_params.num_instances,
@@ -816,6 +816,7 @@ void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
                 cmdbuf.Draw(draw_params.num_vertices, draw_params.num_instances,
                             draw_params.base_vertex, draw_params.base_instance);
             }
+            return true; // Actual worker emission; ordinary Record ignores this evidence.
         });
     });
     if (pipeline) {

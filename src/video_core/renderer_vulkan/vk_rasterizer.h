@@ -189,6 +189,7 @@ public:
     }
     void RetireControlledTransfersAfterDeviceIdle() {
         buffer_cache_runtime.RetireControlledTransfersAfterDeviceIdle();
+        scheduler.RetireCheckedWritesAfterDeviceIdle();
     }
     [[nodiscard]] Core::Memory::PreparedCpuWriteResult WriteControlledCached8(
         const ControlledRegistrationPtr&, Core::Memory::Memory&,

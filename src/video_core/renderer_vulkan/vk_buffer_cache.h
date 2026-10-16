@@ -13,6 +13,7 @@
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/renderer_vulkan/vk_compute_pass.h"
 #include "video_core/renderer_vulkan/vk_buffer_payload.h"
+#include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/renderer_vulkan/vk_update_descriptor.h"
 #include "video_core/surface.h"
@@ -186,6 +187,9 @@ public:
     void PostCopyBarrier();
 
     void ClearBuffer(VkBuffer dest_buffer, u32 offset, size_t size, u32 value);
+    // Isolated write provenance, not ordinary routing or physical content authority.
+    [[nodiscard]] Scheduler::Write ClearBufferChecked(StagedBufferPin pin, u64 intent_revision, u32 value,
+        std::function<bool()> emit = {});
 
     void BindIndexBuffer(PrimitiveTopology topology, IndexFormat index_format, u32 num_indices,
                          u32 base_vertex, VkBuffer buffer, u32 offset, u32 size);

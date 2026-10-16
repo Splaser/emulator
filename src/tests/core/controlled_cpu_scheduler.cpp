@@ -958,4 +958,178 @@ TEST_CASE("Admitted staged alias adapter copies exact physical dirty intersectio
                  "parking, disjoint reverse write, overlapping-writer refusal, retained retirement, "
                  "remap Unknown and quarantine; ordinary F3 remains Open\n";
 }
+TEST_CASE("Checked write provenance separates emission completion and current representation",
+          "[.][f3-provenance]") {
+    using State = Vulkan::Scheduler::WriteState;
+    Settings::values.use_multi_core.SetValue(true);
+    Settings::values.use_asynchronous_gpu_emulation.SetValue(true);
+    Settings::values.use_uma_zero_copy.SetValue(false);
+    Settings::values.cpu_debug_mode.SetValue(false);
+    Core::System system;
+    Window window;
+    system.Initialize();
+    TransferRenderer* renderer{};
+    Access::Initialize(system, window, [&](Core::System& initialized) {
+        auto result = std::make_unique<TransferRenderer>(window, initialized);
+        renderer = result.get();
+        return result;
+    });
+    SCOPE_EXIT { system.ShutdownMainProcess(); };
+    auto& gpu = system.GPU();
+    auto& rasterizer = renderer->rasterizer;
+    auto& device_memory = system.Host1x().MemoryManager();
+    const auto on_gpu = [&](auto&& callback) {
+        std::exception_ptr error;
+        gpu.RunOnGpuThread([&] {
+            try { callback(); } catch (...) { error = std::current_exception(); }
+        });
+        if (error) std::rethrow_exception(error);
+    };
+    auto channel = gpu.AllocateChannel();
+    channel->memory_manager = std::make_shared<Tegra::MemoryManager>(system);
+    on_gpu([&] { gpu.InitChannel(*channel, 0); gpu.BindChannel(channel->bind_id); });
+    Process owner{system};
+    auto& memory = owner.process->GetMemory();
+    auto* keeper = owner.Start([&] {
+        auto& kernel = system.Kernel();
+        auto& self = Kernel::GetCurrentThread(kernel);
+        while (!self.IsTerminationRequested())
+            (void)self.Sleep(kernel.HardwareTimer().GetTick() + 1'000'000);
+    });
+    constexpr DAddr A = 0x1000000, B = 0x2000000;
+    constexpr u32 Page = 4096;
+    std::vector<u8> initial(2 * Footprint, 10);
+    std::fill(initial.begin() + Footprint, initial.end(), u8{55});
+    REQUIRE(memory.WriteBlock(owner.heap, initial.data(), initial.size()));
+    const auto asid = device_memory.RegisterProcess(&memory);
+    for (DAddr address : {A, B}) {
+        device_memory.AllocateFixed(address, Footprint);
+        device_memory.Map(address, GetInteger(owner.heap), Footprint, asid);
+    }
+    SCOPE_EXIT {
+        on_gpu([&] { for (DAddr address : {A, B}) device_memory.Unmap(address, Footprint); });
+        device_memory.UnregisterProcess(asid);
+        owner.Close();
+        EndThread(keeper);
+    };
+    const auto read = [&](DAddr address) {
+        std::vector<u8> bytes;
+        on_gpu([&] { bytes = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, address, Page)); });
+        return bytes;
+    };
+    const auto poll = [&](const Vulkan::Scheduler::Write& write) {
+        State state{};
+        on_gpu([&] { state = renderer->scheduler.PollCheckedWrite(write); });
+        return state;
+    };
+    const auto finish = [&](const Vulkan::Scheduler::Write& write, State expected) {
+        State state{};
+        REQUIRE(Until([&] {
+            state = poll(write);
+            return state != State::Pending && state != State::Submitted;
+        }));
+        REQUIRE(state == expected);
+    };
+    const auto fill = [&](DAddr address, u32 value, std::function<bool()> emit = {}) {
+        Vulkan::Scheduler::Write write;
+        on_gpu([&] { write = Access::CheckedOrdinaryFill(rasterizer, address, Page, value, std::move(emit)); });
+        return write;
+    };
+    REQUIRE(read(A) == std::vector<u8>(Page, 10));
+    REQUIRE(read(B) == std::vector<u8>(Page, 10));
+    auto plan = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, A, Page);
+    REQUIRE(plan);
+    auto skipped = fill(A, 0x63636363, [] { return false; });
+    REQUIRE(skipped);
+    finish(skipped, State::Skipped); // Intent and a completed empty submission are not content.
+    REQUIRE(read(A) == std::vector<u8>(Page, 10));
+    auto first = fill(A, 0x42424242);
+    REQUIRE(first);
+    finish(first, State::Complete);
+    REQUIRE(read(A) == std::vector<u8>(Page, 66));
+    std::optional<VideoCommon::AliasWriteSnapshot> snapshot;
+    on_gpu([&] {
+        std::scoped_lock lock{Access::Cache(rasterizer).mutex};
+        snapshot = Access::Cache(rasterizer).SnapshotAliasWrites(A, Page);
+    });
+    REQUIRE(snapshot);
+    REQUIRE(first->IntentRevision() == snapshot->revision);
+    auto second = fill(A, 0x4d4d4d4d);
+    REQUIRE(second);
+    REQUIRE(first->ResourceIdentity() == second->ResourceIdentity());
+    REQUIRE(first->SubmissionIdentity() != second->SubmissionIdentity());
+    REQUIRE(first->Offset() == 0);
+    REQUIRE(first->Size() == Page);
+    std::optional<VideoCommon::AliasWriteSnapshot> changed;
+    on_gpu([&] {
+        std::scoped_lock lock{Access::Cache(rasterizer).mutex};
+        changed = Access::Cache(rasterizer).SnapshotAliasWrites(A, Page);
+    });
+    REQUIRE(changed);
+    REQUIRE(changed->ranges == snapshot->ranges);
+    REQUIRE(*changed != *snapshot); // Same dirty interval, distinct write intent.
+    REQUIRE(second->IntentRevision() == changed->revision);
+    REQUIRE(poll(first) == State::Complete); // Historical completion is not current authority.
+    finish(second, State::Complete);
+    REQUIRE(read(A) == std::vector<u8>(Page, 77));
+    REQUIRE(read(B) == std::vector<u8>(Page, 10)); // Independent replica is never relabelled.
+
+    auto entered = std::make_shared<std::promise<void>>();
+    auto release = std::make_shared<std::promise<void>>();
+    auto released = release->get_future().share();
+    // Always release the worker on assertion/exception unwinding, before shutdown.
+    SCOPE_EXIT { try { release->set_value(); } catch (...) {} };
+    auto delayed = fill(A, 0x63636363, [entered, released] {
+        entered->set_value();
+        return released.wait_for(5s) == std::future_status::ready;
+    });
+    REQUIRE(delayed);
+    REQUIRE(entered->get_future().wait_for(5s) == std::future_status::ready);
+    REQUIRE(poll(delayed) == State::Pending);
+    REQUIRE(poll(first) == State::Complete);
+    std::optional<Vulkan::StagedBufferPin> old_pin;
+    on_gpu([&] {
+        // No synchronization/readback while the recording worker is deliberately parked.
+        std::scoped_lock lock{Access::Cache(rasterizer).mutex};
+        old_pin = Access::Cache(rasterizer).PinExistingDmaRepresentation(A, *plan);
+    });
+    REQUIRE(old_pin);
+    on_gpu([&] {
+        Access::RetireOrdinary(rasterizer, A);
+        device_memory.Unmap(A, Footprint);
+        device_memory.Map(A, GetInteger(owner.heap) + Footprint, Footprint, asid);
+    });
+    bool stale_current{};
+    on_gpu([&] {
+        std::scoped_lock lock{Access::Cache(rasterizer).mutex};
+        stale_current = Access::Cache(rasterizer).PinExistingDmaRepresentation(A, *plan).has_value();
+    });
+    REQUIRE_FALSE(stale_current);
+    release->set_value();
+    finish(delayed, State::Complete); // Completes OLD native allocation, never the new mapping.
+    REQUIRE(read(A) == std::vector<u8>(Page, 55));
+    on_gpu([&] {
+        std::scoped_lock lock{Access::Cache(rasterizer).mutex};
+        stale_current = Access::Cache(rasterizer).PinExistingDmaRepresentation(A, *plan).has_value();
+    });
+    REQUIRE_FALSE(stale_current); // Reject physical mismatch even after a new allocation is warmed.
+    REQUIRE(read(B) == std::vector<u8>(Page, 10));
+    std::vector<u8> old_bytes;
+    on_gpu([&] { old_bytes = Access::ReadPin(rasterizer, *old_pin); });
+    REQUIRE(old_bytes == std::vector<u8>(Page, 99));
+    REQUIRE(delayed->ResourceIdentity() == old_pin->Identity());
+    on_gpu([&] {
+        renderer->scheduler.Finish();
+        std::scoped_lock lock{renderer->scheduler.submit_mutex};
+        if (renderer->device.GetLogical().WaitIdle() != VK_SUCCESS)
+            throw std::runtime_error("provenance trusted idle failed");
+        rasterizer.RetireControlledTransfersAfterDeviceIdle();
+    });
+    REQUIRE(delayed->ResourceIdentity() == nullptr);
+    REQUIRE(poll(delayed) == State::Unknown);
+    std::cout << "PASS checked write provenance: skipped intent, distinct actual submissions, "
+                 "repeated dirty interval, historical completion versus current snapshot, "
+                 "pending worker, independent replica, remap and retained old native allocation; "
+                 "no physical latest-writer authority\n";
+}
 } // namespace

@@ -11,6 +11,7 @@
 #include <thread>
 #include <utility>
 #include <queue>
+#include <vector>
 
 #include "common/alignment.h"
 #include "common/common_types.h"
@@ -47,6 +48,41 @@ public:
         u64 tick{};
     };
     using Submission = std::shared_ptr<CheckedSubmission>;
+
+    enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };
+    class CheckedWrite {
+        friend class Scheduler;
+    public:
+        const void* ResourceIdentity() const noexcept { return resources ? identity : nullptr; }
+        const void* SubmissionIdentity() const noexcept { return submission.get(); }
+        u64 Offset() const noexcept { return offset; }
+        u64 Size() const noexcept { return size; }
+        u64 IntentRevision() const noexcept { return intent_revision; }
+    private:
+        enum class Emission { Pending, Recorded, Skipped, Unknown };
+        CheckedWrite(std::shared_ptr<const void> resources_, const void* identity_, u64 offset_,
+                     u64 size_, u64 intent_revision_, std::shared_ptr<std::atomic_bool> owner_)
+            : resources{std::move(resources_)}, identity{identity_}, offset{offset_}, size{size_},
+              intent_revision{intent_revision_}, owner{std::move(owner_)} {}
+        std::shared_ptr<const void> resources;
+        const void* const identity;
+        const u64 offset, size, intent_revision;
+        const std::shared_ptr<std::atomic_bool> owner;
+        Submission submission;
+        std::atomic<Emission> emission{Emission::Pending};
+        bool retired{};
+    };
+    using Write = std::shared_ptr<CheckedWrite>;
+
+    // Explicit isolated producer only. Record and flush are inseparable: the returned
+    // identity is the submission containing this command, not a later timeline tick.
+    // The worker callback returns false only when it emitted no write commands.
+    [[nodiscard]] Write RecordCheckedWrite(std::shared_ptr<const void> resources,
+        const void* identity, u64 offset, u64 size, u64 intent_revision,
+        std::function<bool(vk::CommandBuffer)> command);
+    [[nodiscard]] WriteState PollCheckedWrite(const Write& write) const noexcept;
+    // Caller has joined producers and successfully waited for real device idle.
+    void RetireCheckedWritesAfterDeviceIdle();
 
     explicit Scheduler(const Device& device, StateTracker& state_tracker);
     ~Scheduler();
@@ -302,6 +338,7 @@ private:
 
     std::unique_ptr<CommandChunk> chunk;
     std::function<void()> on_submit;
+    std::vector<Write> checked_writes;
 
     State state;
 

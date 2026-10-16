@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -90,6 +91,63 @@ VkResult Scheduler::PollChecked(const Submission& submission) const noexcept {
     const auto result = submission->result.load(std::memory_order_acquire);
     if (result != VK_SUCCESS) return result;
     return master_semaphore->PollTimeline(submission->tick);
+}
+
+Scheduler::Write Scheduler::RecordCheckedWrite(std::shared_ptr<const void> resources,
+    const void* identity, u64 offset, u64 size, u64 intent_revision,
+    std::function<bool(vk::CommandBuffer)> command) {
+    if (!resources || !identity || !size || !intent_revision ||
+        size > std::numeric_limits<u64>::max() - offset ||
+        !command || !submission_owner->load(std::memory_order_acquire) ||
+        !device.HasTimelineSemaphore() || checked_writes.size() >= 256) return {};
+    auto write = Write{new CheckedWrite{std::move(resources), identity, offset, size,
+                                      intent_revision, submission_owner}};
+    checked_writes.push_back(write); // Retain before recording, including uncertain failures.
+    try {
+        Record([write, command = std::move(command)](vk::CommandBuffer cmdbuf) {
+            try {
+                const bool emitted = command(cmdbuf);
+                auto expected = CheckedWrite::Emission::Pending;
+                (void)write->emission.compare_exchange_strong(
+                    expected, emitted ? CheckedWrite::Emission::Recorded : CheckedWrite::Emission::Skipped,
+                    std::memory_order_release, std::memory_order_relaxed);
+            } catch (...) {
+                // A command may have emitted partial effects. Never replay it.
+                write->emission.store(CheckedWrite::Emission::Unknown, std::memory_order_release);
+            }
+        });
+        write->submission = FlushChecked();
+    } catch (...) {
+        write->emission.store(CheckedWrite::Emission::Unknown, std::memory_order_release);
+    }
+    return write;
+}
+
+Scheduler::WriteState Scheduler::PollCheckedWrite(const Write& write) const noexcept {
+    using Emission = CheckedWrite::Emission;
+    if (!write || write->owner != submission_owner || write->retired ||
+        !submission_owner->load(std::memory_order_acquire)) return WriteState::Unknown;
+    const auto emission = write->emission.load(std::memory_order_acquire);
+    if (emission == Emission::Unknown) return WriteState::Unknown;
+    const auto status = PollChecked(write->submission);
+    if (status != VK_SUCCESS && status != VK_NOT_READY) {
+        write->emission.store(Emission::Unknown, std::memory_order_release);
+        return WriteState::Unknown;
+    }
+    if (emission == Emission::Pending) return WriteState::Pending;
+    if (status != VK_SUCCESS) {
+        return write->submission && write->submission->result.load(std::memory_order_acquire) == VK_SUCCESS
+            ? WriteState::Submitted : WriteState::Pending;
+    }
+    return emission == Emission::Skipped ? WriteState::Skipped : WriteState::Complete;
+}
+
+void Scheduler::RetireCheckedWritesAfterDeviceIdle() {
+    for (const auto& write : checked_writes) {
+        write->retired = true;
+        write->resources.reset();
+    }
+    checked_writes.clear();
 }
 
 void Scheduler::Finish(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {

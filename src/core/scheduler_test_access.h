@@ -114,6 +114,22 @@ struct SchedulerTestAccess : SystemTestAccess {
         }
         rasterizer.scheduler.Finish();
     }
+    static Vulkan::Scheduler::Write CheckedOrdinaryFill(Vulkan::RasterizerVulkan& rasterizer,
+        DAddr address, u32 size, u32 value, std::function<bool()> emit = {}) {
+        auto& cache = Cache(rasterizer);
+        std::optional<Vulkan::StagedBufferPin> pin;
+        std::optional<u64> revision;
+        {
+            std::scoped_lock lock{cache.mutex};
+            auto [buffer, offset] = cache.ObtainCPUBuffer(address, size,
+                VideoCommon::ObtainBufferSynchronize::FullSynchronize,
+                VideoCommon::ObtainBufferOperation::MarkAsWritten);
+            pin = buffer->PinStagedRepresentation(offset, size);
+            revision = buffer->gpu_write_revision.Snapshot();
+        }
+        if (!pin || !revision) throw std::runtime_error("checked writer pin or intent unavailable");
+        return rasterizer.buffer_cache_runtime.ClearBufferChecked(std::move(*pin), *revision, value, std::move(emit));
+    }
     static void RetireOrdinary(Vulkan::RasterizerVulkan& rasterizer, DAddr address) {
         auto& cache = Cache(rasterizer);
         std::scoped_lock lock{cache.mutex};

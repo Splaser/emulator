@@ -57,6 +57,8 @@ add_test(NAME native_f3_witness COMMAND controlled_cpu_scheduler_tests "[f3]")
 set_tests_properties(native_f3_witness PROPERTIES TIMEOUT 30)
 add_test(NAME native_f3_transfer COMMAND controlled_cpu_scheduler_tests "[f3-transfer]")
 set_tests_properties(native_f3_transfer PROPERTIES TIMEOUT 30)
+add_test(NAME native_f3_provenance COMMAND controlled_cpu_scheduler_tests "[f3-provenance]")
+set_tests_properties(native_f3_provenance PROPERTIES TIMEOUT 30)
 
 if (CITRON_USE_PRECOMPILED_HEADERS)
     target_precompile_headers(tests PRIVATE precompiled_headers.h)
