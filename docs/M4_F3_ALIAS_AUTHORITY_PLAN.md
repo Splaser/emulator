@@ -4,6 +4,14 @@ This is the bounded follow-up design to the native witness, not a production fix
 or an activation certificate. F2 remains Open, restricted eligibility remains
 blocked, ordinary scalar routing and selective UMA zero-copy remain inactive.
 
+The [isolated admitted alias adapter](M4_F3_CONTROLLED_ALIAS_ADAPTER.md) is now
+implemented and verified at production source `642a71fb07` (full Linux/Android
+run `38903097142`), with test-only weak-owner follow-up `a415dea618` (Linux run
+`38903908981`). It captures per-operation physical/native association snapshots,
+rejects competing current dirty aliases, and performs checked exact staged copies.
+Persistent write-site provenance/latest-writer ownership and ordinary routing
+are still absent; the adapter does not close the original ordinary F3 witness.
+
 ## Observed defect and validation boundary
 
 At checkpoint `3a95a1e4fa`, a native Vulkan write of 99 through device address A
@@ -96,10 +104,13 @@ coordinator or replacement BufferCache.
 | Gather/scatter, texture/render targets, direct imports | Audit actual write publication and consumers; unknown alias coverage is not disjointness. Do not silently treat these paths as enrolled. |
 | Process teardown, frame return/reallocation, shared process mappings | Backing allocation lifetime is not frame-content lifetime. The allocator does not currently issue a general admission certificate; exact PAddr equality cannot rule out reuse/ABA. |
 
-Next native controls must cover alternating A/B writers, byte-disjoint writes
-within one page, merged/retired representations, concurrent remap while retaining
-an old pin, rejected submission and Unknown retention. Sequential remap and
-equivalent mapping-generation qualification are already covered. Full/partial
-baseline stale observations and original F2 remain
+The adapter now covers byte-disjoint reverse writers within one page, exact
+partial/full copies, third-alias/overlapping-writer refusal, pre-submit retirement,
+post-submit remap with retained old pins, Unknown reader quarantine and unrelated
+mapping-generation changes. Submission/counter/wait/invalidate/readback failures
+have an actual-body fault fixture; they are not real device-loss execution.
+Next native acceptance must cover choosing the correct latest version for
+overlapping alternating A/B writers, merge/GC authority transfer and frame reuse
+under actual production exclusion. Full/partial baseline stale observations and original F2 remain
 separate regressions. No game, hardware Vulkan, Android or NCE execution is
 claimed by the software Vulkan witness.

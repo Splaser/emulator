@@ -1,5 +1,30 @@
 # M3B production integration progress
 
+## M4 isolated admitted alias copy verified; ordinary F3 remains Open
+
+Production source `642a71fb07` passed full Linux/Android run
+[38903097142](https://github.com/Splaser/emulator/actions/runs/38903097142).
+Test-only weak native-payload retention/release checks at `a415dea618` passed
+complete Linux run [38903908981](https://github.com/Splaser/emulator/actions/runs/38903908981).
+The production sources/workflow are identical between those heads. The four CTest
+processes passed: 130 ordinary cases, 1708 scheduler assertions, 38 original F3
+assertions and 67 admitted-adapter assertions; the adapter also passed three extra
+native repetitions. All configured HostMemory/import, integration/lifecycle,
+mutation and new seven-mode alias transfer fault fixtures passed. Android compiled
+the actual arm64 production libraries remotely; no APK/device run is claimed.
+
+The adapter snapshots physical/resource associations and actual GPU dirty ranges,
+rejects overlapping dirty owners across all current DAddr aliases, parks under the
+existing backing range admission and verifies exact staged copies with checked
+Vulkan submission/readback. Dirty complements survive; pre-effect retirement
+refuses and post-submit remap retains Unknown/quarantines readers. The source stays
+dirty and no guest-backing copy or new ordinary route is introduced.
+
+This completes an isolated transfer component, not persistent producer versioning
+or ordinary F3 repair. F2/F3 remain Open and restricted eligibility remains blocked.
+Continue with the [adapter record](../../docs/M4_F3_CONTROLLED_ALIAS_ADAPTER.md)
+and [authority roadmap](../../docs/M4_F3_ALIAS_AUTHORITY_PLAN.md).
+
 ## M4 F3 native alias witness reproduced; production fix remains open
 
 Remote Linux run [38898475861](https://github.com/Splaser/emulator/actions/runs/38898475861)

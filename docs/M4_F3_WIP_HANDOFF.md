@@ -17,7 +17,7 @@ This is a continuation checkpoint, not M4 acceptance or a production F3 fix.
   Final remote validation is tracked below. **F3 is reproduced, not fixed.**
 - No local Android build was attempted; validation continues through remote workflow.
 
-## Last verified baseline
+## Initial verified baseline
 
 The checkpoint starts from `3462bbadcf`, previously pushed to both `main` and
 `codex/issue-372-fixes` (PR 375 source branch).
@@ -97,14 +97,16 @@ worker on an uncaught test exception.
 
 ## Resume roadmap
 
-1. Follow the [bounded authority implementation plan](M4_F3_ALIAS_AUTHORITY_PLAN.md):
-   associate staged payloads with physical geometry, publish exact GPU-written
-   subranges, resolve authoritative alias content under existing admission and
-   revalidate before effects. Preserve DAddr resource lookup and GPU dirty
-   complements. Do not widen activation or add a coordinator.
-2. Cover alternating alias writers, disjoint writes within one page, merge/GC,
-   concurrent remap/retirement, submission failure and Unknown retention. The
-   existing sequential retire-before-remap witness is not exhaustive.
+1. Extend the [bounded authority implementation plan](M4_F3_ALIAS_AUTHORITY_PLAN.md)
+   with persistent write-site physical/provenance metadata and latest-writer
+   subrange ownership. Reuse the now verified
+   [isolated alias adapter](M4_F3_CONTROLLED_ALIAS_ADAPTER.md) for qualified exact
+   copies. Its per-operation snapshots are not a general write-site version issuer.
+   Preserve DAddr lookup and GPU dirty complements; do not add a coordinator.
+2. Integrate overlapping alternating writers (currently refused), merge/GC
+   authority transfer and frame-reuse exclusion. The adapter already covers
+   disjoint reverse writes, source/target retirement and submitted remap Unknown;
+   native adapter success is not ordinary-path or allocator-lifetime acceptance.
 3. Preserve the original ordinary F3 negative witness and F2 defect. A manually
    driven copy adapter cannot count as an ordinary-path coherency fix. Only after
    the implementation exists may fixed-mode passing controls replace this gate.
@@ -144,6 +146,22 @@ worker on an uncaught test exception.
   invoking its compiled `f2 require-fixed` returned 1 as expected. This is fixture
   regression evidence, not native Vulkan or Android acceptance.
 
-Production coherency code has not changed in this continuation. The next source
-slice is the bounded representation/content authority plan linked above; automatic
-ordinary routing and general producer eligibility remain blocked.
+The witness-only continuation through `425de3055b` did not change production code.
+
+## Subsequent continuation: isolated staged alias copy verified
+
+Production source `642a71fb07` implements the explicit admitted alias-copy adapter;
+full run [38903097142](https://github.com/Splaser/emulator/actions/runs/38903097142)
+passed Linux and Android compilation. Linux passed the original 130 ordinary cases,
+1708 scheduler assertions, 38 F3 assertions and 67 new native adapter assertions,
+plus three extra adapter repetitions. Test-only weak-payload-owner checks at
+`a415dea618` passed full Linux run
+[38903908981](https://github.com/Splaser/emulator/actions/runs/38903908981), including
+the new exact-copy/failure/retention fixture and every existing integration/mutation
+regression. Production source/workflow differences between those heads are empty.
+
+See [adapter contract and evidence](M4_F3_CONTROLLED_ALIAS_ADAPTER.md) for exact
+scope, commands/cases, retained resources and Unknown behavior. The original ordinary
+F3/F2 negatives still reproduce; automatic ordinary routing, latest-writer authority
+and general producer eligibility remain blocked. Next development starts at the
+resume roadmap above, not by redoing the verified adapter.
