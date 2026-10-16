@@ -33,6 +33,7 @@ not permission to write a kernel frame after the process has returned it to its 
 | --- | --- | --- |
 | CPU preparation | Cold context/PTE snapshot and owned physical view; bounded owner registry | Before suspension; no GPU queue/fence wait |
 | Enqueue | One queue try-lock/TryEmplace | Queue acknowledgement is not acceptance or completion |
+| Preaccept buffer-readback exclusion | Current mapping try-guard, all coarse-footprint physical aliases, flush ranges and pending destination batches | Refuses before acceptance; no native wait or Memory visit. This excludes one producer family, not all production access |
 | Acceptance | One owner try-lock, CAS Prepared to Accepted, bounded strong identity retention | Races Close under the same lifetime gate; failure leaves an unaccepted request |
 | GPU continuation | Cache try-lock; one admission/preservation poll | Park/Pending returns and releases the cache; later ordinary commands can supply progress |
 | Mapping qualification | Device mapping try-guard against the immutable plan's epoch/generation | A contended/stale mapping refuses or quarantines; no blocking rewalk for requests |
@@ -99,6 +100,8 @@ regressions also passed. The earlier full native run passed at `202eb74500` in
 
 The [producer inventory](M3B_F2_PRODUCER_INVENTORY.md) records the paths that still require
 exclusion or enrollment before restricted application activation.
+The subsequent [restricted eligibility record](M3B_F2_RESTRICTED_ELIGIBILITY.md) documents the
+blocked ordinary-entry acceptance and the added readback/fencing-worker isolation slice.
 
 This acceptance covers the explicit controlled endpoint in the tested multicore topology.
 Automatic ARM/NCE game-memory routing, complete legacy producer exclusion, all alias-process

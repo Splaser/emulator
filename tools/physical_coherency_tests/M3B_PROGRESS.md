@@ -31,6 +31,16 @@ FenceManager owner/wait APIs observe failure without replay or false completion.
 FenceManager template passed ten host repetitions with native fence/cache/platform shims;
 GPU-stop tests cover the external-worker publication as well as a direct typed exception.
 This follow-up requires its own final remote run; the preceding workflow is superseded.
+Production source `3ebb655b97` passed native compilation, 130 production test cases and 1,708
+native scheduler/readback assertions (0.83 seconds) in
+[38870993595](https://github.com/Splaser/emulator/actions/runs/38870993595). Its downloaded CTest
+log is retained locally. The full Linux job failed later in the old renderer-worker extraction
+fixture, which omitted the new conflict type/state/GPU notifier. That fixture is now updated
+and passed locally along with ten complete FenceManager repetitions. Final-source host
+pipeline cases and all controls 82-90/92-95 also passed three repetitions. The Android job
+continues against this exact production source; only fixture/workflow/documentation changes
+follow it. A scoped Linux-only rerun validates those changes without cancelling that Android
+job or implying Android source changes. The final remote results still need recording.
 
 ## Native guest scheduler acceptance: final lifecycle hardening passed
 
