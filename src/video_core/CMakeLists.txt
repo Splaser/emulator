@@ -12,6 +12,7 @@ endif()
 add_library(video_core STATIC
     arm64_register_guard.h
     buffer_cache/buffer_base.h
+    buffer_cache/gpu_write_revision.h
     buffer_cache/buffer_cache_base.h
     buffer_cache/controlled_transfer.h
     buffer_cache/physical_alias_copy.h

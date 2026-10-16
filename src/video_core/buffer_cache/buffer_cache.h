@@ -1138,6 +1138,7 @@ bool BufferCache<P>::DMACopyImpl(GPUVAddr src_address, GPUVAddr dest_address, u6
     const auto& copy = copies[0];
     MarkGpuUse(src_buffer, copy.src_offset, copy.size);
     MarkGpuUse(dest_buffer, copy.dst_offset, copy.size);
+    dest_buffer.gpu_write_revision.Mark();
     runtime.CopyBuffer(dest_buffer, src_buffer, copies, true);
     NotifyGatherWrite(*cpu_dest_address, amount);
     if (has_new_downloads) {
@@ -1359,6 +1360,7 @@ bool BufferCache<P>::DMAClear(GPUVAddr dst_address, u64 amount, u32 value) {
     Buffer& dest_buffer = slot_buffers[buffer];
     const u32 offset = dest_buffer.Offset(*cpu_dst_address);
     MarkGpuUse(dest_buffer, offset, size);
+    dest_buffer.gpu_write_revision.Mark();
     runtime.ClearBuffer(dest_buffer, offset, size, value);
     NotifyGatherWrite(*cpu_dst_address, size);
     return true;
@@ -1390,7 +1392,7 @@ bool BufferCache<P>::HasUniqueAliasSource(DAddr source, const Tegra::PhysicalAcc
 }
 
 template <class P>
-std::optional<std::vector<AliasWrittenRange>> BufferCache<P>::SnapshotAliasWrites(
+std::optional<AliasWriteSnapshot> BufferCache<P>::SnapshotAliasWrites(
     DAddr address, u64 size) {
     if (!size || !IsRegionPageTableAddressable(address, size) || scatter_busy ||
         !async_downloads.Empty() || !pending_downloads.empty() ||
@@ -1400,13 +1402,20 @@ std::optional<std::vector<AliasWrittenRange>> BufferCache<P>::SnapshotAliasWrite
             return item.second.scatter_pending;
         }) || memory_tracker.IsRegionCpuModified(address, size)) return std::nullopt;
     CheckControlledSynchronization(address, size);
+    const auto id = GetPageBufferId(address >> CACHING_PAGEBITS);
+    if (!id || id == NULL_BUFFER_ID) return std::nullopt;
+    const auto& buffer = slot_buffers[id];
+    if (address < buffer.CpuAddr() || address - buffer.CpuAddr() >= buffer.SizeBytes() ||
+        size > buffer.SizeBytes() - (address - buffer.CpuAddr())) return std::nullopt;
+    const auto revision = buffer.gpu_write_revision.Snapshot();
+    if (!revision) return std::nullopt;
     std::vector<AliasWrittenRange> ranges;
     gpu_modified_ranges.ForEachInRange(address, size, [&](DAddr begin, DAddr end) {
         if (ranges.size() <= Common::PhysicalRangeAdmission::MaxAccesses)
             ranges.push_back({begin - address, end - begin});
     });
     if (ranges.size() > Common::PhysicalRangeAdmission::MaxAccesses) return std::nullopt;
-    return ranges;
+    return AliasWriteSnapshot{std::move(ranges), *revision};
 }
 
 template <class P>
@@ -2740,6 +2749,7 @@ void BufferCache<P>::UpdateComputeTextureBuffers() {
 
 template <class P>
 void BufferCache<P>::MarkWrittenBuffer(BufferId buffer_id, DAddr device_addr, u32 size) {
+    slot_buffers[buffer_id].gpu_write_revision.Mark();
     NotifyGatherWrite(device_addr, size, 2); // the write happens after this bind
     memory_tracker.MarkRegionAsGpuModified(device_addr, size);
     gpu_modified_ranges.Add(device_addr, size);
@@ -4101,6 +4111,7 @@ void BufferCache<P>::ScatterGatherEntry(GPUVAddr gpu_addr, GatherEntry& entry) {
             .size = chunk.size,
         }};
         MarkGpuUse(dst, copies[0].dst_offset, chunk.size);
+        dst.gpu_write_revision.Mark();
         if (!IsDirectGuest(scratch) || !IsDirectGuest(dst)) {
             // A staged mirror introduced after binding still needs refreshed bytes;
             // directly shared destinations already see the same payload.

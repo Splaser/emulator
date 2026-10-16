@@ -34,6 +34,7 @@ head = r'''
 
 #include "video_core/buffer_cache/direct_guest_mapping.h"
 #include "video_core/buffer_cache/gather_alias.h"
+#include "video_core/buffer_cache/gpu_write_revision.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -132,6 +133,7 @@ struct Bytes {
 };
 struct Runtime;
 struct FakeBuffer {
+    VideoCommon::GpuWriteRevision gpu_write_revision;
     static inline bool fail_next = false;
     DAddr base = 0;
     std::vector<u64> page_gpu_tick;
@@ -793,6 +795,8 @@ int main() {
     check(allocation_failed && growth.gather_buffers.at(64).buffer.get() == old_buffer &&
               growth.gather_used_memory == old_bytes,
           "allocation failure retains previous scratch and memory accounting");
+    const auto scatter_dst = growth.FindBuffer(1008, 4);
+    const auto scatter_revision = growth.slot_buffers[scatter_dst].gpu_write_revision.Snapshot();
     growth.pending_gather_writes = {64};
     growth.FlushGatherWrites();
     growth.runtime.fail_copy = true;
@@ -804,6 +808,8 @@ int main() {
     }
     check(copy_failed && !growth.scatter_busy && growth.gather_buffers.at(64).scatter_pending,
           "failed scatter preserves pending writes and releases recursion guard");
+    check(growth.slot_buffers[scatter_dst].gpu_write_revision.Snapshot() != scatter_revision,
+          "failed scatter changes destination write intent before uncertain copy effects");
     growth.ResolveScatter(0, 0);
     check(!growth.gather_buffers.at(64).scatter_pending, "failed scatter can be retried");
     check(DynamicDescriptorCount(512, 3, 32) == 32,

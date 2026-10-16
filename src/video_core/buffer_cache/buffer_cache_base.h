@@ -392,8 +392,8 @@ public:
         -> decltype(std::declval<const B&>().PinStagedRepresentation(u64{}, u64{}));
 
     /// Explicit isolated alias adapter only; caller holds mutex on the GPU owner.
-    /// Snapshots actual dirty subranges, without consuming uploads or changing trackers.
-    [[nodiscard]] std::optional<std::vector<AliasWrittenRange>> SnapshotAliasWrites(
+    /// Snapshots dirty subranges and resource write intent, without consuming uploads.
+    [[nodiscard]] std::optional<AliasWriteSnapshot> SnapshotAliasWrites(
         DAddr address, u64 size);
     [[nodiscard]] bool HasUniqueAliasSource(DAddr source, const Tegra::PhysicalAccessPlan& plan,
                                           std::span<const AliasCopyRange> copies);

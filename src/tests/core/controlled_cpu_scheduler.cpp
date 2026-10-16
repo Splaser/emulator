@@ -826,6 +826,15 @@ TEST_CASE("Admitted staged alias adapter copies exact physical dirty intersectio
     });
     REQUIRE_FALSE(begin(A, A));
     REQUIRE_FALSE(begin(A, D)); // Different physical backing must not copy by DAddr shape.
+    auto rewritten_target = begin(A, B);
+    REQUIRE(rewritten_target);
+    // Same target bytes and dirty shape, but a distinct producer intent. A
+    // resource-wide revision conservatively rejects even this disjoint change.
+    on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, B + 512, 256, 0x58585858); });
+    finish(rewritten_target, Phase::Refused);
+    auto target_before_copy = std::vector<u8>(Page, 10);
+    std::fill(target_before_copy.begin() + 512, target_before_copy.begin() + 768, u8{88});
+    REQUIRE(read(B) == target_before_copy);
     auto plan = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, A, Page);
     REQUIRE(plan);
     auto domain = plan->Segments().front().storage.Epoch()->ranges;
@@ -861,12 +870,10 @@ TEST_CASE("Admitted staged alias adapter copies exact physical dirty intersectio
     on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, C, Page, 0x42424242); });
     auto rewritten_source = begin(C, A + Page);
     REQUIRE(rewritten_source);
-    // Repeating exactly the dirty interval preserves its RangeSet geometry. The
-    // original adapter accepts this different write despite its prepared snapshot.
+    // Repeating exactly the dirty interval preserves its RangeSet geometry.
     on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, C, Page, 0x37373737); });
-    finish(rewritten_source, Phase::Complete);
-    REQUIRE(read(A + Page) == std::vector<u8>(Page, 55));
-    std::cout << "REPRODUCED alias write-intent ABA: identical dirty geometry accepted a new source write\n";
+    finish(rewritten_source, Phase::Refused);
+    REQUIRE(read(A + Page) == std::vector<u8>(Page, 10));
     on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, C, Page, 0x42424242); });
     auto full = begin(C, A + Page);
     REQUIRE(full);
@@ -891,6 +898,29 @@ TEST_CASE("Admitted staged alias adapter copies exact physical dirty intersectio
     on_gpu([&] { Access::RetireOrdinary(rasterizer, C); });
     finish(retired_source, Phase::Refused);
     REQUIRE(read(B + Page) == std::vector<u8>(Page, 10));
+
+    (void)read(D + Page);
+    (void)read(E + Page);
+    on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, D + Page, Page, 0x2c2c2c2c); });
+    std::shared_ptr<Vulkan::ControlledAliasCopy> submitted_rewrite;
+    on_gpu([&] {
+        submitted_rewrite = rasterizer.BeginControlledAliasCopy(D + Page, E + Page, Page);
+    });
+    REQUIRE(submitted_rewrite);
+    REQUIRE(poll(submitted_rewrite) == Phase::Submitted);
+    // Queue ordering and Finish complete the old copy/readbacks before this new
+    // same-interval write finishes. Matching readbacks alone must not accept it.
+    on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, D + Page, Page, 0x4d4d4d4d); });
+    finish(submitted_rewrite, Phase::Unknown);
+    REQUIRE(read(D + Page) == std::vector<u8>(Page, 77));
+    REQUIRE(read(E + Page) == std::vector<u8>(Page, 44));
+    auto rewritten_plan = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, D + Page, Page);
+    REQUIRE(rewritten_plan);
+    const std::array rewritten_range{Admission::Access{
+        rewritten_plan->Segments().front().storage.PhysicalOffset(), Page, Admission::Mode::Read}};
+    auto rewritten_reader = domain->Enqueue(rewritten_range, std::make_shared<int>(4));
+    REQUIRE(domain->TryStart(rewritten_reader) == Admission::Start::Park);
+    REQUIRE(domain->Cancel(rewritten_reader));
 
     (void)read(E);
     on_gpu([&] { Access::WriteOrdinaryGpu(rasterizer, D, Page, 0x2c2c2c2c); });
@@ -923,6 +953,7 @@ TEST_CASE("Admitted staged alias adapter copies exact physical dirty intersectio
         rasterizer.RetireControlledTransfersAfterDeviceIdle();
     });
     REQUIRE(poll(remapped) == Phase::Unknown); // Trusted idle alone does not forgive Unknown.
+    REQUIRE(poll(submitted_rewrite) == Phase::Unknown);
     std::cout << "PASS admitted alias adapter: exact partial/full physical copies, dirty complements, "
                  "parking, disjoint reverse write, overlapping-writer refusal, retained retirement, "
                  "remap Unknown and quarantine; ordinary F3 remains Open\n";

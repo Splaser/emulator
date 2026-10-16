@@ -61,7 +61,8 @@ struct ControlledAliasCopy {
     const std::shared_ptr<const u8> owner;
     const DAddr source, destination;
     const u32 size;
-    const std::vector<VideoCommon::AliasWrittenRange> written;
+    const VideoCommon::AliasWriteSnapshot written;
+    const u64 target_revision;
     const std::vector<VideoCommon::AliasCopyRange> copies;
     const std::shared_ptr<Owners> owners;
     const std::shared_ptr<Common::PhysicalRangeAdmission> domain;
@@ -83,7 +84,7 @@ std::shared_ptr<ControlledAliasCopy> RasterizerVulkan::BeginControlledAliasCopy(
     auto to = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, destination, size);
     if (!from || !to || from->DeviceEpoch() != to->DeviceEpoch()) return {};
     std::optional<StagedBufferPin> source_pin, destination_pin;
-    std::optional<std::vector<VideoCommon::AliasWrittenRange>> written, target_written;
+    std::optional<VideoCommon::AliasWriteSnapshot> written, target_written;
     try {
         std::unique_lock lock{buffer_cache.mutex, std::try_to_lock};
         if (!lock.owns_lock()) return {};
@@ -93,14 +94,14 @@ std::shared_ptr<ControlledAliasCopy> RasterizerVulkan::BeginControlledAliasCopy(
         target_written = buffer_cache.SnapshotAliasWrites(destination, size);
     } catch (...) { return {}; }
     if (!source_pin || !destination_pin || !written || !target_written) return {};
-    const auto copies = VideoCommon::BuildPhysicalAliasCopies(*from, *to, *written);
+    const auto copies = VideoCommon::BuildPhysicalAliasCopies(*from, *to, written->ranges);
     if (!copies) return {};
     {
         std::unique_lock lock{buffer_cache.mutex, std::try_to_lock};
         if (!lock.owns_lock() || !buffer_cache.HasUniqueAliasSource(source, *from, *copies)) return {};
     }
     for (const auto& copy : *copies)
-        for (const auto& dirty : *target_written)
+        for (const auto& dirty : target_written->ranges)
             if (copy.destination_offset < dirty.offset + dirty.size &&
                 dirty.offset < copy.destination_offset + copy.size) return {};
     // Dedicated readback allocation is also outside cache/PTE locks. Only the
@@ -112,7 +113,8 @@ std::shared_ptr<ControlledAliasCopy> RasterizerVulkan::BeginControlledAliasCopy(
     auto owners = std::make_shared<ControlledAliasCopy::Owners>(
         ControlledAliasCopy::Owners{std::move(*from), std::move(*to), std::move(transfer)});
     auto op = std::make_shared<ControlledAliasCopy>(ControlledAliasCopy{
-        controlled_alias_owner, source, destination, size, std::move(*written), *copies,
+        controlled_alias_owner, source, destination, size, std::move(*written),
+        target_written->revision, *copies,
         std::move(owners), domain, {}, ControlledAliasPhase::Refused});
     std::vector<Common::PhysicalRangeAdmission::Access> accesses;
     for (const auto& copy : op->copies)
@@ -150,9 +152,10 @@ ControlledAliasPhase RasterizerVulkan::PollControlledAliasCopy(
         const auto writes = buffer_cache.SnapshotAliasWrites(op->source, op->size);
         const auto target_writes = buffer_cache.SnapshotAliasWrites(op->destination, op->size);
         if (!writes || *writes != op->written || !target_writes ||
+            target_writes->revision != op->target_revision ||
             !buffer_cache.HasUniqueAliasSource(op->source, op->owners->source, op->copies)) return false;
         for (const auto& copy : op->copies)
-            for (const auto& dirty : *target_writes)
+            for (const auto& dirty : target_writes->ranges)
                 if (copy.destination_offset < dirty.offset + dirty.size &&
                     dirty.offset < copy.destination_offset + copy.size) return false;
         return true;

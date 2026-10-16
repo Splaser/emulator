@@ -14,6 +14,11 @@ struct AliasWrittenRange {
     u64 offset, size;
     bool operator==(const AliasWrittenRange&) const = default;
 };
+struct AliasWriteSnapshot {
+    std::vector<AliasWrittenRange> ranges;
+    u64 revision;
+    bool operator==(const AliasWriteSnapshot&) const = default;
+};
 struct AliasCopyRange {
     u64 source_offset, destination_offset, size, physical_offset;
     bool operator==(const AliasCopyRange&) const = default;
