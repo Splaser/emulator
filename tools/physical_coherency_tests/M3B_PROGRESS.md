@@ -1,5 +1,27 @@
 # M3B production integration progress
 
+## Isolated submission-linked write provenance
+
+Full [Linux/Android run 38984914456](https://github.com/Splaser/emulator/actions/runs/38984914456)
+passed at `102b0486f7`: five CTest processes, 53 provenance assertions in CTest and
+each of three extra native processes, all configured integration/lifecycle/fault
+gates, preserved F2/F3 fixed-mode negatives and real Android arm64 production
+library compilation. The Draw guard case uses extracted actual worker code with
+fake pipeline/Vulkan dispatch; it is not a native storage-binding/shader test.
+Source stamps, generated fixtures and job output are retained under
+`.diagnostics/ci-38984914456/`.
+
+`102b0486f7` (initial implementation `64c59e9208`) links an explicit staged fill
+to native resource/byte footprint,
+resource-local intent and a real CheckedSubmission. It distinguishes worker
+pending, actual queue acceptance, skipped/no-write commands, checked completion and
+sticky Unknown. Completed old submissions never certify a remapped allocation or
+order physical replicas. Scheduler retains accepted payloads until the existing
+trusted device-idle retirement boundary. Ordinary shader/alias consumer routing
+and physical latest-writer authority remain unimplemented. F2/F3 remain Open and
+restricted eligibility remains blocked. See the
+[provenance record](../../docs/M4_F3_SUBMISSION_PROVENANCE.md).
+
 ## Resource write-intent revision follow-up
 
 Full Linux/Android run [38907387312](https://github.com/Splaser/emulator/actions/runs/38907387312)

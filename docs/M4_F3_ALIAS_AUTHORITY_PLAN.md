@@ -17,6 +17,12 @@ revision, rejecting same-dirty-shape rewrites between preparation and completion
 It does not establish a queue/submission content version or physical latest-writer
 ownership. See the [revision boundary](M4_F3_CONTROLLED_ALIAS_ADAPTER.md#resource-write-intent-revisions).
 
+The [submission-provenance slice](M4_F3_SUBMISSION_PROVENANCE.md) then links explicit
+isolated staged fills to a real CheckedSubmission, native owner/footprint and
+intent revision. It distinguishes queue acceptance from device completion and
+skipped worker commands from completed writes. Ordinary shader enrollment and
+physical latest-writer authority remain separate, unimplemented gates.
+
 ## Observed defect and validation boundary
 
 At checkpoint `3a95a1e4fa`, a native Vulkan write of 99 through device address A

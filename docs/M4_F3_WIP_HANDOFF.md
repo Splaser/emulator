@@ -6,6 +6,23 @@ This is a continuation checkpoint, not M4 acceptance or a production F3 fix.
 
 ## Status and constraints
 
+- Submission-provenance source `102b0486f7` (initial implementation `64c59e9208`)
+  introduces only an explicit isolated
+  staged fill linked to actual native owner/footprint, local intent and checked
+  submission. Pending, Submitted, Skipped, Complete and Unknown are distinct;
+  historical completion does not certify a still-current physical representation.
+  See the [provenance boundary and tests](M4_F3_SUBMISSION_PROVENANCE.md). Ordinary
+  shaders/alias consumers are not switched to this API and no latest-writer
+  authority is published. Verification results are recorded in that document.
+  Full [Linux/Android run 38984914456](https://github.com/Splaser/emulator/actions/runs/38984914456)
+  passed at `102b0486f7`: five CTest processes, 53 provenance assertions in CTest
+  and each of three extra processes, unchanged original F2/F3 negative controls,
+  all configured integration/lifecycle/fault gates and actual Android arm64
+  core/video/shader compilation. The failed-pipeline Draw guard remains an
+  actual-body fixture, not native shader/binding execution. Evidence is retained
+  under `.diagnostics/ci-38984914456/`. No physical content authority, general
+  draw/dispatch provenance or ordinary F3 repair is certified.
+
 - Write-intent follow-up `d8764c0cf0` records resource-local GPU write revisions at
   ordinary write marking, staged DMA copy/clear and scatter destinations. The
   isolated adapter rejects pre-submit source/target rewrites even when dirty

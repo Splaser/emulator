@@ -165,6 +165,12 @@ sources or workflow and does not require rerunning these same validations.
 
 ## Remaining work
 
+The next increment provides [isolated submission-linked write provenance](M4_F3_SUBMISSION_PROVENANCE.md)
+for explicit staged fills, with distinct Pending/Submitted/Skipped/Complete/Unknown
+states and actual native resource/intent/footprint identity. It does not switch
+this adapter or ordinary shaders to that evidence, publish physical authority or
+close any exclusion blocker. General draw/dispatch integration remains a gate.
+
 Attach physical/content provenance at actual staged producer publication, integrate
 latest-writer subrange ownership across overlapping aliases, merge/GC and mapping
 changes, then integrate ordinary consumers. A snapshot taken by this isolated adapter
