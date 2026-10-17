@@ -1,5 +1,9 @@
 # M4 F3: opt-in ordinary storage write observation
 
+The subsequent [immutable physical provenance slice](M4_F3_IMMUTABLE_PHYSICAL_PROVENANCE.md)
+adds allocation-origin identity and shared closed-scope coverage. The original
+observer evidence below predates that extension; neither slice grants authority.
+
 This extends the [isolated provenance slice](M4_F3_SUBMISSION_PROVENANCE.md)
 with a bounded diagnostic observer on ordinary Vulkan Draw, all three indirect
 Draw variants, and direct/indirect compute dispatch. Observation is disabled by

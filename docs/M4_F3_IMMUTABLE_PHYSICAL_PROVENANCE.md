@@ -22,6 +22,14 @@ identity with today's mapping. The immutable slice is attached to the same
 CheckedWrite that retains the actual native payload and actual submission.
 Completion never resolves DAddr again.
 
+Origin qualification also requires the original device mapping generation. Equal
+current geometry alone cannot exclude an intervening remap/restore while staged
+contents were initialized. An unrelated generation change is conservatively
+incomplete too; this slice does not prove per-range mapping stability. The existing
+mapping stamp is compared for equality only, never used as a content version or
+write ordering. A geometry-only comparison is diagnostic and cannot qualify a
+representation origin.
+
 Allocations predating observation have no origin and stay unqualified. Scratch,
 direct/imported buffers, holes, oversized/unknown footprints and representation
 identity mismatches also make capture incomplete. Cache JoinOverlap explicitly
@@ -101,3 +109,69 @@ memory dependencies, cross-queue semaphore relationships, transfer/shader access
 dependencies and partial interval coverage must be established explicitly. Do not
 replace those proofs with a global content_version, resource revision ordering or
 the largest submission ID. Latest-writer authority is a later, separate step.
+
+## Verification record
+
+Final production source is `84d004b270`; `52560e5ec9` changes only the native
+scheduler test's pre-enqueue setup. The complete
+[Linux run 38998481678](https://github.com/Splaser/emulator/actions/runs/38998481678)
+passed all five CTest processes: 130 ordinary cases, 1708 original scheduler
+assertions, 38 original F3 assertions, 88 isolated alias assertions and 105 physical
+provenance assertions. Three additional provenance processes each passed all 105
+assertions. Original F3/alias repetitions and every configured HostMemory/import,
+coherency/lifecycle and mutation gate passed. F3 fixed mode retained exactly two
+known alias failures (36 passing assertions), exit 42; F2 remained backing 77/cache
+10 and require-fixed exited 1.
+
+The [Android native job](https://github.com/Splaser/emulator/actions/runs/38997972989/job/117294620935)
+passed actual arm64 core/video/shader library compilation with CPM/NDK 29 on
+`84d004b270`. It is library compilation, not APK or target-device/game execution.
+That full run's Linux job failed the old scheduler fixture's single-attempt enqueue
+assertion; it is not described as an entirely passing run. Production/workflow
+sources are identical between the Android-tested source and the final Linux head.
+The final documentation follow-up changes no production/test code or workflow.
+
+| Required association | Evidence |
+| --- | --- |
+| Stable staged allocation / physical pages | Native actual device mappings, native identity/offset/length checks and checked fill/readback. |
+| Remap after actual queue acceptance | Native old geometry and old native bytes retained; strict current-map validation rejects the changed mapping. Completion exposes only the old association. |
+| Two DAddr aliases to one backing | Native shared backing/physical overlap with distinct staged identities and different retained bytes; no revision-based source choice. |
+| Unknown mapping / representation | Actual-body pre-observation, hole, generation change/restore, mismatched and invalidated origins reject association and invalidate shared scope coverage. |
+
+The deterministic device-loss fixture checks the actual ordinary exception result,
+device-loss reporting, Unknown, absence of successful timeline/device effects and
+refusal by the physical history gate. The overflow case executes all 257 Draw
+callbacks once, retains 256 metadata records and refuses the entire prefix after
+scope invalidation. The extra mutation removes the actual coverage check and
+fails precisely the overflowing-prefix CompletedPhysicalIdentity assertion.
+
+Validation corrections are retained, not counted as passing intermediate runs:
+
+- [38996500093](https://github.com/Splaser/emulator/actions/runs/38996500093)
+  passed native 104-assertion provenance at `6c639e4108`, then found the concrete
+  gather Runtime's missing merge-invalidation hook (-Wtemplate-body). `63bfe2448d`
+  adds that fixture hook and checks actual JoinOverlap invocation without weakening
+  source warnings or the original data assertions.
+- [38996898419](https://github.com/Splaser/emulator/actions/runs/38996898419)
+  passed F2, then exposed the representation pin extraction's missing actual
+  identity header. `a191a7d7c2` adds the include/hash; resource-retention,
+  non-owning-pin and missing-seal controls passed locally and in final CI.
+- Actual-header generation-change testing reproduced acceptance of equal final
+  geometry with different mapping history. `84d004b270` requires the original
+  generation; the same control and actual-body fixture then passed. Obsolete
+  pending checks were cancelled and are not acceptance evidence.
+- The original scheduler suite in the Android source run encountered a permitted
+  TryQueueCpuWrite try-lock refusal while filling its 64 owner slots. `52560e5ec9`
+  retries only the no-effect transport boundary within the existing Until deadline.
+  It does not retry admitted CPU requests or alter production queue behavior, and
+  retains the exact 64-slot cancellation assertion. Final native scheduler and
+  physical provenance checks all passed.
+
+Exact final Linux source stamp, per-process native logs, generated fixtures,
+extraction hashes, expected coverage-negative log and full job output are retained
+in `.diagnostics/ci-38998481678/`. Android configuration and complete job output are
+in `.diagnostics/ci-38997972989/`, including its original scheduler failure.
+Earlier first-error logs are in `.diagnostics/ci-38996500093/` and
+`.diagnostics/ci-38996898419/`. Windows actual-body controls and the mapping-history
+red/green control remain separate fixture evidence; remote native acceptance belongs
+to the exact sources above. No local Android compilation was used.

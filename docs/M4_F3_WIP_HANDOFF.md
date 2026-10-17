@@ -222,3 +222,31 @@ latest-writer publisher. Do not infer authority from Complete, maximum revision 
 submission identity. Actual shader/game execution, merge/GC and mapping/frame reuse
 remain separate acceptance gates. F2/F3 remain Open, restricted eligibility remains
 blocked, and ordinary Memory::Write/UMA routing remains inactive.
+
+## Subsequent continuation: immutable physical identity before authority
+
+The [immutable physical provenance contract](M4_F3_IMMUTABLE_PHYSICAL_PROVENANCE.md)
+supersedes the earlier observer's lack of physical identity. Allocation origins
+are captured once from real device PTE snapshots; exact binding slices retain
+GuestBackingEpoch/physical geometry and native identity. Existing, merged,
+ambiguous or mapping-generation-changed resources remain incomplete. Completion
+never re-resolves a current DAddr or chooses a writer by revision/submission ID.
+
+Shared coverage is Open until the GPU owner explicitly closes the observation
+scope. Any capture failure/overflow invalidates every retained event in the scope;
+sealing cannot repair it. CompletedPhysicalIdentity requires checked Complete,
+closed complete coverage and live identity epochs. It exposes historical identity
+only, with no backing pointer/storage ownership or content authority.
+
+Production source is `84d004b270`; the native test setup follow-up `52560e5ec9`
+changes only pre-enqueue retry behavior in the existing scheduler fixture. Native
+physical provenance now has 105 assertions. Validation/failures and exact source
+relationships are recorded in the contract; use those results rather than inferring
+acceptance from an intermediate run's partial success.
+
+Next stage remains real synchronization relationships: same-queue execution/memory
+dependencies, cross-queue semaphore relationships, transfer/shader dependencies and
+partial intervals. Do not start latest-writer publication from these identity
+records. Real storage pins/admission, complete producer enrollment, mapping/frame
+reuse and merge/GC ownership are still required before content authority. F2/F3
+remain Open; restricted eligibility and ordinary Memory::Write/UMA stay blocked.
