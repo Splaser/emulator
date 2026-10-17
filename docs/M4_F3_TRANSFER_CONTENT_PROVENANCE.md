@@ -123,6 +123,39 @@ promotion, refuses cross-submission root imports and rejects the current-mapping
 gate after remap. These are controlled transfers, not real shader/game execution
 or target-device acceptance. Android is compiled only through the GitHub workflow.
 
+## Verification record
+
+Final production/test source `4a3f9a6aba` passed the complete
+[workflow 39012415113](https://github.com/Splaser/emulator/actions/runs/39012415113).
+Both Linux production and Android native jobs succeeded. All five Linux CTest
+processes passed: 130 ordinary cases, 1708 scheduler assertions, 38 original F3
+assertions, 88 isolated alias assertions and 149 native provenance assertions.
+Three additional native provenance processes each passed all 149 assertions.
+
+The actual-body fixture passed all 23 content cases, the earlier sync cases and
+all 14 expected mutation failures (nine content, five synchronization). The
+independent byte oracle passed all 512 command prefixes. The combined registration,
+ordinary Draw/Dispatch, coherency/lifecycle and ownership regressions also passed.
+F3 require-fixed still produced exactly two alias failures, 36 passing assertions
+and exit 42. F2 still reported backing 77/cache 10 and require-fixed exited 1.
+
+Android compiled actual arm64 core/video/shader libraries through CPM/NDK 29.
+It is library compilation, not APK, shader/game or target-device acceptance. No
+local Android compilation was performed.
+
+The initial `f682e086e9` workflow
+[39012197470](https://github.com/Splaser/emulator/actions/runs/39012197470) was
+cancelled when the deterministic pre-submit retirement control exposed a resource
+retention gap. It is superseded, not acceptance evidence. `4a3f9a6aba` adds the
+queue-attempt/result guard and its regression before the final full validation.
+
+Downloaded source stamp, full job logs, LastTest.log, generated actual-body inputs,
+hash manifests and separate expected-failure logs are retained under
+`.diagnostics/ci-39012415113/`. CI extraction input hashes match the committed Git
+blobs (Windows working-tree CRLF bytes are not compared to Linux LF bytes).
+The final handoff follow-up changes only documentation and does not repeat the
+same production validation.
+
 ## Next boundary
 
 Do not start physical latest-writer publication from this slice. Broader producer

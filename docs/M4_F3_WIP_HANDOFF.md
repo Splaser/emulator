@@ -275,7 +275,17 @@ bytes are Unknown; previous submissions and shader bindings cannot seed roots.
 The mapping gate refuses remap/dead origins. No ordinary caller routing, automatic
 replica synchronization or physical latest-writer publication is added.
 
-The actual-body fixture passes completion/partial-copy/remap/pin-lifetime controls
-and nine expected content mutation failures, alongside the five earlier sync
-mutations. Exact native transfer/readback and Android production library validation
-must be read from the new workflow source, not inferred from the previous run.
+Final source `4a3f9a6aba` passed complete
+[workflow 39012415113](https://github.com/Splaser/emulator/actions/runs/39012415113):
+all five Linux CTest processes, native provenance 149 assertions plus three repeat
+processes, 23 actual-body content cases, nine content/five sync mutation failures,
+512 byte-oracle prefixes, full coherency/lifecycle regressions and actual Android
+arm64 production library compilation. No APK/device/game acceptance is claimed.
+
+The pre-submit negative reproduced early pin retirement after command recording
+but before its queued Submit callback. The final source guards queue attempt/result
+as well as host callback completion; unattempted host failures remain quarantined.
+The initial `f682e086e9` run was cancelled/superseded, not accepted. Artifacts and
+source-hash correspondence are recorded in the transfer contract. Original F3
+require-fixed still fails exactly two aliases (exit 42); F2 remains backing 77/cache
+10. Cross-submission/queue roots stay Unknown; no latest-writer authority is added.
