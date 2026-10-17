@@ -4,7 +4,7 @@ void TestTransferContent() {
     using Plan = Vulkan::TransferContent;
     using Kind = Plan::Kind;
     using State = Scheduler::WriteState;
-    for (int mode = 0; mode < 45; ++mode) {
+    for (int mode = 0; mode < 46; ++mode) {
         auto s = std::make_unique<Scenario>();
         Vulkan::StorageObserverHarness observation{s->scheduler, s->runtime};
         std::array<std::unique_ptr<Vulkan::Buffer>, 3> buffers;
@@ -189,6 +189,12 @@ void TestTransferContent() {
             const auto range = [&](size_t buffer, u64 begin, u64 length) {
                 return s->scheduler.CurrentTransferContentRange(transfer, s->runtime.test_mapping, buffer, begin, length);
             };
+            if (mode == 45) {
+                const VkMemoryBarrier memory{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
+                    VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT};
+                s->scheduler.RecordProvenanceBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, memory);
+            }
             const bool unknown = mode == 36;
             const bool disjoint = mode == 37 || mode == 38 || mode == 44;
             assert(bool(range(1, 0, 16)) == !unknown); // Before execution/submit: intent cancellation already applies.

@@ -927,10 +927,8 @@ void BufferCacheRuntime::PreCopyBarrier() {
         .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
     };
     scheduler.RequestOutsideRenderPassOperationContext();
-    scheduler.Record([](vk::CommandBuffer cmdbuf) {
-        cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                               0, READ_BARRIER);
-    });
+    scheduler.RecordProvenanceBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                      READ_BARRIER);
 }
 
 void BufferCacheRuntime::PostCopyBarrier() {
@@ -941,10 +939,8 @@ void BufferCacheRuntime::PostCopyBarrier() {
         .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
     };
     scheduler.RequestOutsideRenderPassOperationContext();
-    scheduler.Record([](vk::CommandBuffer cmdbuf) {
-        cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                               0, WRITE_BARRIER);
-    });
+    scheduler.RecordProvenanceBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                      WRITE_BARRIER);
 }
 
 namespace {

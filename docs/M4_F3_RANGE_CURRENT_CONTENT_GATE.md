@@ -40,8 +40,11 @@ closed for that entire pin; it never retains a falsely complete prefix. Zero or
 overflowing write footprints cancel conservatively. Zero-size, out-of-bounds and
 overflowing query ranges are rejected.
 
+Typed memory barriers (including WFI and copy pre/post barriers) retain eligibility:
+they record only the actual barrier and its synchronization observation, no buffer
+write or content-root import. Their real Vulkan stage/access scopes are unchanged.
 Generic `Record`/`RecordWithUploadBuffer`, unknown shader paths, unclassified state
-commands and deferred render-pass/barrier work still cancel the whole snapshot.
+commands and deferred render-pass work still cancel the whole snapshot.
 Their effects are not inferred from shader bindings or intent revisions. Typed
 readback only changes its staging destination, so it preserves the source snapshot
 unless surrounding unclassified work intervenes. Retirement/remap retain their
@@ -58,6 +61,9 @@ the original completed-event checks retain their prior meanings.
 The initial range query delegated to the old whole-snapshot check. A real-body
 controlled Fill of `[16,32)` made its untouched `[0,16)` query fail; the expected
 red assertion is retained in `.diagnostics/m4-range-gate-red.log`.
+An additional negative control exposed typed memory/copy barriers going through
+generic recording and incorrectly cancelling complements; it is retained in
+`.diagnostics/m4-range-barrier-red.log` before the typed barrier enqueue fix.
 
 Focused actual-body controls exercise partial Fill/Copy, independent aliases,
 nonzero native pin offsets, upload regions, multi-region copy, source preservation,

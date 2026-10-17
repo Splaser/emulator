@@ -1319,8 +1319,7 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     const Content *left_content{}, *middle_content{}, *right_content{};
     const auto immutable_history = content_transfer->PlannedContent();
     on_gpu([&] {
-        renderer->scheduler.RecordBufferFill(content_targets[1].pin.Handle(),
-            content_targets[1].pin.Offset() + 16, 16, 0xeeeeeeee);
+        Access::FillPinRange(rasterizer, content_targets[1].pin, 16, 16, 0xeeeeeeee);
         left_content = renderer->scheduler.CurrentTransferContentRange(content_transfer, device_memory, 1, 0, 16);
         middle_content = renderer->scheduler.CurrentTransferContentRange(content_transfer, device_memory, 1, 16, 16);
         right_content = renderer->scheduler.CurrentTransferContentRange(content_transfer, device_memory, 1, 32, 32);
@@ -1365,9 +1364,7 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     on_gpu([&] { current_content = renderer->scheduler.CurrentTransferContent(retirement_snapshot, device_memory); });
     REQUIRE(current_content == retirement_history.get());
     on_gpu([&] {
-        const std::array<VkBufferCopy, 1> partial{{{
-            content_targets[0].pin.Offset() + 16, content_targets[1].pin.Offset() + 16, 16}}};
-        renderer->scheduler.RecordBufferCopy(content_targets[1].pin.Handle(), content_targets[0].pin.Handle(), partial, true);
+        Access::CopyPinRange(rasterizer, content_targets[1].pin, content_targets[0].pin, 16, 16);
         left_content = renderer->scheduler.CurrentTransferContentRange(retirement_snapshot, device_memory, 0, 0, 16);
         middle_content = renderer->scheduler.CurrentTransferContentRange(retirement_snapshot, device_memory, 0, 16, 16);
         right_content = renderer->scheduler.CurrentTransferContentRange(retirement_snapshot, device_memory, 0, 32, 32);

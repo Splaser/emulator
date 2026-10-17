@@ -4,6 +4,7 @@
 // Linked only by CITRON_TESTS builds. These peers select real owners/locks; they do not
 // replace scheduler, store, tracker, GPU queue, completion or process finalization bodies.
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -98,6 +99,20 @@ struct SchedulerTestAccess : SystemTestAccess {
         runtime.CopyBuffer(staging.buffer, pin.Handle(), copies, true);
         rasterizer.scheduler.Finish(); // No cache, mapping, PTE or execution lease held.
         return {staging.mapped_span.begin(), staging.mapped_span.begin() + pin.Size()};
+    }
+    static void FillPinRange(Vulkan::RasterizerVulkan& rasterizer, const Vulkan::StagedBufferPin& pin,
+                             u32 offset, u32 size, u32 value) {
+        if (pin.Offset() > std::numeric_limits<u32>::max() - offset)
+            throw std::runtime_error("ordinary fill native offset overflow");
+        rasterizer.buffer_cache_runtime.ClearBuffer(pin.Handle(), static_cast<u32>(pin.Offset()) + offset, size, value);
+    }
+    static void CopyPinRange(Vulkan::RasterizerVulkan& rasterizer, const Vulkan::StagedBufferPin& destination,
+                             const Vulkan::StagedBufferPin& source, u64 offset, u64 size) {
+        auto& runtime = rasterizer.buffer_cache_runtime;
+        const std::array<VideoCommon::BufferCopy, 1> copies{{{source.Offset() + offset, destination.Offset() + offset, size}}};
+        runtime.PreCopyBarrier();
+        runtime.CopyBuffer(destination.Handle(), source.Handle(), copies, false, false);
+        runtime.PostCopyBarrier();
     }
     static void WriteOrdinaryGpu(Vulkan::RasterizerVulkan& rasterizer,
                                  DAddr address, u32 size, u32 value) {

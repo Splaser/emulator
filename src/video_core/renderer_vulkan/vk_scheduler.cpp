@@ -471,7 +471,8 @@ bool Scheduler::HasConfirmedMemoryDependency(const Write& before, const Write& a
 void Scheduler::RecordProvenanceBarrier(VkPipelineStageFlags source,
                                        VkPipelineStageFlags destination,
                                        const VkMemoryBarrier& memory) {
-    Record([submission = observed_submission, source, destination, memory](vk::CommandBuffer cmdbuf) {
+    // A typed memory barrier records no buffer writes and cannot revoke byte content.
+    EnqueueCommand([submission = observed_submission, source, destination, memory](vk::CommandBuffer cmdbuf, vk::CommandBuffer) {
         cmdbuf.PipelineBarrier(source, destination, 0, memory);
         if (submission) submission->synchronization.RecordBarrier(source, destination, memory);
     });
