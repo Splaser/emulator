@@ -107,8 +107,8 @@ public:
     const TransferContent* CurrentTransferContent(const Transfer& transfer, const Memory& memory) const noexcept {
         if (!transfer || !transfer->current_eligible) return nullptr;
         // Pending is not current evidence, but must not cancel eventual completion.
-        const auto state = PollCheckedTransfer(transfer);
-        if (state != WriteState::Complete) return nullptr;
+        const auto transfer_state = PollCheckedTransfer(transfer);
+        if (transfer_state != WriteState::Complete) return nullptr;
         const auto* content = TransferContentForMapping(transfer, memory);
         if (!content || std::ranges::any_of(transfer->resources, [](const auto& resource) {
                 return !resource.pin.ContentEligible();
