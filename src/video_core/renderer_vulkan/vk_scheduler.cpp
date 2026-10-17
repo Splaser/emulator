@@ -401,8 +401,11 @@ void Scheduler::RecordProvenanceBarrier(VkPipelineStageFlags source,
 
 void Scheduler::RetireCheckedWritesAfterDeviceIdle() {
     if (observed_submission) return; // Device idle does not submit recorded host work.
-    for (const auto& transfer : checked_transfers)
-        if (transfer->worker_pending.load(std::memory_order_acquire)) return;
+    for (const auto& transfer : checked_transfers) {
+        if (transfer->worker_pending.load(std::memory_order_acquire) ||
+            !transfer->submission->queue_attempted.load(std::memory_order_acquire) ||
+            transfer->submission->result.load(std::memory_order_acquire) == VK_NOT_READY) return;
+    }
     for (const auto& write : checked_writes) {
         write->retired = true;
         write->resources.reset();
@@ -648,6 +651,7 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
                 }
 
                 std::scoped_lock lock{submit_mutex};
+                if (checked) checked->queue_attempted.store(true, std::memory_order_release);
                 const VkResult result = master_semaphore->SubmitQueue(
                     cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value);
                 if (checked) {

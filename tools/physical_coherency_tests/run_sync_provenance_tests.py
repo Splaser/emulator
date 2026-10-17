@@ -149,7 +149,9 @@ if a.content:
         ('copy-without-device-command', 'cmdbuf.CopyBuffer(source.Handle(), destination.Handle(), region);', '(void)region;'),
         ('fill-without-device-command', 'cmdbuf.FillBuffer(destination.Handle(), destination.Offset() + operation.destination_offset,\n                                          operation.size, operation.value);', '(void)destination;'),
         ('content-without-sync-evidence', 'transfer->positions[i], next)) return nullptr;', 'transfer->positions[i], next)) {}'),
-        ('content-without-host-retention', 'if (transfer->worker_pending.load(std::memory_order_acquire)) return;', 'if (false && transfer->worker_pending.load(std::memory_order_acquire)) return;')]:
+        ('content-without-host-retention',
+         'if (transfer->worker_pending.load(std::memory_order_acquire) ||\n            !transfer->submission->queue_attempted.load(std::memory_order_acquire) ||\n            transfer->submission->result.load(std::memory_order_acquire) == VK_NOT_READY) return;',
+         '(void)transfer;')]:
         assert source.count(guard) == 1, name
         result = run(name, source.replace(guard, replacement))
         if result.returncode == 0 or 'Assertion' not in result.stderr:

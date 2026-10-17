@@ -38,6 +38,9 @@ local command identity, exact destination interval and 32-bit fill pattern. Copy
 records source/destination allocation indices and offsets, and derives ancestry
 from the source state at that command. Copies of copies retain the old root;
 overwriting the source later cannot rebase an earlier copy.
+The root's allocation/offset names its historical origin, not a place from which
+those bytes can still be read today. After A changes to 77, B may retain copied 99;
+reading A's current storage would not recover that earlier root.
 
 Overlay replaces only the exact written interval. Both untouched complements keep
 their previous nodes, or Unknown when no source was established. Roots identify
@@ -66,8 +69,10 @@ same Scheduler owner, live retained native pins/backing identities, successful
 checked submission/timeline/host-wait evidence and recorded inter-command memory
 dependencies. Pending, failed, partially recorded, sealed, dead or retired records
 refuse. Execution uncertainty is sticky Unknown. Resources remain retained until
-trusted device idle AND all relevant host callbacks have run. A failed host submit
-setup cannot make device idle sufficient to release an unrun callback's pins.
+trusted device idle, completed host callbacks and a resolved queue attempt. Both
+an unrun callback and recorded native commands awaiting a Submit callback must
+keep their pins. A host setup failure that never attempts a queue submission stays
+quarantined until teardown; a later idle cannot manufacture its submission identity.
 
 TransferContentForMapping additionally checks every immutable origin against the
 current mapping, including the original mapping generation. Remap/restore cannot
@@ -87,7 +92,7 @@ test failed. The implemented header passes exact-copy/complement, source overwri
 copy-of-copy, Unknown-byte and malformed-footprint cases, plus 512 deterministic
 command prefixes checked against an independent per-byte root-label oracle.
 
-The actual-body fixture runs 22 cases through production transfer recording,
+The actual-body fixture runs 23 cases through production transfer recording,
 checked submission/completion, synchronization and current-mapping gates. Vulkan
 dispatch, device execution, mapping snapshots and allocations are simulated. It
 covers failed submission/counter/host wait, partial copy recording, remap/dead
@@ -96,6 +101,9 @@ host-submit failure, foreign owner, dropped cache owners, erased sync evidence a
 different nonzero native pin offsets. Copying from an Unknown source erases the
 destination's previous known origin for that exact interval; it cannot preserve
 the overwritten root as a fallback.
+The pre-submit retention negative first reproduced early retirement after native
+recording but before the queued Submit callback. The queue-attempt/result guard
+must prevent that retirement even though the recording callback has finished.
 An already-observed ordinary batch refuses transfer enrollment while its original
 command still executes exactly once.
 A second completed submission copying real bytes from a prior submission still

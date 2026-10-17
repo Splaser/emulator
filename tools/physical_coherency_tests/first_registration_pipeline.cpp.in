@@ -173,6 +173,7 @@ public:
     template<class F> void Record(F f) {RecordWithUploadBuffer([=](vk::CommandBuffer main,vk::CommandBuffer){f(main);});}
     void DispatchWork() {} // Deliberately independent worker rendezvous.
     void RunWorker() {while(!commands.empty()) {auto f=std::move(commands.front());commands.pop_front();f({},{});}}
+    void RunOneWorkerCommandForTest() {assert(!commands.empty());auto f=std::move(commands.front());commands.pop_front();f({},{});}
     void RequestOutsideRenderPassSyncedOperationContext() {}
     void RequestOutsideRenderPassOperationContext() {}
 };

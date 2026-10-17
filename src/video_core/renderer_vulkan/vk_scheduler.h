@@ -50,6 +50,7 @@ public:
             : owner{std::move(owner_)} {}
         const std::shared_ptr<std::atomic_bool> owner;
         std::atomic<VkResult> result{VK_NOT_READY};
+        std::atomic_bool queue_attempted{};
         u64 tick{};
         SyncProvenance synchronization;
     };

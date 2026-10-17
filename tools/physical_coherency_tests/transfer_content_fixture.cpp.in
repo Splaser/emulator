@@ -4,7 +4,7 @@ void TestTransferContent() {
     using Plan = Vulkan::TransferContent;
     using Kind = Plan::Kind;
     using State = Scheduler::WriteState;
-    for (int mode = 0; mode < 22; ++mode) {
+    for (int mode = 0; mode < 23; ++mode) {
         auto s = std::make_unique<Scenario>();
         Vulkan::StorageObserverHarness observation{s->scheduler, s->runtime};
         std::array<std::unique_ptr<Vulkan::Buffer>, 3> buffers;
@@ -69,6 +69,12 @@ void TestTransferContent() {
             assert(s->scheduler.PollCheckedTransfer(transfer) == State::Unknown);
             s->scheduler.RetireCheckedWritesAfterDeviceIdle();
             assert(transfer->ResourcesRetained()); // Idle alone cannot release an unrun host callback.
+        }
+        if (mode == 22) {
+            s->scheduler.RunOneWorkerCommandForTest(); // Recorded native commands, submit callback still queued.
+            assert(driver->submissions == 0);
+            s->scheduler.RetireCheckedWritesAfterDeviceIdle();
+            assert(transfer->ResourcesRetained()); // Idle alone cannot retire a not-yet-submitted native command.
         }
         bool propagated_device_loss = false;
         try {s->scheduler.RunWorker();}
@@ -136,7 +142,8 @@ void TestTransferContent() {
         }
         if (mode == 13) {s->gpu.Complete();assert(s->scheduler.CompletedTransferContent(transfer));}
         s->scheduler.RetireCheckedWritesAfterDeviceIdle();
-        assert(!transfer->ResourcesRetained() && !s->scheduler.CompletedTransferContent(transfer));
+        assert(transfer->ResourcesRetained() == (mode == 14)); // No queue attempt: quarantined until teardown.
+        assert(!s->scheduler.CompletedTransferContent(transfer));
         assert(transfer->PlannedContent() && !transfer->HistoricalOrigins().empty());
         if (mode == 17) assert(weak.expired());
     }
