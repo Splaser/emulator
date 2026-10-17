@@ -108,9 +108,9 @@ Scheduler::Write Scheduler::RecordCheckedWrite(std::shared_ptr<const void> resou
                                       intent_revision, submission_owner}};
     checked_writes.push_back(write); // Retain before recording, including uncertain failures.
     try {
-        Record([write, command = std::move(command)](vk::CommandBuffer cmdbuf) {
+        Record([write, bound_command = std::move(command)](vk::CommandBuffer cmdbuf) {
             try {
-                const bool emitted = command(cmdbuf);
+                const bool emitted = bound_command(cmdbuf);
                 auto expected = CheckedWrite::Emission::Pending;
                 (void)write->emission.compare_exchange_strong(
                     expected, emitted ? CheckedWrite::Emission::Recorded : CheckedWrite::Emission::Skipped,

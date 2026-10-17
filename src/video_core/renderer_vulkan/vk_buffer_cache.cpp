@@ -1039,9 +1039,9 @@ Scheduler::Write BufferCacheRuntime::ClearBufferChecked(StagedBufferPin pin, u64
     scheduler.RequestOutsideRenderPassSyncedOperationContext();
     return scheduler.RecordCheckedWrite(owner, owner->Identity(), owner->Offset(), owner->Size(), intent_revision,
         [clear = MakeBufferClear(owner->Handle(), static_cast<u32>(owner->Offset()), owner->Size(), value),
-         owner, emit = std::move(emit)](vk::CommandBuffer cmdbuf) {
+         owner, should_emit = std::move(emit)](vk::CommandBuffer cmdbuf) {
             if (!owner->IsUsable()) throw std::runtime_error("checked writer pin sealed before emission");
-            if (emit && !emit()) return false;
+            if (should_emit && !should_emit()) return false;
             return clear(cmdbuf);
         });
 }
