@@ -337,5 +337,28 @@ ordinary F3 witness subject to M3B producer-exclusion eligibility. Controlled M4
 acceptance and production F3 acceptance remain distinct.
 
 The old whole-snapshot behavior failed the new untouched-range control as expected
-(`.diagnostics/m4-range-gate-red.log`). Final native/Linux/Android results follow
-after source validation.
+(`.diagnostics/m4-range-gate-red.log`). The typed-barrier control additionally
+exposed copy pre/post and WFI barriers cancelling complements; their typed enqueue
+now preserves content eligibility while retaining the actual barriers and scopes.
+The source-only current-root query also failed a stale-interval control
+(`.diagnostics/m4-current-root-red.log`); `CurrentTransferHasRoot` now combines
+current byte eligibility and the exact historical root/projection without
+promoting other bytes in a retained graph pointer.
+
+Final source `3bf13ca261` passed
+[Linux-only workflow 39019720456](https://github.com/Splaser/emulator/actions/runs/39019720456):
+all five CTest processes, native provenance 177 assertions plus three repeat
+processes, 46 actual-body transfer-content cases, 27 expected mutation failures,
+512 content/2,048 eligibility oracle prefixes and full coherency/lifecycle tests.
+All 12 extraction input hashes match committed blobs; artifacts are retained in
+`.diagnostics/ci-39019720456/`. Original F3 still rejects two aliases (exit 42),
+and F2 remains backing 77/cache 10. No authority or reconciliation is published.
+
+Validation policy: default to Linux compilation, unit tests and relevant native
+regressions. Run Android builds only for Android-specific changes or risks Linux
+cannot cover; manual workflow dispatch now defaults to `linux-only`, with `full`
+available when needed. Android was intentionally skipped for `3bf13ca261`; do not
+claim an unrun Android or device/game acceptance. The previous `cc055d3426` full
+Linux job passed independently (170 native assertions). Its already running
+Android job did not block this follow-up. This documentation-only handoff does
+not repeat the same source validation.

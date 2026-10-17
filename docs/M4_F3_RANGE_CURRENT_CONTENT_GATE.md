@@ -89,9 +89,44 @@ failure, actual typed Fill/Copy and left/right complement guards separately.
 Native Vulkan tests perform actual partial Fill/Copy/readback and compare both
 untouched bytes and query outcomes while retaining historical origins.
 
-Full Linux and Android workflow evidence is recorded after source validation.
-Neither simulated dispatch nor Android library compilation proves device/game
-acceptance. Cross-submission/queue roots remain Unknown in this slice.
+The source-only initial implementation of `CurrentTransferHasRoot` failed the
+new stale-interval control despite retaining the historical root. The expected
+red assertion is retained in `.diagnostics/m4-current-root-red.log`. The final
+implementation requires both current eligibility and that exact root/projection
+on the same interval. Its separate mutations remove each gate independently.
+
+Final source `3bf13ca26195e0507af12942f2b6560c45c3f19d` passed
+[Linux-only workflow 39019720456](https://github.com/Splaser/emulator/actions/runs/39019720456)
+([Linux job](https://github.com/Splaser/emulator/actions/runs/39019720456/job/117358949052)):
+
+- All five CTest processes; native provenance 177 assertions and three repeated
+  processes using actual ordinary runtime clear, pre/copy/post barriers and
+  readback. Mixed sources, historical-but-overwritten bytes, Unknown roots and
+  attempted whole-range promotion reject; qualifying complements pass.
+- 46 actual-body transfer-content cases, 27 expected mutation failures, 512
+  content/2,048 eligibility oracle prefixes, and full coherency/lifecycle tests.
+- Original F3 require-fixed still rejects two stale aliases (exit 42); original
+  F2 still exposes backing 77/cache 10. Neither production defect is closed.
+- Android was skipped intentionally. This commit is validated on Linux and makes
+  no Android compilation or device/game acceptance claim.
+
+All 12 extraction input hashes match committed Git blobs. Source stamp, complete
+job log, native repeat results, generated fixture source, hash manifest and 28
+fixture logs (one positive, 27 expected failures) are retained under
+`.diagnostics/ci-39019720456/`.
+
+The interval/barrier baseline `cc055d3426` had already passed the full Linux job
+in [39018695234](https://github.com/Splaser/emulator/actions/runs/39018695234),
+including 170 native assertions and 25 mutation failures; retained logs/hashes
+are under `.diagnostics/ci-39018695234/`. Its separately running Android job was
+not used as a gate for the current-root follow-up. The initial `34736ad618` run
+[39018402186](https://github.com/Splaser/emulator/actions/runs/39018402186) was
+cancelled/superseded after the typed-barrier negative exposed complement loss.
+It is not acceptance evidence. The final documentation-only update does not
+repeat identical production-source validation.
+
+Cross-submission/queue roots remain Unknown in this slice. These controlled
+checks do not constitute reconciliation or ordinary production F3 acceptance.
 
 Follow-up validation defaults to Linux compilation, unit tests and relevant
 native regressions. Android compilation is requested only for Android-specific
