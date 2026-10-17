@@ -1213,7 +1213,8 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     REQUIRE(physical_a->HistoricalPhysicalIdentity() == historical_a);
     REQUIRE(std::ranges::equal(historical_a->Segments(), original_geometry));
     REQUIRE_FALSE(historical_a->MatchesCurrent(device_memory));
-    REQUIRE(historical_alias->MatchesCurrent(device_memory));
+    REQUIRE_FALSE(historical_alias->MatchesCurrent(device_memory)); // Global mapping history changed.
+    REQUIRE(historical_alias->MatchesCurrent(device_memory, false)); // Geometry alone is diagnostic.
     on_gpu([&] { completed_identity = renderer->scheduler.CompletedPhysicalIdentity(physical_a); });
     REQUIRE(completed_identity == historical_a.get()); // OLD historical identity, never current authority.
     std::vector<u8> physical_old_bytes;

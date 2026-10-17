@@ -658,6 +658,10 @@ int main() {
         assert(a->OverlapsPhysical(*b) && a->Backing()==b->Backing());
         assert(a->Representation()!=b->Representation());
         const auto old_physical=a->Segments().front().physical_offset;
+        s->runtime.test_mapping.generation+=2; // Same final geometry cannot erase mapping history.
+        assert(!a->MatchesCurrent(s->runtime.test_mapping));
+        assert(a->MatchesCurrent(s->runtime.test_mapping,false));
+        assert(!s->runtime.PhysicalIdentityForBinding(original,3840,512));
         s->runtime.test_mapping.bias=4096;s->runtime.test_mapping.generation+=2;
         assert(!a->MatchesCurrent(s->runtime.test_mapping));
         assert(!s->runtime.PhysicalIdentityForBinding(original,3840,512));
@@ -666,11 +670,12 @@ int main() {
         auto fresh=s->runtime.PhysicalIdentityForBinding(replacement,3840,512);
         assert(fresh && fresh->Segments().front().physical_offset==old_physical+4096);
         assert(fresh->Representation()!=a->Representation());
+        Vulkan::Buffer wrong_representation{s->runtime,A,8192};
+        wrong_representation.physical_origin=replacement.physical_origin;
+        assert(!s->runtime.PhysicalIdentityForBinding(wrong_representation,3840,512));
         s->runtime.InvalidatePhysicalOrigin(replacement);
         s->runtime.CapturePhysicalOrigin(replacement);
         assert(!s->runtime.PhysicalIdentityForBinding(replacement,3840,512));
-        original.physical_origin=alias.physical_origin;
-        assert(!s->runtime.PhysicalIdentityForBinding(original,3840,512));
         s->runtime.test_mapping.hole=true;
         Vulkan::Buffer hole{s->runtime,A,4096};
         assert(!s->runtime.PhysicalIdentityForBinding(hole,0,4096));

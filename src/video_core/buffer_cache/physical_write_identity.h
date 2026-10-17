@@ -104,10 +104,11 @@ public:
     }
 
     template <typename Memory>
-    bool MatchesCurrent(const Memory& memory) const {
+    bool MatchesCurrent(const Memory& memory, bool require_original_generation = true) const {
         return memory.ReadPhysicalMappingSnapshot(
             [&](auto epoch, u64 generation, auto owner, u64 limit, const auto& translate) {
-                if (!OwnersAlive() || epoch != device_epoch || owner != backing || (generation & 1))
+                if (!OwnersAlive() || epoch != device_epoch || owner != backing || (generation & 1) ||
+                    (require_original_generation && generation != mapping_generation))
                     return false;
                 for (const auto& segment : Segments()) {
                     const auto physical = translate(address + segment.logical_offset);
