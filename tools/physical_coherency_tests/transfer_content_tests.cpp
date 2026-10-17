@@ -42,6 +42,49 @@ int main() {
     assert(!exhausted.Contains(0, 1));
     using Plan = Vulkan::TransferContent;
     using Kind = Plan::Kind;
+    // Independent per-byte labels over four imported copies. Root IDs never become hop-local IDs.
+    const std::array<Plan::Offset, 6> chain_sizes{64, 64, 64, 64, 64, 64};
+    std::vector<Plan::Command> chain_fills;
+    for (u32 i = 0; i < 6; ++i) chain_fills.push_back({Kind::Fill, i, 0, 0, 0, 64, i});
+    const auto chain_seed = std::make_shared<const Plan>(*Plan::Build(chain_sizes, chain_fills));
+    const auto foreign_seed = std::make_shared<const Plan>(*chain_seed);
+    for (u32 trial = 0; trial < 64; ++trial) {
+        std::array<std::array<Plan::Root, 64>, 6> labels;
+        for (u32 buffer = 0; buffer < 6; ++buffer)
+            for (u64 byte = 0; byte < 64; ++byte) labels[buffer][byte] = {buffer, byte};
+        std::shared_ptr<const Vulkan::ReplicaCopyProvenance> prior;
+        u64 previous_begin{}, previous_length{};
+        for (u32 hop = 1; hop <= Vulkan::ReplicaCopyProvenance::MaxHops; ++hop) {
+            const u64 length = hop == 1 ? 16 : (hop == 2 ? 8 : 4);
+            const u64 source_begin = hop == 1 ? (trial / 4 % 8) * 4
+                : (hop == 2 && trial % 2 ? 0 : previous_begin + ((trial % 2) * (previous_length - length)));
+            const u64 destination_begin = 16 + (trial % 4) * 4;
+            const auto root = labels[hop - 1][source_begin];
+            const auto plan = Vulkan::ReplicaCopyProvenance::Build(chain_seed, hop - 1, hop,
+                source_begin, destination_begin, length, 64, root.command, root.offset, hop, 0, prior);
+            assert(plan && plan->Depth() == hop && plan->SourceCopy() == prior);
+            for (u64 byte = 0; byte < length; ++byte)
+                labels[hop][destination_begin + byte] = labels[hop - 1][source_begin + byte];
+            for (u64 byte = 0; byte < 64; ++byte) {
+                const auto expected = labels[hop][byte];
+                assert(plan->HasRoot(byte, 1, expected.command, expected.offset));
+                assert(!plan->HasRoot(byte, 1, (expected.command + 1) % 6, expected.offset));
+            }
+            assert(!plan->HasRoot(0, 64, root.command, 0));
+            if (prior) {
+                assert(!Vulkan::ReplicaCopyProvenance::Build(foreign_seed, hop - 1, hop,
+                    source_begin, destination_begin, length, 64, root.command, root.offset, hop, 0, prior));
+                assert(!Vulkan::ReplicaCopyProvenance::Build(chain_seed, 5, hop,
+                    source_begin, destination_begin, length, 64, root.command, root.offset, hop, 0, prior));
+            }
+            prior = std::make_shared<const Vulkan::ReplicaCopyProvenance>(*plan);
+            previous_begin = destination_begin;
+            previous_length = length;
+        }
+        const auto last_root = labels[4][previous_begin];
+        assert(!Vulkan::ReplicaCopyProvenance::Build(chain_seed, 4, 5, previous_begin, 16, 4, 64,
+            last_root.command, last_root.offset, 5, 0, prior));
+    }
     const std::array<Plan::Offset, 3> sizes{64, 64, 64};
     const std::array<Plan::Command, 3> seeded{{
         {Kind::Fill, 0, 0, 0, 0, 64, 99}, {Kind::Fill, 1, 0, 0, 0, 64, 10},
@@ -143,5 +186,5 @@ int main() {
     }
     std::cout << "PASS exact transfer content: partial copies, untouched roots, copy-of-copy, "
                  "source overwrite after copy, Unknown bytes, 512 content/2048 eligibility byte-oracle prefixes, "
-                 "bounds and fail-closed eligibility capacity\n";
+                 "256 multi-hop byte-oracle prefixes, bounds and fail-closed eligibility capacity\n";
 }

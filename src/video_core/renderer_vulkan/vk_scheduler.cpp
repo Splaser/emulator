@@ -226,7 +226,8 @@ Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffe
 
 Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferBuffer> buffers,
     std::span<const TransferContent::Command> commands,
-    std::shared_ptr<const ReplicaCopyProvenance> replica_copy, Transfer parent) {
+    std::shared_ptr<const ReplicaCopyProvenance> replica_copy, Transfer parent, Transfer predecessor) {
+    if (!predecessor) predecessor = parent;
     if (replica_copy) {
         if (!parent || parent->replica_copy || replica_copy->ParentContent() != parent->content ||
             buffers.size() != 2 || commands.size() != 1 || commands[0].kind != TransferContent::Kind::Copy ||
@@ -239,6 +240,14 @@ Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferB
                 buffers[slot].pin.Size() == saved.pin.Size() && buffers[slot].physical == saved.physical;
         };
         if (!matches(0, replica_copy->SourceBuffer()) || !matches(1, replica_copy->DestinationBuffer())) return {};
+        if (predecessor != parent) {
+            if (!predecessor || predecessor->replica_anchor != parent ||
+                predecessor->replica_copy != replica_copy->SourceCopy() || predecessor->resources.size() != 2 ||
+                buffers[0].pin.Identity() != predecessor->resources[1].pin.Identity() ||
+                buffers[0].pin.Offset() != predecessor->resources[1].pin.Offset() ||
+                buffers[0].pin.Size() != predecessor->resources[1].pin.Size() ||
+                buffers[0].physical != predecessor->resources[1].physical) return {};
+        } else if (replica_copy->SourceCopy()) return {};
     }
     if (observed_submission || !device.HasTimelineSemaphore() ||
         !submission_owner->load(std::memory_order_acquire) || checked_transfers.size() >= 16 ||
@@ -263,7 +272,8 @@ Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferB
         for (const auto& buffer : buffers) transfer->origins.push_back(buffer.physical);
         transfer->content = std::make_shared<const TransferContent>(std::move(*content));
         transfer->replica_copy = std::move(replica_copy);
-        transfer->replica_parent = std::move(parent);
+        transfer->replica_parent = std::move(predecessor);
+        transfer->replica_anchor = std::move(parent);
         transfer->submission = Submission{new CheckedSubmission{submission_owner}};
         checked_transfers.push_back(transfer); // Retain uncertain effects until trusted device idle.
     } catch (...) {
@@ -387,20 +397,28 @@ const TransferContent* Scheduler::CompletedTransferContent(const Transfer& trans
 
 bool Scheduler::CompletedReplicaCopyHasRoot(const Transfer& result, const Transfer& parent,
     u64 offset, u64 size, TransferContent::Index fill, u64 root_offset) const noexcept {
-    if (!result || !parent || !result->replica_copy || result->replica_parent != parent ||
+    if (!result || !parent || !result->replica_copy || result->replica_anchor != parent ||
         result->replica_copy->ParentContent() != parent->content ||
-        PollCheckedTransfer(result) != WriteState::Complete) return false;
-    const auto& consumer = result->submission;
-    const auto& producer = parent->submission;
-    if (producer == consumer || producer->result.load(std::memory_order_acquire) != VK_SUCCESS ||
-        consumer->queue_predecessor.lock() != producer || !consumer->queue ||
-        consumer->queue != producer->queue || consumer->queue != device.GetGraphicsQueue().Handle()) return false;
-    const SyncProvenance::Access prior{VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT};
-    const SyncProvenance::Access copy{VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT};
-    const SyncProvenance::Access later{VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-        VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT};
-    if (!consumer->synchronization.ProvesEarlierSubmission(prior, result->positions[0], copy) ||
-        !consumer->synchronization.ProvesRelease(result->positions[0], copy, later)) return false;
+        PollCheckedTransfer(result) != WriteState::Complete || PollCheckedTransfer(parent) != WriteState::Complete) return false;
+    auto remaining = result->replica_copy->Depth();
+    for (auto link = result; link != parent; link = link->replica_parent) {
+        if (!link || !remaining || !link->replica_copy || link->replica_anchor != parent ||
+            link->replica_copy->Depth() != remaining-- || !link->replica_parent ||
+            (link != result && PollCheckedTransfer(link) != WriteState::Complete) ||
+            link->replica_copy->SourceCopy() != link->replica_parent->replica_copy) return false;
+        const auto& consumer = link->submission;
+        const auto& producer = link->replica_parent->submission;
+        if (producer == consumer || producer->result.load(std::memory_order_acquire) != VK_SUCCESS ||
+            consumer->queue_predecessor.lock() != producer || !consumer->queue ||
+            consumer->queue != producer->queue || consumer->queue != device.GetGraphicsQueue().Handle()) return false;
+        const SyncProvenance::Access prior{VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT};
+        const SyncProvenance::Access copy{VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT};
+        const SyncProvenance::Access later{VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT};
+        if (!consumer->synchronization.ProvesEarlierSubmission(prior, link->positions[0], copy) ||
+            !consumer->synchronization.ProvesRelease(link->positions[0], copy, later)) return false;
+    }
+    if (remaining) return false;
     return result->replica_copy->HasRoot(offset, size, fill, root_offset);
 }
 

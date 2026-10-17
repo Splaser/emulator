@@ -1,7 +1,8 @@
 # M4/F3: controlled same-queue replica copy
 
 This slice transfers exact content ancestry across two actual checked Vulkan
-submissions. It does not publish physical latest-writer authority, reconcile
+submissions. The original one-hop slice is recorded below; the bounded multi-hop
+extension follows its validation record. It does not publish physical latest-writer authority, reconcile
 ordinary game buffers, or close F3/F2.
 
 ## Admission and execution
@@ -59,7 +60,7 @@ retired allocation and newly exposed host pointers fail current qualification.
 Historical metadata remains inspectable. A completed historical receipt is not a
 statement about current physical authority.
 
-Only one hop from a local parent graph is admitted. Chained imported receipts,
+At `d783250b0d`, only one hop from a local parent graph was admitted. Chained imported receipts,
 nonadjacent unknown submissions, mixed-root whole targets, concurrent producers
 and cross-queue semaphore/ownership chains are outside this slice.
 
@@ -105,3 +106,58 @@ Linux job `117368038043`:
 Logs and downloaded artifacts are retained in `.diagnostics/ci-39022879191/`.
 Android was intentionally skipped. Device/game acceptance is untested. The
 following documentation-only evidence update does not repeat source validation.
+
+## Bounded multi-hop extension
+
+The next controlled slice accepts an explicit `source_receipt` together with the
+original parent anchor. Root command IDs continue to refer to that anchor's
+immutable local Fill/Copy graph. A receipt stores its actual immediate producer
+separately from its root anchor. The immutable metadata retains the preceding
+copy's ancestry; it never replaces an imported root with a hop-local command ID.
+
+Every hop must copy from the preceding receipt's destination allocation and
+exact saved physical binding. That receipt must prove the requested current
+source bytes and original root projection. Each new target must still have a
+whole-pin exact current root in the original anchor, including its untouched
+complements. Mixed-root source intervals and previously modified whole targets
+remain unsupported. Model construction also rejects different anchor graphs,
+incorrect source slots and a fifth hop. Four hops bound ancestry/storage walks;
+the existing 16-receipt retention limit remains unchanged.
+
+Each actual copy owns a checked submission with the existing entry/release
+barriers. The worker still requires the immediately preceding accepted submission
+on its actual graphics queue. Completed queries validate every edge back to the
+anchor: actual queue/predecessor identity, successful completed emission and both
+barrier scopes. Good evidence on the final edge cannot repair missing evidence
+on an earlier edge. Cross-queue and intervening unchecked submissions remain
+unproved; neither ticks nor completion order ranks content.
+
+For A = 99, B = 10, C = 20 on `[0,64)`, A→B copies `[16,32)` and B→C copies
+`[20,28)`. B retains 10 outside its copied interval; C retains 20 outside its
+smaller interval. C's middle retains A's original Fill root, not B's local Copy
+command. Copying B's untouched bytes can instead retain B's 10 root. No whole
+replica becomes A's content merely because one interval was copied.
+
+An overlapping B write before the second copy cancels source admission. An
+overlapping B write after the second copy leaves C's captured history/current
+bytes intact. Later C writes cancel only the corresponding current destination
+interval; Unknown recording cancels all current eligibility. Historical graph
+pointers remain unchanged. The current gate additionally walks ancestor storage
+and mappings, conservatively rejecting retirement, escaped host mappings or
+invalid epochs anywhere in the retained chain without rebasing byte ancestry.
+Mapping-query exceptions reject eligibility. No ordinary BufferCache selection,
+replica reconciliation policy or physical latest-writer authority is added.
+
+The retained red control `.diagnostics/m4-chain-red.log` proves the old one-hop
+implementation refused the required B→C handoff. The new deterministic fixture
+adds 44 multi-hop modes covering exact roots/complements, prior versus subsequent
+overwrites, missing earlier/final dependencies, both failed copy submissions,
+pending completion, remap, async retirement, host exposure, Unknown recording and
+the four-hop bound. An independent byte-label oracle checks 256 multi-hop prefixes
+with interval projections and roots from copied or untouched source bytes.
+
+The native Vulkan witness now uses three private staged allocations, reads back
+B and C, checks later intermediate/destination writes and retains an asynchronously
+retired intermediate allocation until trusted device idle. These controlled
+mechanism tests remain separate from production F3 acceptance. Linux validation
+is pending; Android remains on demand.

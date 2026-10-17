@@ -130,7 +130,7 @@ struct Scenario {
 if a.content:
     source += read('tools/physical_coherency_tests/transfer_content_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/replica_copy_fixture.cpp.in')
-source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();' if a.content else '') + '}\n'
+source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();' if a.content else '') + '}\n'
 command = [a.cxx, '-std=c++23', '-O1', '-Wall', '-Wextra', '-Werror',
            '-Wno-unused-parameter', '-Wno-missing-field-initializers',
            '-I', str(out / 'stubs'), '-I', str(root / 'src'),
@@ -164,8 +164,11 @@ for name, guard, replacement in [
     print('PASS expected mutation failure:', name)
 if a.content:
     for name, guard, replacement, count in [
-        ('replica-without-entry-sync', '!consumer->synchronization.ProvesEarlierSubmission(prior, result->positions[0], copy)', '(static_cast<void>(prior), false)', 1),
-        ('replica-without-release-sync', '!consumer->synchronization.ProvesRelease(result->positions[0], copy, later)', '(static_cast<void>(later), false)', 1),
+        ('chain-without-ancestor-evidence', 'const auto& consumer = link->submission;', 'if (link != result) continue;\n    const auto& consumer = link->submission;', 1),
+        ('chain-without-ancestor-storage', 'for (const auto& resource : link->resources)', 'if (link != result) continue;\n            for (const auto& resource : link->resources)', 1),
+        ('chain-source-uses-history', 'CurrentReplicaCopyHasRoot(receipt, memory, parent, request.source_offset, request.size,\n                                                       request.source_fill, request.source_root_offset)', 'receipt->replica_copy->HasRoot(request.source_offset, request.size, request.source_fill, request.source_root_offset)', 1),
+        ('replica-without-entry-sync', '!consumer->synchronization.ProvesEarlierSubmission(prior, link->positions[0], copy)', '(static_cast<void>(prior), false)', 1),
+        ('replica-without-release-sync', '!consumer->synchronization.ProvesRelease(link->positions[0], copy, later)', '(static_cast<void>(later), false)', 1),
         ('replica-without-queue-link', 'consumer->queue_predecessor.lock() != producer', 'false', 1),
         ('replica-without-queue-identity', 'consumer->queue != producer->queue || consumer->queue != device.GetGraphicsQueue().Handle()', 'false', 1),
         ('replica-without-physical-alias', '!std::ranges::equal(source_physical->Segments(), destination_physical->Segments())', 'false', 1),
@@ -175,9 +178,9 @@ if a.content:
         ('replica-without-copy-coupling', '!replica_copy->MatchesCopy(commands[0].source_offset, commands[0].destination_offset, commands[0].size)', 'false', 1),
         ('replica-without-buffer-coupling', '!matches(0, replica_copy->SourceBuffer()) || !matches(1, replica_copy->DestinationBuffer())', '(static_cast<void>(matches), false)', 1),
         ('replica-without-completion', 'PollCheckedTransfer(result) != WriteState::Complete', 'false', 1),
-        ('replica-without-current-interval', 'CurrentTransferContentRange(result, memory, 1, offset, size) &&', 'true &&', 1),
+        ('replica-without-current-interval', '!CurrentTransferContentRange(result, memory, 1, offset, size)', 'false', 1),
         ('replica-without-exact-root', 'return result->replica_copy->HasRoot(offset, size, fill, root_offset);', 'return true;', 1),
-        ('replica-without-current-source', '!CurrentTransferHasRoot(parent, memory, request.source, request.source_offset, request.size,\n                                    request.source_fill, request.source_root_offset)', 'false', 2),
+        ('replica-without-current-source', '!current_source()', '(static_cast<void>(current_source), false)', 2),
         ('replica-without-current-target', '!CurrentTransferHasRoot(parent, memory, request.destination, 0, destination.pin.Size(),\n                                    request.destination_fill, request.destination_root_offset)', 'false', 2)]:
         assert source.count(guard) == count, name
         result = run(name, source.replace(guard, replacement))
@@ -215,6 +218,7 @@ if a.content:
         '#include "video_core/renderer_vulkan/vk_transfer_content.h"', '')
     expanded = expanded.replace('#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"', replica_header)
     for name, guard, replacement in [
+        ('chain-without-hop-limit', 'source_copy->Depth() >= MaxHops || ', ''),
         ('stale-whole-replica-promotion', 'if (!root || root->command != fill || root->offset != root_offset + begin - offset) return false;', 'if (!root) return false;'),
         ('missing-left-complement', 'if (part.offset < offset) {', 'if (false) {'),
         ('missing-right-complement', 'if (begin < part.offset + part.size) {', 'if (false) {')]:

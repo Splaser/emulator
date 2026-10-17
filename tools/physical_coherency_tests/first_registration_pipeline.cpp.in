@@ -165,7 +165,7 @@ public:
     const VideoCommon::PhysicalWriteIdentity* CompletedPhysicalIdentity(const Write&) const noexcept;
     Transfer RecordTransferBatch(std::span<const TransferBuffer>,std::span<const TransferContent::Command>);
     Transfer RecordTransferBatchImpl(std::span<const TransferBuffer>,std::span<const TransferContent::Command>,
-        std::shared_ptr<const ReplicaCopyProvenance>,Transfer);
+        std::shared_ptr<const ReplicaCopyProvenance>,Transfer,Transfer = {});
     bool CompletedReplicaCopyHasRoot(const Transfer&,const Transfer&,u64,u64,TransferContent::Index,u64) const noexcept;
     WriteState PollCheckedTransfer(const Transfer&) const noexcept;
     const TransferContent* CompletedTransferContent(const Transfer&) const noexcept;

@@ -390,3 +390,16 @@ input hashes match committed blobs; all 43 fixture logs are retained under
 `.diagnostics/ci-39022879191/`. Original F3 fixed-required mode still fails two
 alias checks (exit 42); F2 remains backing 77/cache 10. Android was intentionally
 skipped. This evidence update changes documentation only and does not rerun CI.
+
+### Bounded multi-hop same-queue handoff (2026-10-17)
+
+The follow-up in [M4_F3_SAME_QUEUE_REPLICA_COPY.md](M4_F3_SAME_QUEUE_REPLICA_COPY.md)
+extends explicit receipt ancestry to at most four copies over fresh target slots
+from one root anchor. Admission combines current source bytes, immutable root
+projection, exact saved binding and known whole-target complements. Completed
+qualification verifies every actual submission/queue/barrier edge, not just the
+last copy. Ancestor storage/remap/host-exposure cancellation fails current
+qualification; later intermediate byte writes do not rewrite already captured
+downstream content. Linux validation is pending. Cross-queue remains Unknown;
+ordinary automatic selection, latest-writer publication, F3 and F2 closure remain
+outside this slice. Android remains on demand.

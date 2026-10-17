@@ -753,7 +753,7 @@ sync_fixture += '\n' + read('tools/physical_coherency_tests/transfer_content_fix
 sync_fixture += '\n' + read('tools/physical_coherency_tests/replica_copy_fixture.cpp.in')
 observer = observer.replace('int main() {', sync_fixture + '\nint main() {')
 observer = observer.replace('    std::cout<<"PASS ordinary storage observer',
-                            '    TestSyncDependencies();\n    TestTransferContent();\n    TestReplicaCopy();\n    std::cout<<"PASS ordinary storage observer')
+                            '    TestSyncDependencies();\n    TestTransferContent();\n    TestReplicaCopy();\n    TestReplicaChain();\n    std::cout<<"PASS ordinary storage observer')
 observer_cpp.write_text(observer)
 observer_exe = out / ('storage_observer.exe' if os.name == 'nt' else 'storage_observer')
 subprocess.run(cmd + [str(observer_cpp), '-o', str(observer_exe)], check=True)
