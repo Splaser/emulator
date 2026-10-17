@@ -197,3 +197,28 @@ scope, commands/cases, retained resources and Unknown behavior. The original ord
 F3/F2 negatives still reproduce; automatic ordinary routing, latest-writer authority
 and general producer eligibility remain blocked. Next development starts at the
 resume roadmap above, not by redoing the verified adapter.
+
+## Subsequent continuation: ordinary storage submission observation
+
+Source `be3847045e` adds an opt-in ordinary Draw/indirect Draw/Dispatch storage
+observer. It captures the actual descriptor allocation/range and write intent,
+then joins the existing batch's checked submission without a per-draw flush.
+Default rendering remains unobserved; unsupported capture is incomplete and does
+not suppress/replay the command. Shader footprints are conservative access ranges,
+not proof of per-byte stores or physical content versions.
+
+See the [observer contract and current validation record](M4_F3_STORAGE_WRITE_OBSERVER.md)
+and [initial checked provenance slice](M4_F3_SUBMISSION_PROVENANCE.md). Native
+provenance now has 70 assertions, including two real fills sharing an ordinary
+submission and a subsequent batch with a different identity. The Linux job of
+[38989337199](https://github.com/Splaser/emulator/actions/runs/38989337199) passed
+all five CTest processes, repeated native controls, original F2/F3 negatives and
+all configured integration/mutation regressions. Full platform status is recorded
+in the observer document.
+
+Next gate: retain immutable GuestBackingEpoch/physical geometry and prove actual
+representation association plus synchronization relationships before any physical
+latest-writer publisher. Do not infer authority from Complete, maximum revision or
+submission identity. Actual shader/game execution, merge/GC and mapping/frame reuse
+remain separate acceptance gates. F2/F3 remain Open, restricted eligibility remains
+blocked, and ordinary Memory::Write/UMA routing remains inactive.

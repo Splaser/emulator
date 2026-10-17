@@ -44,6 +44,12 @@ requires the existing checked timeline counter and zero-time host wait. Ordinary
 submission and worker exceptions still propagate and leave evidence Unknown.
 Unknown is sticky; historical Complete does not certify current content.
 
+For shaders, the captured interval is the descriptor's conservative writable
+access range, not a measurement of individual stores. A completed Draw/Dispatch
+may take a branch that leaves some or all bytes untouched. Its event proves that
+the declared producer command executed; it does not publish a per-byte content
+version or prove that every captured resource was changed.
+
 The observer is limited to 64 footprints per command and 256 accepted records per
 Scheduler retirement interval. Capacity/metadata/unsupported capture refusal marks
 coverage incomplete and still records the original rendering command exactly once.
@@ -83,3 +89,27 @@ fill, delayed worker, F2/F3 negatives and isolated alias regressions remain inta
 
 Remote full Linux/Android validation is required for this production change.
 Android compilation runs through GitHub workflow; no local Android build is used.
+
+## Verification record
+
+Production/test source `be3847045e` passed the complete Linux/Android
+[run 38989337199](https://github.com/Splaser/emulator/actions/runs/38989337199).
+Its Linux job passed all five CTest processes: 130 ordinary cases, 1708 original
+scheduler assertions, 38 original F3 assertions, 88 isolated alias assertions and
+70 provenance assertions. Three additional provenance processes each passed all
+70 assertions, with the original F3/alias repetitions also passing. F3 fixed mode
+still exits 42 with exactly two known alias failures (36 passing assertions);
+F2 still reports backing 77/cache 10 and its fixed-mode negative remains required.
+Every configured Linux HostMemory/import, coherency/lifecycle and mutation gate
+passed, including the new actual-body storage observer fixture.
+
+The complete Windows actual-body pipeline/mutation suite also passed on the same
+source, recorded in `.diagnostics/m4-storage-observer-final.log`. This is fixture
+evidence, separate from native Vulkan acceptance. Exact Linux source stamp, native
+process logs, generated fixtures and extraction hashes are retained under
+`.diagnostics/ci-38989337199/` alongside full job output and Android configuration/
+source artifacts. Android compiled the actual arm64 core, video and shader
+libraries with CPM/NDK 29, including the new ordinary capture/recording code. This
+is native-library compilation, not APK or target-device/game execution. The final
+documentation follow-up changes no production/test sources or workflow; it does
+not require repeating the same validation.
