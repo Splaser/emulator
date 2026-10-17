@@ -85,6 +85,8 @@ for marker in ['Scheduler::Submission Scheduler::FlushChecked(',
                'Scheduler::Write Scheduler::RecordCheckedWrite(',
                'Scheduler::ObservedWrites Scheduler::RecordObservedWrites(',
                'const VideoCommon::PhysicalWriteIdentity* Scheduler::CompletedPhysicalIdentity(',
+               'bool Scheduler::HasConfirmedMemoryDependency(',
+               'void Scheduler::RecordProvenanceBarrier(',
                'Scheduler::WriteState Scheduler::PollCheckedWrite(',
                'void Scheduler::RetireCheckedWritesAfterDeviceIdle(']:
     submission += body(scheduler_path, marker) + '\n'
@@ -716,6 +718,10 @@ int main() {
 }
 '''
 observer_cpp = out / 'storage_observer.cpp'
+sync_fixture = read('tools/physical_coherency_tests/sync_dependency_fixture.cpp.in')
+observer = observer.replace('int main() {', sync_fixture + '\nint main() {')
+observer = observer.replace('    std::cout<<"PASS ordinary storage observer',
+                            '    TestSyncDependencies();\n    std::cout<<"PASS ordinary storage observer')
 observer_cpp.write_text(observer)
 observer_exe = out / ('storage_observer.exe' if os.name == 'nt' else 'storage_observer')
 subprocess.run(cmd + [str(observer_cpp), '-o', str(observer_exe)], check=True)
@@ -737,6 +743,7 @@ inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled
                'src/video_core/buffer_cache/controlled_transfer.h', 'src/video_core/physical_access_plan.h',
                'src/video_core/renderer_vulkan/vk_buffer_payload.h',
                'src/video_core/buffer_cache/physical_write_identity.h',
+               'src/video_core/renderer_vulkan/vk_sync_provenance.h',
                'src/video_core/buffer_cache/physical_alias_copy.h'])
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sorted(inputs)},

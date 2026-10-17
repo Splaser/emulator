@@ -4,6 +4,7 @@
 #include <deque>
 #include <limits>
 #include <vulkan/vulkan.h>
+#include "video_core/renderer_vulkan/vk_sync_provenance.h"
 #include "common/slot_vector.h"
 #include "common/scratch_buffer.h"
 #include "common/range_sets.inc"
@@ -146,6 +147,8 @@ public:
     ObservedWrites RecordObservedWrites(std::span<const WriteFootprint>,std::function<bool(vk::CommandBuffer)>,
         std::shared_ptr<VideoCommon::PhysicalWriteCoverage> = {});
     const VideoCommon::PhysicalWriteIdentity* CompletedPhysicalIdentity(const Write&) const noexcept;
+    bool HasConfirmedMemoryDependency(const Write&,const Write&,u64,u64) const noexcept;
+    void RecordProvenanceBarrier(VkPipelineStageFlags,VkPipelineStageFlags,const VkMemoryBarrier&);
     Write RecordCheckedWrite(std::shared_ptr<const void>,const void*,u64,u64,u64,std::function<bool(vk::CommandBuffer)>);
     WriteState PollCheckedWrite(const Write&) const noexcept;
     void RetireCheckedWritesAfterDeviceIdle();

@@ -1099,7 +1099,11 @@ void BufferCacheRuntime::BindStorageBuffer(Buffer& buffer, u32 offset, u32 size,
             storage_observation_valid = false; // Scratch/direct/overflow is not observed coverage.
         } else {
             storage_write_footprints.push_back({pin->RetainedOwner(), pin->Identity(),
-                pin->Offset(), pin->Size(), *revision, physical});
+                pin->Offset(), pin->Size(), *revision, physical,
+                {VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT |
+                 VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT | VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT |
+                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                 VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT}});
         }
     }
     BindBuffer(buffer.Handle(), offset, size);

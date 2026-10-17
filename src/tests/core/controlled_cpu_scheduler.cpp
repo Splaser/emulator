@@ -1176,14 +1176,24 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     on_gpu([&] { device_memory.Map(Alias, GetInteger(owner.heap) + Footprint, Footprint, asid); });
     SCOPE_EXIT { on_gpu([&] { device_memory.Unmap(Alias, Footprint); }); };
     auto physical_coverage = std::make_shared<VideoCommon::PhysicalWriteCoverage>();
-    Vulkan::Scheduler::Write physical_a, physical_alias;
+    Vulkan::Scheduler::Write physical_a, physical_alias, missing_barrier, wrong_stage,
+        ordered_partial, separate_submission;
     std::optional<Vulkan::StagedBufferPin> retained_physical_a;
     on_gpu([&] {
         Access::RetireOrdinary(rasterizer, A);
         physical_a = Access::ObserveOrdinaryFill(rasterizer, A, Page, 0x31313131, physical_coverage);
         retained_physical_a = Access::OrdinaryPin(rasterizer, A, Page);
+        // The fill helper's internal barrier keeps native execution valid, but is
+        // deliberately not enrolled as provenance. Missing evidence must refuse.
+        missing_barrier = Access::ObserveOrdinaryFill(rasterizer, A, Page, 0x31313131, physical_coverage);
+        renderer->scheduler.WaitForIdle(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        wrong_stage = Access::ObserveOrdinaryFill(rasterizer, A, Page, 0x31313131, physical_coverage);
+        renderer->scheduler.WaitForIdle(VK_PIPELINE_STAGE_TRANSFER_BIT);
+        ordered_partial = Access::ObserveOrdinaryFill(rasterizer, A + 128, 512, 0x31313131, physical_coverage);
         physical_alias = Access::ObserveOrdinaryFill(rasterizer, Alias, Page, 0x32323232, physical_coverage);
         renderer->scheduler.Flush();
+        separate_submission = Access::ObserveOrdinaryFill(rasterizer, A, Page, 0x31313131, physical_coverage);
+        renderer->scheduler.Flush(); // No recorded semaphore dependency between these batches.
     });
     REQUIRE(physical_a);
     REQUIRE(physical_alias);
@@ -1216,6 +1226,27 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     physical_coverage->Seal();
     finish(physical_a, State::Complete);
     finish(physical_alias, State::Complete);
+    finish(missing_barrier, State::Complete);
+    finish(wrong_stage, State::Complete);
+    finish(ordered_partial, State::Complete);
+    finish(separate_submission, State::Complete);
+    std::array<bool, 6> dependencies{};
+    on_gpu([&] {
+        const auto physical = historical_a->Segments().front().physical_offset;
+        dependencies = {
+            renderer->scheduler.HasConfirmedMemoryDependency(physical_a, missing_barrier, physical, Page),
+            renderer->scheduler.HasConfirmedMemoryDependency(physical_a, wrong_stage, physical, Page),
+            renderer->scheduler.HasConfirmedMemoryDependency(physical_a, ordered_partial, physical + 128, 512),
+            renderer->scheduler.HasConfirmedMemoryDependency(physical_a, ordered_partial, physical, Page),
+            renderer->scheduler.HasConfirmedMemoryDependency(physical_a, physical_alias, physical, Page),
+            renderer->scheduler.HasConfirmedMemoryDependency(physical_a, separate_submission, physical, Page)};
+    });
+    REQUIRE_FALSE(dependencies[0]);
+    REQUIRE_FALSE(dependencies[1]);
+    REQUIRE(dependencies[2]);
+    REQUIRE_FALSE(dependencies[3]);
+    REQUIRE_FALSE(dependencies[4]);
+    REQUIRE_FALSE(dependencies[5]);
     REQUIRE(physical_a->HistoricalPhysicalIdentity() == historical_a);
     REQUIRE(std::ranges::equal(historical_a->Segments(), original_geometry));
     REQUIRE_FALSE(historical_a->MatchesCurrent(device_memory));

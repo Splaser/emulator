@@ -155,7 +155,8 @@ struct SchedulerTestAccess : SystemTestAccess {
         }
         if (!pin || !revision) throw std::runtime_error("observed fill pin or intent unavailable");
         const std::array<Vulkan::Scheduler::WriteFootprint, 1> ranges{{
-            {pin->RetainedOwner(), pin->Identity(), pin->Offset(), pin->Size(), *revision, physical}}};
+            {pin->RetainedOwner(), pin->Identity(), pin->Offset(), pin->Size(), *revision, physical,
+             {VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT}}}};
         auto& scheduler = rasterizer.scheduler;
         scheduler.RequestOutsideRenderPassOperationContext();
         const auto writes = scheduler.RecordObservedWrites(ranges,

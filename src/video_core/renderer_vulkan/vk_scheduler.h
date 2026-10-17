@@ -20,6 +20,7 @@
 #include "common/profiling.h"
 #include "video_core/buffer_cache/physical_write_identity.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
+#include "video_core/renderer_vulkan/vk_sync_provenance.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
 namespace VideoCommon {
@@ -48,6 +49,7 @@ public:
         const std::shared_ptr<std::atomic_bool> owner;
         std::atomic<VkResult> result{VK_NOT_READY};
         u64 tick{};
+        SyncProvenance synchronization;
     };
     using Submission = std::shared_ptr<CheckedSubmission>;
 
@@ -77,6 +79,8 @@ public:
         std::shared_ptr<VideoCommon::PhysicalWriteCoverage> coverage;
         std::atomic<Emission> emission{Emission::Pending};
         bool retired{};
+        SyncProvenance::Access access;
+        SyncProvenance::Position position{};
     };
     using Write = std::shared_ptr<CheckedWrite>;
     struct WriteFootprint {
@@ -84,6 +88,7 @@ public:
         const void* identity;
         u64 offset, size, intent_revision;
         std::shared_ptr<const VideoCommon::PhysicalWriteIdentity> physical;
+        SyncProvenance::Access access{};
     };
     using ObservedWrites = std::shared_ptr<const std::vector<Write>>;
 
@@ -95,6 +100,14 @@ public:
     // Closed complete scope + checked historical execution only, never current authority.
     [[nodiscard]] const VideoCommon::PhysicalWriteIdentity* CompletedPhysicalIdentity(
         const Write& write) const noexcept;
+
+    // Direct same-submission memory dependency for this historical physical interval.
+    // False means Unknown, never proof of an unordered execution or of latest content.
+    [[nodiscard]] bool HasConfirmedMemoryDependency(const Write& before, const Write& after,
+                                                    u64 physical_offset, u64 size) const noexcept;
+    // Outside a render pass. Metadata is recorded alongside the actual global barrier.
+    void RecordProvenanceBarrier(VkPipelineStageFlags source, VkPipelineStageFlags destination,
+                                 const VkMemoryBarrier& memory);
 
     // Explicit isolated producer only. Record and flush are inseparable: the returned
     // identity is the submission containing this command, not a later timeline tick.

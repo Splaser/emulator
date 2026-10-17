@@ -175,6 +175,7 @@ Scheduler::ObservedWrites Scheduler::RecordObservedWrites(std::span<const WriteF
                     range.size, range.intent_revision, submission_owner}};
                 write->submission = submission;
                 write->coverage = coverage;
+                write->access = range.access;
                 const bool associated = range.physical &&
                     range.physical->Representation() == range.identity &&
                     range.physical->NativeOffset() == range.offset &&
@@ -197,7 +198,10 @@ Scheduler::ObservedWrites Scheduler::RecordObservedWrites(std::span<const WriteF
             try {
                 const auto emission = bound_command(cmdbuf) ? CheckedWrite::Emission::Recorded :
                                                             CheckedWrite::Emission::Skipped;
+                const auto position = !writes->empty() && emission == CheckedWrite::Emission::Recorded
+                    ? writes->front()->submission->synchronization.RecordAccess() : 0;
                 for (const auto& write : *writes) {
+                    write->position = position;
                     auto expected = CheckedWrite::Emission::Pending;
                     (void)write->emission.compare_exchange_strong(expected, emission,
                         std::memory_order_release, std::memory_order_relaxed);
@@ -221,6 +225,56 @@ const VideoCommon::PhysicalWriteIdentity* Scheduler::CompletedPhysicalIdentity(
     if (PollCheckedWrite(write) != WriteState::Complete || !write->PhysicalCoverageComplete() ||
         !write->physical || !write->physical->OwnersAlive()) return nullptr;
     return write->physical.get();
+}
+
+bool Scheduler::HasConfirmedMemoryDependency(const Write& before, const Write& after,
+                                            u64 physical_offset, u64 size) const noexcept {
+    const auto* a = CompletedPhysicalIdentity(before);
+    const auto* b = CompletedPhysicalIdentity(after);
+    if (!a || !b || !size || size > std::numeric_limits<u64>::max() - physical_offset ||
+        before->submission != after->submission || a->Backing() != b->Backing() ||
+        a->Representation() != b->Representation()) return false;
+    const auto unique_projection = [](const VideoCommon::PhysicalWriteIdentity& plan) {
+        const auto segments = plan.Segments();
+        for (size_t i = 0; i < segments.size(); ++i)
+            for (size_t j = i + 1; j < segments.size(); ++j)
+                if (segments[i].physical_offset < segments[j].physical_offset + segments[j].length &&
+                    segments[j].physical_offset < segments[i].physical_offset + segments[i].length)
+                    return false;
+        return true;
+    };
+    if (!unique_projection(*a) || !unique_projection(*b)) return false;
+    // Each requested physical byte must project to the SAME native allocation byte.
+    // Physical aliases backed by independent staged buffers do not inherit contents.
+    for (u64 cursor = physical_offset; cursor < physical_offset + size;) {
+        u64 advance{};
+        for (const auto& left : a->Segments()) {
+            if (cursor < left.physical_offset || cursor - left.physical_offset >= left.length) continue;
+            for (const auto& right : b->Segments()) {
+                if (cursor < right.physical_offset || cursor - right.physical_offset >= right.length)
+                    continue;
+                const auto native_a = a->NativeOffset() + left.logical_offset + cursor - left.physical_offset;
+                const auto native_b = b->NativeOffset() + right.logical_offset + cursor - right.physical_offset;
+                if (native_a == native_b)
+                    advance = std::min({physical_offset + size - cursor,
+                        left.length - (cursor - left.physical_offset),
+                        right.length - (cursor - right.physical_offset)});
+            }
+        }
+        if (!advance) return false;
+        cursor += advance;
+    }
+    return before->submission->synchronization.Proves(
+        before->position, before->access, after->position, after->access);
+}
+
+void Scheduler::RecordProvenanceBarrier(VkPipelineStageFlags source,
+                                       VkPipelineStageFlags destination,
+                                       const VkMemoryBarrier& memory) {
+    Record([submission = observed_submission, source, destination, memory](vk::CommandBuffer cmdbuf) {
+        cmdbuf.PipelineBarrier(source, destination, 0, memory);
+        if (submission) submission->synchronization.RecordBarrier(source, destination, memory);
+    });
 }
 
 void Scheduler::RetireCheckedWritesAfterDeviceIdle() {
@@ -333,16 +387,13 @@ void Scheduler::RecordDeferredWaitForIdle() {
     // finished and sees its writes. The event pair this replaced had TOP_OF_PIPE as its second
     // scope, which carries no memory dependency, and the event was never reset, so every wait
     // after the first did nothing.
-    Record([src_stages = deferred_wfi_stages](vk::CommandBuffer cmdbuf) {
-        static constexpr VkMemoryBarrier WRITES_VISIBLE{
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
-        };
-        cmdbuf.PipelineBarrier(src_stages, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
-                               WRITES_VISIBLE);
-    });
+    static constexpr VkMemoryBarrier WRITES_VISIBLE{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+    };
+    RecordProvenanceBarrier(deferred_wfi_stages, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, WRITES_VISIBLE);
     deferred_wfi_stages = 0;
 }
 

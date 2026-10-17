@@ -250,3 +250,14 @@ partial intervals. Do not start latest-writer publication from these identity
 records. Real storage pins/admission, complete producer enrollment, mapping/frame
 reuse and merge/GC ownership are still required before content authority. F2/F3
 remain Open; restricted eligibility and ordinary Memory::Write/UMA stay blocked.
+
+### M4 F3 synchronization provenance extension
+
+See [the synchronization contract](M4_F3_SYNCHRONIZATION_PROVENANCE.md). Direct
+same-submission graphics-queue WFI memory-barrier dependencies are now recorded
+alongside actual Vulkan emission and gated by checked completion, closed coverage,
+stage/access scopes and complete same-native-byte physical projection. Independent
+replicas, different submissions and cross-queue relations remain Unknown. No data
+copy or latest-writer publication is implemented. The focused actual-body fixture
+and five expected mutation failures pass locally; native Linux/Android validation
+must be read from the exact new workflow run, not inferred from previous heads.

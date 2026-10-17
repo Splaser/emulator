@@ -104,6 +104,12 @@ required.
 
 ## Next gate
 
+The following bounded extension is now implemented in
+[synchronization provenance](M4_F3_SYNCHRONIZATION_PROVENANCE.md): direct global
+memory-barrier evidence within one checked graphics submission, with physical and
+native byte coverage checks. Cross-submission/queue relationships and content
+authority remain unimplemented. The paragraph below records the broader gate.
+
 Real synchronization provenance is still unimplemented: same-queue execution and
 memory dependencies, cross-queue semaphore relationships, transfer/shader access
 dependencies and partial interval coverage must be established explicitly. Do not

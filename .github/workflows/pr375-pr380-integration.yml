@@ -104,6 +104,14 @@ jobs:
             -DENABLE_QT=OFF -DENABLE_SDL2=ON -DCITRON_USE_EXTERNAL_SDL2=OFF \
             -DENABLE_CUBEB=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_LIBUSB=OFF \
             -DCITRON_ROOM=OFF -DCITRON_TESTS=ON -DCITRON_CRASH_DUMPS=OFF
+      - name: Reject unsupported synchronization evidence before native execution
+        run: |
+          g++ -std=c++23 -Wall -Wextra -Werror -I src -I externals/Vulkan-Headers/include \
+            tools/physical_coherency_tests/sync_provenance_tests.cpp \
+            -o .diagnostics/pr375-pr380/sync-provenance
+          .diagnostics/pr375-pr380/sync-provenance \
+            | tee .diagnostics/pr375-pr380/sync-provenance.txt
+          python tools/physical_coherency_tests/run_sync_provenance_tests.py
       - name: Check native scheduler integration translation units first
         run: |
           cmake --build build-integration --parallel 3 --target \
@@ -209,6 +217,7 @@ jobs:
             .diagnostics/m3b-registration-pipeline/extraction.json
             .diagnostics/m3b-registration-pipeline/*.cpp
             .diagnostics/m3b-registration-pipeline/*.txt
+            .diagnostics/m4-sync-provenance/*
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn
