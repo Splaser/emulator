@@ -149,13 +149,15 @@ Scheduler::WriteState Scheduler::PollCheckedWrite(const Write& write) const noex
 }
 
 Scheduler::ObservedWrites Scheduler::RecordObservedWrites(std::span<const WriteFootprint> footprints,
-    std::function<bool(vk::CommandBuffer)> command) {
+    std::function<bool(vk::CommandBuffer)> command,
+    std::shared_ptr<VideoCommon::PhysicalWriteCoverage> coverage) {
     if (!command) return {};
     std::shared_ptr<std::vector<Write>> writes;
     Submission submission;
     try {
         if (footprints.size() > 64 || checked_writes.size() + footprints.size() > 256 ||
-            !submission_owner->load(std::memory_order_acquire) || !device.HasTimelineSemaphore())
+            !submission_owner->load(std::memory_order_acquire) || !device.HasTimelineSemaphore() ||
+            (coverage && !coverage->Accepting()))
             throw std::runtime_error("unsupported observed write batch");
         for (const auto& range : footprints) {
             if (!range.resources || !range.identity || !range.size || !range.intent_revision ||
@@ -172,10 +174,18 @@ Scheduler::ObservedWrites Scheduler::RecordObservedWrites(std::span<const WriteF
                 auto write = Write{new CheckedWrite{range.resources, range.identity, range.offset,
                     range.size, range.intent_revision, submission_owner}};
                 write->submission = submission;
+                write->coverage = coverage;
+                const bool associated = range.physical &&
+                    range.physical->Representation() == range.identity &&
+                    range.physical->NativeOffset() == range.offset &&
+                    range.physical->Size() == range.size && range.physical->OwnersAlive();
+                if (associated) write->physical = range.physical;
+                else if (coverage) coverage->Invalidate();
                 writes->push_back(std::move(write));
             }
         }
     } catch (...) {
+        if (coverage) coverage->Invalidate();
         // No observed command has been queued. Diagnostics never drop/replay rendering.
         Record(std::move(command));
         return {};
@@ -204,6 +214,13 @@ Scheduler::ObservedWrites Scheduler::RecordObservedWrites(std::span<const WriteF
         throw;
     }
     return writes;
+}
+
+const VideoCommon::PhysicalWriteIdentity* Scheduler::CompletedPhysicalIdentity(
+    const Write& write) const noexcept {
+    if (PollCheckedWrite(write) != WriteState::Complete || !write->PhysicalCoverageComplete() ||
+        !write->physical || !write->physical->OwnersAlive()) return nullptr;
+    return write->physical.get();
 }
 
 void Scheduler::RetireCheckedWritesAfterDeviceIdle() {

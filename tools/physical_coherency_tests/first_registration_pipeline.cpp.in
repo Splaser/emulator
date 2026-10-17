@@ -14,7 +14,7 @@ struct Allocation { std::vector<u8> bytes; explicit Allocation(size_t size):byte
 struct Driver {
     VkResult submit_result=VK_SUCCESS,counter_result=VK_SUCCESS,wait_result=VK_SUCCESS,flush_result=VK_SUCCESS,invalidate_result=VK_SUCCESS;
     u64 counter=0,submitted_tick=0;
-    size_t submissions=0,barriers=0;
+    size_t submissions=0,barriers=0,reported_losses=0;
     bool corrupt=false;
     bool fail_allocation=false;
     bool host_read_barrier=false;
@@ -29,8 +29,13 @@ struct Driver {
 };
 inline Driver* driver;
 namespace vk {
-class Exception:public std::exception { public: VkResult GetResult() const {return VK_ERROR_UNKNOWN;} };
-inline void Check(VkResult result) {if(result!=VK_SUCCESS) throw Exception{};}
+class Exception:public std::exception {
+    VkResult result;
+public:
+    explicit Exception(VkResult value=VK_ERROR_UNKNOWN):result{value} {}
+    VkResult GetResult() const {return result;}
+};
+inline void Check(VkResult result) {if(result!=VK_SUCCESS) throw Exception{result};}
 class Buffer {
     std::shared_ptr<Allocation> allocation;
 public:
@@ -84,6 +89,7 @@ struct CommandBuffer {
 // The pin and payload ownership implementations are the actual production header.
 #include "video_core/renderer_vulkan/vk_buffer_payload.h"
 #include "video_core/buffer_cache/gpu_write_revision.h"
+#include "video_core/buffer_cache/physical_write_identity.h"
 namespace VideoCommon {struct BufferCopy {u64 src_offset,dst_offset,size;};}
 namespace Vulkan {
 struct Semaphore {
@@ -111,7 +117,7 @@ struct Device {
     bool timeline=true;
     bool HasTimelineSemaphore() const {return timeline;}
     Queue GetGraphicsQueue() const {return {};}
-    void ReportLoss() const {}
+    void ReportLoss() const {++driver->reported_losses;}
 };
 class MasterSemaphore {
 public:
@@ -137,7 +143,9 @@ public:
     Submission FlushChecked();VkResult PollChecked(const Submission&) const noexcept;
     std::vector<Write> checked_writes;
     Submission observed_submission;
-    ObservedWrites RecordObservedWrites(std::span<const WriteFootprint>,std::function<bool(vk::CommandBuffer)>);
+    ObservedWrites RecordObservedWrites(std::span<const WriteFootprint>,std::function<bool(vk::CommandBuffer)>,
+        std::shared_ptr<VideoCommon::PhysicalWriteCoverage> = {});
+    const VideoCommon::PhysicalWriteIdentity* CompletedPhysicalIdentity(const Write&) const noexcept;
     Write RecordCheckedWrite(std::shared_ptr<const void>,const void*,u64,u64,u64,std::function<bool(vk::CommandBuffer)>);
     WriteState PollCheckedWrite(const Write&) const noexcept;
     void RetireCheckedWritesAfterDeviceIdle();
@@ -162,12 +170,26 @@ struct Allocator {vk::Buffer CreateBuffer(const VkBufferCreateInfo& ci,MemoryUsa
     return buffer;
 }};
 class BufferCacheRuntime;
+struct ObservationMapping {
+    std::shared_ptr<Common::GuestBackingEpoch> backing=std::make_shared<Common::GuestBackingEpoch>();
+    std::shared_ptr<Common::MappingEpoch> epoch=std::make_shared<Common::MappingEpoch>();
+    u64 generation{},bias{};bool hole{};
+    template<class F> auto ReadPhysicalMappingSnapshot(F&& callback) const {
+        return callback(epoch,generation,backing,u64{4*1024*1024},[&](u64 address)->std::optional<u64> {
+            if(hole) return {};
+            return address%131072+bias;
+        });
+    }
+};
 class Buffer {
     std::shared_ptr<StagedBufferPayload> payload;
     u64 base,size;size_t lru{};
 public:
     Buffer(BufferCacheRuntime&,u64,u64);
     VideoCommon::GpuWriteRevision gpu_write_revision;
+    std::shared_ptr<const VideoCommon::PhysicalWriteIdentity> physical_origin;
+    bool physical_origin_attempted{};
+    bool IsDirectGuest() const {return false;}
     VkBuffer Handle() const {return payload->buffer ? *payload->buffer : VK_NULL_HANDLE;}
     u64 CpuAddr() const {return base;}u64 SizeBytes() const {return size;}
     void setLRUID(size_t n) {lru=n;}size_t getLRUID() const {return lru;}
@@ -185,6 +207,13 @@ public:
     bool SupportsControlledTransfers() const;
     Scheduler::Write ClearBufferChecked(StagedBufferPin,u64,u32,std::function<bool()> = {});
     bool storage_observation_active{},storage_observation_valid{true};
+    ObservationMapping test_mapping;
+    const ObservationMapping* observation_memory{};
+    void SetPhysicalObservationMemory(const ObservationMapping* memory) {observation_memory=memory;}
+    void CapturePhysicalOrigin(Buffer&) const noexcept;
+    void InvalidatePhysicalOrigin(Buffer& buffer) const noexcept {buffer.physical_origin.reset();}
+    std::shared_ptr<const VideoCommon::PhysicalWriteIdentity>
+        PhysicalIdentityForBinding(const Buffer&,u64,u64) const noexcept;
     std::vector<Scheduler::WriteFootprint> storage_write_footprints;
     void BeginStorageWriteObservation(bool);
     void EndStorageWriteObservation();
@@ -199,7 +228,9 @@ public:
     void CopyBuffer(VkBuffer,VkBuffer,std::span<const VideoCommon::BufferCopy>,bool,bool=false);
 };
 Buffer::Buffer(BufferCacheRuntime& runtime,u64 address,u64 length)
-    :payload{std::make_shared<StagedBufferPayload>(vk::Buffer(length),length,runtime.staged_pin_domain)},base{address},size{length} {}
+    :payload{std::make_shared<StagedBufferPayload>(vk::Buffer(length),length,runtime.staged_pin_domain)},base{address},size{length} {
+        runtime.CapturePhysicalOrigin(*this);
+    }
 // @TRANSFER_METHODS@
 }
 using DAddr=u64;

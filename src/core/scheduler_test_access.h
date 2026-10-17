@@ -138,10 +138,12 @@ struct SchedulerTestAccess : SystemTestAccess {
     // Exercise the ordinary batch observer with real transfer commands. This is not
     // an actual shader binding test; extracted Draw/Dispatch fixtures cover that wiring.
     static Vulkan::Scheduler::Write ObserveOrdinaryFill(Vulkan::RasterizerVulkan& rasterizer,
-        DAddr address, u32 size, u32 value) {
+        DAddr address, u32 size, u32 value,
+        std::shared_ptr<VideoCommon::PhysicalWriteCoverage> coverage = {}) {
         auto& cache = Cache(rasterizer);
         std::optional<Vulkan::StagedBufferPin> pin;
         std::optional<u64> revision;
+        std::shared_ptr<const VideoCommon::PhysicalWriteIdentity> physical;
         {
             std::scoped_lock lock{cache.mutex};
             auto [buffer, offset] = cache.ObtainCPUBuffer(address, size,
@@ -149,10 +151,11 @@ struct SchedulerTestAccess : SystemTestAccess {
                 VideoCommon::ObtainBufferOperation::MarkAsWritten);
             pin = buffer->PinStagedRepresentation(offset, size);
             revision = buffer->gpu_write_revision.Snapshot();
+            physical = rasterizer.buffer_cache_runtime.PhysicalIdentityForBinding(*buffer, offset, size);
         }
         if (!pin || !revision) throw std::runtime_error("observed fill pin or intent unavailable");
         const std::array<Vulkan::Scheduler::WriteFootprint, 1> ranges{{
-            {pin->RetainedOwner(), pin->Identity(), pin->Offset(), pin->Size(), *revision}}};
+            {pin->RetainedOwner(), pin->Identity(), pin->Offset(), pin->Size(), *revision, physical}}};
         auto& scheduler = rasterizer.scheduler;
         scheduler.RequestOutsideRenderPassOperationContext();
         const auto writes = scheduler.RecordObservedWrites(ranges,
@@ -169,7 +172,7 @@ struct SchedulerTestAccess : SystemTestAccess {
                     VK_PIPELINE_STAGE_TRANSFER_BIT, 0, barrier);
                 cmdbuf.FillBuffer(bound_pin.Handle(), bound_pin.Offset(), bound_pin.Size(), value);
                 return true;
-            });
+            }, std::move(coverage));
         if (!writes || writes->size() != 1) throw std::runtime_error("observed fill refused");
         return writes->front();
     }

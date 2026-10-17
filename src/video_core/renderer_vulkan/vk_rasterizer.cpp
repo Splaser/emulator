@@ -56,11 +56,24 @@ namespace Vulkan {
 bool RasterizerVulkan::SetControlledStorageWriteObservation(bool enabled) {
     std::shared_lock shutdown_guard{shutdown_mutex, std::try_to_lock};
     if (!shutdown_guard.owns_lock() || is_shutting_down || !gpu.IsGpuThread()) return false;
-    try { if (enabled) observed_storage_writes.reserve(256); }
+    if (!enabled) {
+        observe_storage_writes = false;
+        buffer_cache_runtime.SetPhysicalObservationMemory(nullptr);
+        if (storage_write_coverage) storage_write_coverage->Seal();
+        return true;
+    }
+    std::shared_ptr<VideoCommon::PhysicalWriteCoverage> coverage;
+    try {
+        observed_storage_writes.reserve(256);
+        coverage = std::make_shared<VideoCommon::PhysicalWriteCoverage>();
+    }
     catch (...) { return false; }
     observe_storage_writes = enabled;
     storage_observation_incomplete = false;
     observed_storage_writes.clear();
+    if (storage_write_coverage && storage_write_coverage->Accepting()) storage_write_coverage->Invalidate();
+    storage_write_coverage = std::move(coverage);
+    buffer_cache_runtime.SetPhysicalObservationMemory(&device_memory);
     return true;
 }
 
@@ -68,20 +81,27 @@ std::optional<RasterizerVulkan::StorageWriteObservation>
 RasterizerVulkan::GetControlledStorageWriteObservation() {
     std::shared_lock shutdown_guard{shutdown_mutex, std::try_to_lock};
     if (!shutdown_guard.owns_lock() || is_shutting_down || !gpu.IsGpuThread()) return {};
-    return StorageWriteObservation{observe_storage_writes && !storage_observation_incomplete,
-                                   observed_storage_writes};
+    return StorageWriteObservation{storage_write_coverage && storage_write_coverage->Intact() &&
+                                       !storage_observation_incomplete,
+                                   observed_storage_writes,
+                                   storage_write_coverage && storage_write_coverage->Complete()};
+}
+
+void RasterizerVulkan::MarkStorageObservationIncomplete() {
+    storage_observation_incomplete = true;
+    if (storage_write_coverage) storage_write_coverage->Invalidate();
 }
 
 void RasterizerVulkan::RecordObservedShaderStorageWrite(std::function<bool(vk::CommandBuffer)> command) {
     if (!observe_storage_writes || !buffer_cache_runtime.StorageWriteObservationValid()) {
-        if (observe_storage_writes) storage_observation_incomplete = true;
+        if (observe_storage_writes) MarkStorageObservationIncomplete();
         scheduler.Record(std::move(command));
         return;
     }
     const auto writes = scheduler.RecordObservedWrites(buffer_cache_runtime.StorageWriteFootprints(),
-                                                       std::move(command));
+                                                       std::move(command), storage_write_coverage);
     if (!writes || observed_storage_writes.size() + writes->size() > 256) {
-        storage_observation_incomplete = true;
+        MarkStorageObservationIncomplete();
         return; // Command was already recorded once, including observation refusal.
     }
     observed_storage_writes.insert(observed_storage_writes.end(), writes->begin(), writes->end());
@@ -647,7 +667,7 @@ GraphicsPipeline* RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_fun
     if (observing) buffer_cache_runtime.BeginStorageWriteObservation(true);
     SCOPE_EXIT {
         if (observing) {
-            if (!observed_command_recorded) storage_observation_incomplete = true;
+            if (!observed_command_recorded) MarkStorageObservationIncomplete();
             buffer_cache_runtime.EndStorageWriteObservation();
         }
     };
@@ -1139,7 +1159,7 @@ void RasterizerVulkan::DispatchCompute() {
     if (observing) buffer_cache_runtime.BeginStorageWriteObservation(true);
     SCOPE_EXIT {
         if (observing) {
-            if (!observed_command_recorded) storage_observation_incomplete = true;
+            if (!observed_command_recorded) MarkStorageObservationIncomplete();
             buffer_cache_runtime.EndStorageWriteObservation();
         }
     };

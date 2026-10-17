@@ -2870,6 +2870,10 @@ void BufferCache<P>::JoinOverlap(BufferId new_buffer_id, BufferId overlap_id,
                                  bool accumulate_stream_score) {
     Buffer& new_buffer = slot_buffers[new_buffer_id];
     Buffer& overlap = slot_buffers[overlap_id];
+    if constexpr (requires { runtime.InvalidatePhysicalOrigin(new_buffer); }) {
+        // This bounded observer does not yet prove representation inheritance.
+        runtime.InvalidatePhysicalOrigin(new_buffer);
+    }
     if (accumulate_stream_score) {
         new_buffer.IncreaseStreamScore(overlap.StreamScore() + 1);
     }

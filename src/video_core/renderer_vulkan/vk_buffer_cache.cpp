@@ -586,6 +586,7 @@ Buffer::Buffer(BufferCacheRuntime& runtime, DAddr cpu_addr_, u64 size_bytes_)
           CreateBuffer(*device, runtime.memory_allocator, SizeBytes()), SizeBytes(),
           runtime.staged_pin_domain)},
       tracker{SizeBytes()} {
+    runtime.CapturePhysicalOrigin(*this);
     if (runtime.device.HasDebuggingToolAttached()) {
         payload->buffer.SetObjectNameEXT(fmt::format("Buffer 0x{:x}", CpuAddr()).c_str());
     }
@@ -1056,6 +1057,32 @@ void BufferCacheRuntime::BeginStorageWriteObservation(bool enabled) {
     }
 }
 
+void BufferCacheRuntime::CapturePhysicalOrigin(Buffer& buffer) const noexcept {
+    if (buffer.physical_origin_attempted) return;
+    buffer.physical_origin_attempted = true; // Never rebase an existing/merged allocation.
+    if (!observation_memory || !buffer.CpuAddr() || buffer.IsDirectGuest()) return;
+    try {
+        const auto pin = buffer.PinStagedRepresentation(0, buffer.SizeBytes());
+        if (!pin) return;
+        auto origin = VideoCommon::PhysicalWriteIdentity::Capture(
+            *observation_memory, buffer.CpuAddr(), buffer.SizeBytes(), pin->Identity());
+        if (origin) buffer.physical_origin =
+            std::make_shared<const VideoCommon::PhysicalWriteIdentity>(std::move(*origin));
+    } catch (...) {} // Diagnostics cannot reject native allocation/rendering.
+}
+
+std::shared_ptr<const VideoCommon::PhysicalWriteIdentity>
+BufferCacheRuntime::PhysicalIdentityForBinding(const Buffer& buffer, u64 offset, u64 size) const noexcept {
+    if (!observation_memory || !buffer.physical_origin) return {};
+    try {
+        const auto pin = buffer.PinStagedRepresentation(offset, size);
+        if (!pin || buffer.physical_origin->Representation() != pin->Identity()) return {};
+        auto range = buffer.physical_origin->Slice(offset, size);
+        if (!range || !range->MatchesCurrent(*observation_memory)) return {};
+        return std::make_shared<const VideoCommon::PhysicalWriteIdentity>(std::move(*range));
+    } catch (...) { return {}; }
+}
+
 void BufferCacheRuntime::EndStorageWriteObservation() {
     storage_observation_active = false;
     storage_write_footprints.clear();
@@ -1067,11 +1094,12 @@ void BufferCacheRuntime::BindStorageBuffer(Buffer& buffer, u32 offset, u32 size,
     if (storage_observation_active && storage_observation_valid && is_written && size) {
         const auto pin = buffer.PinStagedRepresentation(offset, size);
         const auto revision = buffer.gpu_write_revision.Snapshot();
-        if (!buffer.CpuAddr() || !pin || !revision || storage_write_footprints.size() == 64) {
+        const auto physical = PhysicalIdentityForBinding(buffer, offset, size);
+        if (!buffer.CpuAddr() || !pin || !revision || !physical || storage_write_footprints.size() == 64) {
             storage_observation_valid = false; // Scratch/direct/overflow is not observed coverage.
         } else {
             storage_write_footprints.push_back({pin->RetainedOwner(), pin->Identity(),
-                pin->Offset(), pin->Size(), *revision});
+                pin->Offset(), pin->Size(), *revision, physical});
         }
     }
     BindBuffer(buffer.Handle(), offset, size);

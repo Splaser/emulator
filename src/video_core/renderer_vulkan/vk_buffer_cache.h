@@ -11,6 +11,7 @@
 #include "video_core/buffer_cache/memory_tracker_base.h"
 #include "video_core/buffer_cache/usage_tracker.h"
 #include "video_core/engines/maxwell_3d.h"
+#include "video_core/host1x/gpu_device_memory_manager.h"
 #include "video_core/renderer_vulkan/vk_compute_pass.h"
 #include "video_core/renderer_vulkan/vk_buffer_payload.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -102,6 +103,8 @@ private:
     std::unique_ptr<DirectGuestMapping> direct;
     const Device* device{};
     std::shared_ptr<StagedBufferPayload> payload;
+    std::shared_ptr<const VideoCommon::PhysicalWriteIdentity> physical_origin;
+    bool physical_origin_attempted{};
     std::vector<BufferView> views;
     VideoCommon::UsageTracker tracker;
     /// Submission the usage in tracker belongs to.
@@ -191,6 +194,13 @@ public:
     [[nodiscard]] Scheduler::Write ClearBufferChecked(StagedBufferPin pin, u64 intent_revision, u32 value,
         std::function<bool()> emit = {});
     void BeginStorageWriteObservation(bool enabled);
+    void SetPhysicalObservationMemory(const Tegra::MaxwellDeviceMemoryManager* memory) {
+        observation_memory = memory;
+    }
+    void CapturePhysicalOrigin(Buffer& buffer) const noexcept;
+    void InvalidatePhysicalOrigin(Buffer& buffer) const noexcept { buffer.physical_origin.reset(); }
+    [[nodiscard]] std::shared_ptr<const VideoCommon::PhysicalWriteIdentity>
+        PhysicalIdentityForBinding(const Buffer& buffer, u64 offset, u64 size) const noexcept;
     void EndStorageWriteObservation();
     [[nodiscard]] bool StorageWriteObservationValid() const {
         return storage_observation_active && storage_observation_valid;
@@ -257,6 +267,7 @@ public:
 
 private:
     bool storage_observation_active{};
+    const Tegra::MaxwellDeviceMemoryManager* observation_memory{};
     bool storage_observation_valid{true};
     std::vector<Scheduler::WriteFootprint> storage_write_footprints;
     std::vector<std::weak_ptr<VideoCommon::ControlledBufferTransfer>> controlled_transfers;

@@ -84,6 +84,7 @@ for marker in ['Scheduler::Submission Scheduler::FlushChecked(',
                'VkResult Scheduler::PollChecked(', 'u64 Scheduler::SubmitExecution(',
                'Scheduler::Write Scheduler::RecordCheckedWrite(',
                'Scheduler::ObservedWrites Scheduler::RecordObservedWrites(',
+               'const VideoCommon::PhysicalWriteIdentity* Scheduler::CompletedPhysicalIdentity(',
                'Scheduler::WriteState Scheduler::PollCheckedWrite(',
                'void Scheduler::RetireCheckedWritesAfterDeviceIdle(']:
     submission += body(scheduler_path, marker) + '\n'
@@ -91,6 +92,8 @@ runtime_path = 'src/video_core/renderer_vulkan/vk_buffer_cache.cpp'
 transfer = body(runtime_path, 'VkBufferCopy MakeBufferCopy(') + '\n'
 transfer += body(runtime_path, 'class ControlledTransfer final') + ';\n'
 for marker in ['void BufferCacheRuntime::BeginStorageWriteObservation(',
+               'void BufferCacheRuntime::CapturePhysicalOrigin(',
+               'std::shared_ptr<const VideoCommon::PhysicalWriteIdentity>\nBufferCacheRuntime::PhysicalIdentityForBinding(',
                'void BufferCacheRuntime::EndStorageWriteObservation(',
                'void BufferCacheRuntime::BindStorageBuffer(Buffer&']:
     transfer += body(runtime_path, marker) + '\n'
@@ -484,14 +487,20 @@ struct StorageObserverHarness {
     Scheduler& scheduler;BufferCacheRuntime& buffer_cache_runtime;
     bool observe_storage_writes=true,storage_observation_incomplete=false;
     std::vector<Scheduler::Write> observed_storage_writes;
+    std::shared_ptr<VideoCommon::PhysicalWriteCoverage> storage_write_coverage=
+        std::make_shared<VideoCommon::PhysicalWriteCoverage>();
     StorageObserverHarness(Scheduler& s,BufferCacheRuntime& r):scheduler{s},buffer_cache_runtime{r} {
         observed_storage_writes.reserve(256);
+        r.SetPhysicalObservationMemory(&r.test_mapping);
     }
     void RecordObservedShaderStorageWrite(std::function<bool(vk::CommandBuffer)>);
+    void MarkStorageObservationIncomplete();
 ''' + 'template <typename Command>\n' + body('src/video_core/renderer_vulkan/vk_rasterizer.h',
            '    void RecordShaderStorageWrite(Command&& command)') + r'''
 };
 ''' + body('src/video_core/renderer_vulkan/vk_rasterizer.cpp',
+           'void RasterizerVulkan::MarkStorageObservationIncomplete(').replace(
+               'RasterizerVulkan::', 'StorageObserverHarness::') + '\n' + body('src/video_core/renderer_vulkan/vk_rasterizer.cpp',
            'void RasterizerVulkan::RecordObservedShaderStorageWrite(').replace(
                'RasterizerVulkan::', 'StorageObserverHarness::') + '\n}\n'
 observer += r'''
@@ -545,18 +554,32 @@ int main() {
             assert(s->scheduler.PollCheckedWrite(first)==State::Pending && driver->submissions==0);
             if(mode==2) driver->submit_result=VK_ERROR_DEVICE_LOST;
             bool threw=false;
+            VkResult propagated=VK_SUCCESS;
             s->scheduler.fail_end_pending=mode==8;
             try {
                 s->scheduler.SubmitExecution(nullptr,nullptr); // Ordinary Flush's actual submit body.
                 s->scheduler.RunWorker();
-            } catch(const std::exception&) {threw=true;}
+            } catch(const vk::Exception& error) {threw=true;propagated=error.GetResult();}
+              catch(const std::exception&) {threw=true;}
             s->scheduler.fail_end_pending=false;
             const bool failed=mode==2 || mode==8;
+            assert(first->HistoricalPhysicalIdentity());
+            assert(!s->scheduler.CompletedPhysicalIdentity(first)); // Open scope is never complete coverage.
+            rasterizer.storage_write_coverage->Seal();
             assert(threw==failed); // Ordinary failure policy must survive diagnostics.
             assert(s->scheduler.PollCheckedWrite(first)==(failed?State::Unknown:State::Submitted));
+            if(mode==2) {
+                assert(propagated==VK_ERROR_DEVICE_LOST && driver->reported_losses==1);
+                assert(driver->counter==0 && driver->submitted_tick==0 && driver->submitted.empty());
+                driver->submit_result=VK_SUCCESS;
+                s->gpu.Complete();
+                assert(driver->counter==0 && s->scheduler.PollCheckedWrite(first)==State::Unknown);
+                assert(!s->scheduler.CompletedPhysicalIdentity(first));
+            }
             if(!failed) {
                 s->gpu.Complete();
                 assert(s->scheduler.PollCheckedWrite(first)==(mode==1?State::Skipped:State::Complete));
+                assert(bool(s->scheduler.CompletedPhysicalIdentity(first))==(mode!=1));
                 assert(driver->draws==(mode==1?0u:2u));
                 for(auto byte:reinterpret_cast<Allocation*>(handle)->bytes) assert(byte==(mode==1?10:99));
             }
@@ -591,6 +614,70 @@ int main() {
         for(const auto& write:writes) assert(s->scheduler.PollCheckedWrite(write)==State::Complete);
         s->scheduler.RetireCheckedWritesAfterDeviceIdle();
     }
+    {
+        auto s=std::make_unique<Scenario>();
+        Vulkan::StorageObserverHarness rasterizer{s->scheduler,s->runtime};
+        Vulkan::Buffer buffer{s->runtime,A,4096};
+        driver->draw_target=buffer.Handle();
+        Pipeline pipeline;
+        for(size_t i=0;i<257;++i) {
+            s->runtime.BeginStorageWriteObservation(true);
+            s->runtime.BindStorageBuffer(buffer,0,4096,true);
+            rasterizer.RecordShaderStorageWrite([&](vk::CommandBuffer command) {
+                return ActualDrawWorker(command,&pipeline,{});
+            });
+            s->runtime.EndStorageWriteObservation();
+            if(i==199) assert(!rasterizer.storage_observation_incomplete);
+        }
+        assert(rasterizer.storage_observation_incomplete && rasterizer.observed_storage_writes.size()==256);
+        rasterizer.storage_write_coverage->Seal();
+        s->scheduler.SubmitExecution(nullptr,nullptr);s->scheduler.RunWorker();s->gpu.Complete();
+        assert(driver->draws==257 && driver->submissions==1);
+        for(const auto& write:rasterizer.observed_storage_writes) {
+            assert(s->scheduler.PollCheckedWrite(write)==State::Complete);
+            assert(write->HistoricalPhysicalIdentity() && !write->PhysicalCoverageComplete());
+            assert(!s->scheduler.CompletedPhysicalIdentity(write));
+        }
+        s->scheduler.RetireCheckedWritesAfterDeviceIdle();
+    }
+    {
+        auto s=std::make_unique<Scenario>();
+        // An allocation predating observation must not be labelled from today's mapping.
+        Vulkan::Buffer unqualified{s->runtime,A,4096};
+        Vulkan::StorageObserverHarness rasterizer{s->scheduler,s->runtime};
+        s->runtime.CapturePhysicalOrigin(unqualified);
+        assert(!unqualified.physical_origin); // Constructor-only origin, even after observation starts.
+        s->runtime.BeginStorageWriteObservation(true);
+        s->runtime.BindStorageBuffer(unqualified,0,4096,true);
+        assert(!s->runtime.StorageWriteObservationValid());
+        s->runtime.EndStorageWriteObservation();
+        Vulkan::Buffer original{s->runtime,A,8192},alias{s->runtime,ALIAS,8192};
+        auto a=s->runtime.PhysicalIdentityForBinding(original,3840,512);
+        auto b=s->runtime.PhysicalIdentityForBinding(alias,3840,512);
+        assert(a && b && a->Segments().size()==2 && a->Size()==512 && a->NativeOffset()==3840);
+        assert(a->OverlapsPhysical(*b) && a->Backing()==b->Backing());
+        assert(a->Representation()!=b->Representation());
+        const auto old_physical=a->Segments().front().physical_offset;
+        s->runtime.test_mapping.bias=4096;s->runtime.test_mapping.generation+=2;
+        assert(!a->MatchesCurrent(s->runtime.test_mapping));
+        assert(!s->runtime.PhysicalIdentityForBinding(original,3840,512));
+        assert(a->Segments().front().physical_offset==old_physical); // Never resolve a replacement origin.
+        Vulkan::Buffer replacement{s->runtime,A,8192};
+        auto fresh=s->runtime.PhysicalIdentityForBinding(replacement,3840,512);
+        assert(fresh && fresh->Segments().front().physical_offset==old_physical+4096);
+        assert(fresh->Representation()!=a->Representation());
+        s->runtime.InvalidatePhysicalOrigin(replacement);
+        s->runtime.CapturePhysicalOrigin(replacement);
+        assert(!s->runtime.PhysicalIdentityForBinding(replacement,3840,512));
+        original.physical_origin=alias.physical_origin;
+        assert(!s->runtime.PhysicalIdentityForBinding(original,3840,512));
+        s->runtime.test_mapping.hole=true;
+        Vulkan::Buffer hole{s->runtime,A,4096};
+        assert(!s->runtime.PhysicalIdentityForBinding(hole,0,4096));
+        s->runtime.test_mapping.hole=false;
+        s->runtime.test_mapping.backing->alive.store(false);
+        assert(!a->OwnersAlive() && a->Segments().front().physical_offset==old_physical);
+    }
     for(bool skipped:{false,true}) {
         auto s=std::make_unique<Scenario>();
         Vulkan::Buffer buffer{s->runtime,A,4096};
@@ -618,6 +705,9 @@ int main() {
     std::cout<<"PASS ordinary storage observer actual-body fixture: bind identity/range/revision, "
                "shared batch without flush, skipped Draw, pending versus completed, ordinary submit throws, "
                "unsubmitted retention, disabled/scratch/raw/capacity refusal executes once; no authority\n";
+    std::cout<<"PASS immutable physical identity: aliases, partial pages, old remap geometry, "
+               "unqualified/rebased/invalidated/mismatched representations and dead epochs; "
+               "device-loss propagation with no timeline success; closed scope and 257-command overflow gate\n";
 }
 '''
 observer_cpp = out / 'storage_observer.cpp'
@@ -625,12 +715,23 @@ observer_cpp.write_text(observer)
 observer_exe = out / ('storage_observer.exe' if os.name == 'nt' else 'storage_observer')
 subprocess.run(cmd + [str(observer_cpp), '-o', str(observer_exe)], check=True)
 subprocess.run([str(observer_exe)], check=True, timeout=60)
+coverage_guard = '!write->PhysicalCoverageComplete() ||'
+assert observer.count(coverage_guard) == 1
+coverage_cpp = out / 'storage_coverage_bypass.cpp'
+coverage_cpp.write_text(observer.replace(coverage_guard, 'false ||'))
+coverage_exe = out / ('storage_coverage_bypass.exe' if os.name == 'nt' else 'storage_coverage_bypass')
+subprocess.run(cmd + [str(coverage_cpp), '-o', str(coverage_exe)], check=True)
+negative = subprocess.run([str(coverage_exe)], capture_output=True, text=True, timeout=60)
+(out / 'storage-coverage-negative.txt').write_text(negative.stdout + negative.stderr)
+assert negative.returncode != 0 and 'CompletedPhysicalIdentity(write)' in negative.stderr
+print('PASS negative physical coverage control: ignoring shared coverage admits an overflowing prefix')
 inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
                'src/video_core/buffer_cache/controlled_conflict.h', 'src/common/range_sets.inc',
                'src/video_core/gpu_thread.cpp','src/video_core/gpu_thread.h',
                'src/core/hle/kernel/k_process.cpp','src/core/memory.h',
                'src/video_core/buffer_cache/controlled_transfer.h', 'src/video_core/physical_access_plan.h',
                'src/video_core/renderer_vulkan/vk_buffer_payload.h',
+               'src/video_core/buffer_cache/physical_write_identity.h',
                'src/video_core/buffer_cache/physical_alias_copy.h'])
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sorted(inputs)},

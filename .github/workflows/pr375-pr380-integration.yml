@@ -208,6 +208,7 @@ jobs:
             .diagnostics/m3b-first-registration/*.cpp
             .diagnostics/m3b-registration-pipeline/extraction.json
             .diagnostics/m3b-registration-pipeline/*.cpp
+            .diagnostics/m3b-registration-pipeline/*.txt
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn

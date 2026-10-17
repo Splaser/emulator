@@ -18,6 +18,7 @@
 #include "common/common_types.h"
 #include "common/polyfill_thread.h"
 #include "common/profiling.h"
+#include "video_core/buffer_cache/physical_write_identity.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
@@ -59,6 +60,8 @@ public:
         u64 Offset() const noexcept { return offset; }
         u64 Size() const noexcept { return size; }
         u64 IntentRevision() const noexcept { return intent_revision; }
+        const auto& HistoricalPhysicalIdentity() const noexcept { return physical; }
+        bool PhysicalCoverageComplete() const noexcept { return coverage && coverage->Complete(); }
     private:
         enum class Emission { Pending, Recorded, Skipped, Unknown };
         CheckedWrite(std::shared_ptr<const void> resources_, const void* identity_, u64 offset_,
@@ -70,6 +73,8 @@ public:
         const u64 offset, size, intent_revision;
         const std::shared_ptr<std::atomic_bool> owner;
         Submission submission;
+        std::shared_ptr<const VideoCommon::PhysicalWriteIdentity> physical;
+        std::shared_ptr<VideoCommon::PhysicalWriteCoverage> coverage;
         std::atomic<Emission> emission{Emission::Pending};
         bool retired{};
     };
@@ -78,13 +83,18 @@ public:
         std::shared_ptr<const void> resources;
         const void* identity;
         u64 offset, size, intent_revision;
+        std::shared_ptr<const VideoCommon::PhysicalWriteIdentity> physical;
     };
     using ObservedWrites = std::shared_ptr<const std::vector<Write>>;
 
     // Diagnostic storage projection. Uses the existing batch, without flushing.
     // Null means observation refused; the original command is still recorded once.
     [[nodiscard]] ObservedWrites RecordObservedWrites(std::span<const WriteFootprint> footprints,
-        std::function<bool(vk::CommandBuffer)> command);
+        std::function<bool(vk::CommandBuffer)> command,
+        std::shared_ptr<VideoCommon::PhysicalWriteCoverage> coverage = {});
+    // Closed complete scope + checked historical execution only, never current authority.
+    [[nodiscard]] const VideoCommon::PhysicalWriteIdentity* CompletedPhysicalIdentity(
+        const Write& write) const noexcept;
 
     // Explicit isolated producer only. Record and flush are inseparable: the returned
     // identity is the submission containing this command, not a later timeline tick.

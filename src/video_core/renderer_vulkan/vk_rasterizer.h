@@ -102,6 +102,7 @@ public:
     struct StorageWriteObservation {
         bool capture_valid;
         std::vector<Scheduler::Write> writes;
+        bool physical_coverage_complete;
     };
     // Explicit GPU-owner diagnostics. No physical authority or eligibility certificate.
     bool SetControlledStorageWriteObservation(bool enabled);
@@ -264,7 +265,7 @@ private:
         try {
             observed_command = command;
         } catch (...) {
-            storage_observation_incomplete = true;
+            MarkStorageObservationIncomplete();
             scheduler.Record(std::forward<Command>(command));
             return;
         }
@@ -272,6 +273,7 @@ private:
         RecordObservedShaderStorageWrite(std::move(observed_command));
     }
     void RecordObservedShaderStorageWrite(std::function<bool(vk::CommandBuffer)> command);
+    void MarkStorageObservationIncomplete();
 
     /// Performs the pipeline's vertex pointer stores, instance_count is empty for indirect draws
     void PerformVertexPointerStores(const GraphicsPipeline& pipeline, bool is_indexed,
@@ -340,6 +342,7 @@ private:
     bool observe_storage_writes{};
     bool storage_observation_incomplete{};
     std::vector<Scheduler::Write> observed_storage_writes;
+    std::shared_ptr<VideoCommon::PhysicalWriteCoverage> storage_write_coverage;
     const std::shared_ptr<const u8> controlled_alias_owner{std::make_shared<const u8>(0)};
     QueryCacheRuntime query_cache_runtime;
     QueryCache query_cache;

@@ -1145,6 +1145,81 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     finish(next_batch, State::Complete);
     REQUIRE(read(A) == std::vector<u8>(Page, 35));
     REQUIRE(read(B) == std::vector<u8>(Page, 10));
+    // Immutable physical identity slice: real mappings/cache/queue, transfer
+    // producers only. The ordinary shader binding wiring remains a fault fixture.
+    auto missing_coverage = std::make_shared<VideoCommon::PhysicalWriteCoverage>();
+    Vulkan::Scheduler::Write missing_origin;
+    bool enabled{};
+    on_gpu([&] {
+        enabled = rasterizer.SetControlledStorageWriteObservation(true);
+        missing_origin = Access::ObserveOrdinaryFill(rasterizer, A, Page, 0x23232323, missing_coverage);
+        renderer->scheduler.Flush();
+    });
+    REQUIRE(enabled);
+    REQUIRE(missing_origin);
+    REQUIRE_FALSE(missing_origin->HistoricalPhysicalIdentity());
+    REQUIRE_FALSE(missing_coverage->Intact()); // Existing allocation cannot acquire a new origin.
+    missing_coverage->Seal();
+    finish(missing_origin, State::Complete);
+    const VideoCommon::PhysicalWriteIdentity* completed_identity{};
+    on_gpu([&] { completed_identity = renderer->scheduler.CompletedPhysicalIdentity(missing_origin); });
+    REQUIRE(completed_identity == nullptr);
+
+    constexpr DAddr Alias = 0x3000000;
+    device_memory.AllocateFixed(Alias, Footprint);
+    on_gpu([&] { device_memory.Map(Alias, GetInteger(owner.heap) + Footprint, Footprint, asid); });
+    SCOPE_EXIT { on_gpu([&] { device_memory.Unmap(Alias, Footprint); }); };
+    auto physical_coverage = std::make_shared<VideoCommon::PhysicalWriteCoverage>();
+    Vulkan::Scheduler::Write physical_a, physical_alias;
+    std::optional<Vulkan::StagedBufferPin> retained_physical_a;
+    on_gpu([&] {
+        Access::RetireOrdinary(rasterizer, A);
+        physical_a = Access::ObserveOrdinaryFill(rasterizer, A, Page, 0x31313131, physical_coverage);
+        retained_physical_a = Access::OrdinaryPin(rasterizer, A, Page);
+        physical_alias = Access::ObserveOrdinaryFill(rasterizer, Alias, Page, 0x32323232, physical_coverage);
+        renderer->scheduler.Flush();
+    });
+    REQUIRE(physical_a);
+    REQUIRE(physical_alias);
+    REQUIRE(retained_physical_a);
+    const auto historical_a = physical_a->HistoricalPhysicalIdentity();
+    const auto historical_alias = physical_alias->HistoricalPhysicalIdentity();
+    REQUIRE(historical_a);
+    REQUIRE(historical_alias);
+    REQUIRE(historical_a->Representation() == physical_a->ResourceIdentity());
+    REQUIRE(historical_a->NativeOffset() == physical_a->Offset());
+    REQUIRE(historical_a->Size() == Page);
+    REQUIRE(historical_a->Backing() == historical_alias->Backing());
+    REQUIRE(historical_a->OverlapsPhysical(*historical_alias));
+    REQUIRE(physical_a->ResourceIdentity() != physical_alias->ResourceIdentity());
+    REQUIRE(historical_a->DeviceAddress() == A);
+    REQUIRE(historical_alias->DeviceAddress() == Alias);
+    REQUIRE_FALSE(physical_a->PhysicalCoverageComplete()); // Active prefix is not a complete scope.
+    REQUIRE(Until([&] {
+        const auto state = poll(physical_a);
+        return state == State::Submitted || state == State::Complete;
+    })); // Actual successful queue submission precedes the following remap.
+    const std::vector<VideoCommon::PhysicalWriteIdentity::Segment> original_geometry{
+        historical_a->Segments().begin(), historical_a->Segments().end()};
+    on_gpu([&] {
+        device_memory.Unmap(A, Footprint);
+        device_memory.Map(A, GetInteger(owner.heap), Footprint, asid);
+        enabled = rasterizer.SetControlledStorageWriteObservation(false);
+    });
+    REQUIRE(enabled);
+    physical_coverage->Seal();
+    finish(physical_a, State::Complete);
+    finish(physical_alias, State::Complete);
+    REQUIRE(physical_a->HistoricalPhysicalIdentity() == historical_a);
+    REQUIRE(std::ranges::equal(historical_a->Segments(), original_geometry));
+    REQUIRE_FALSE(historical_a->MatchesCurrent(device_memory));
+    REQUIRE(historical_alias->MatchesCurrent(device_memory));
+    on_gpu([&] { completed_identity = renderer->scheduler.CompletedPhysicalIdentity(physical_a); });
+    REQUIRE(completed_identity == historical_a.get()); // OLD historical identity, never current authority.
+    std::vector<u8> physical_old_bytes;
+    on_gpu([&] { physical_old_bytes = Access::ReadPin(rasterizer, *retained_physical_a); });
+    REQUIRE(physical_old_bytes == std::vector<u8>(Page, 49));
+    REQUIRE(read(Alias) == std::vector<u8>(Page, 50)); // Independent staged replica, no source selection.
     on_gpu([&] {
         renderer->scheduler.Finish();
         std::scoped_lock lock{renderer->scheduler.submit_mutex};
