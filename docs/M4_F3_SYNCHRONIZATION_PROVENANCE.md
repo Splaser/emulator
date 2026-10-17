@@ -86,6 +86,28 @@ dispatch covers genuinely missing barrier/wrong destination conditions without
 deliberately submitting a Vulkan data race. Native transfer/readback evidence is
 not actual shader/game execution or Android device validation.
 
+## Verified source and results
+
+Production/test source `a5dba62536` passed the complete
+[workflow 39004334780](https://github.com/Splaser/emulator/actions/runs/39004334780).
+Both Linux production and Android native jobs succeeded. Linux passed all five
+CTest processes: 130 ordinary cases, 1708 scheduler assertions, 38 F3 assertions,
+88 isolated alias assertions and 119 provenance assertions. Three additional native
+provenance processes each passed all 119 assertions. Focused dependency controls,
+all five expected mutation failures, the combined actual-body registration/Draw
+fixture and every configured coherency/lifecycle regression passed.
+
+Original F3 require-fixed mode still produced exactly two known alias failures,
+36 passing assertions and exit 42. F2 still reported backing 77/cache 10, with its
+require-fixed control exiting 1. These remain required defect witnesses, not repair
+acceptance. Android compiled actual arm64 core/video/shader libraries through
+CPM/NDK 29; no local Android build, APK acceptance or target-device run was made.
+
+Downloaded source stamp, LastTest.log, generated actual-body sources, input hashes,
+positive logs and separate expected-failure logs are retained under
+`.diagnostics/ci-39004334780/`. The documentation follow-up changes no production,
+test or workflow source and does not require repeating the same validation.
+
 ## Next boundary
 
 Before physical latest-writer authority, separately establish actual content

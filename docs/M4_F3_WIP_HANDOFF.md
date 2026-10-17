@@ -258,6 +258,10 @@ same-submission graphics-queue WFI memory-barrier dependencies are now recorded
 alongside actual Vulkan emission and gated by checked completion, closed coverage,
 stage/access scopes and complete same-native-byte physical projection. Independent
 replicas, different submissions and cross-queue relations remain Unknown. No data
-copy or latest-writer publication is implemented. The focused actual-body fixture
-and five expected mutation failures pass locally; native Linux/Android validation
-must be read from the exact new workflow run, not inferred from previous heads.
+copy or latest-writer publication is implemented. Source `a5dba62536` passed full
+[workflow 39004334780](https://github.com/Splaser/emulator/actions/runs/39004334780):
+all five Linux CTest processes, native provenance 119 assertions plus three repeat
+processes, focused actual-body controls and five expected mutation failures, full
+coherency/lifecycle regressions and Android arm64 production library compilation.
+F3 require-fixed still fails exactly two aliases (exit 42); F2 remains backing
+77/cache 10. Detailed boundaries and retained artifacts are in the contract.
