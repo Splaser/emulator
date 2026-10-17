@@ -155,7 +155,9 @@ for name, value in [('POLL_TIMELINE', timeline), ('CHECKED_SUBMISSION', checked)
                         'src/video_core/renderer_vulkan/vk_scheduler.h',
                         '    const TransferContent* CurrentTransferContent(') + '\ntemplate <typename Memory>\n' + body(
                         'src/video_core/renderer_vulkan/vk_scheduler.h',
-                        '    const TransferContent* CurrentTransferContentRange(')),
+                        '    const TransferContent* CurrentTransferContentRange(') + '\ntemplate <typename Memory>\n' + body(
+                        'src/video_core/renderer_vulkan/vk_scheduler.h',
+                        '    bool CurrentTransferHasRoot(')),
                     ('RAW_STORAGE_BIND', body('src/video_core/renderer_vulkan/vk_buffer_cache.h',
                         '    void BindStorageBuffer(VkBuffer buffer,')),
                     ('DEVICE_WRITE_GUARDS',

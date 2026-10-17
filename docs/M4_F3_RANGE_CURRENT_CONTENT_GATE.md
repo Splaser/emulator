@@ -15,6 +15,15 @@ An eligible interval can still contain Unknown provenance; callers must separate
 prove its exact content origin. Returned pointers remain immutable historical
 metadata across subsequent operations, not concurrent admission leases.
 
+A non-null range query qualifies only the supplied bytes, never other intervals
+in the returned historical graph. `CurrentTransferHasRoot` combines current range
+qualification and exact historical root/projection checks for the same buffer,
+offset and size, returning a boolean instead of a wider historical pointer.
+Mixed roots, Unknown bytes, wrong root offsets and stale middle bytes all reject.
+The root's command index is local to this immutable transfer graph, not a data
+version or an ordering relationship. This point-in-time check is not a lease or
+physical latest-writer publication.
+
 The whole-snapshot query requires the full interval of every retained pin. Both
 queries return the original graph; revocation never edits roots, copy parents,
 physical origins, fill values or historical coverage.
@@ -83,6 +92,13 @@ untouched bytes and query outcomes while retaining historical origins.
 Full Linux and Android workflow evidence is recorded after source validation.
 Neither simulated dispatch nor Android library compilation proves device/game
 acceptance. Cross-submission/queue roots remain Unknown in this slice.
+
+Follow-up validation defaults to Linux compilation, unit tests and relevant
+native regressions. Android compilation is requested only for Android-specific
+changes or risks Linux cannot cover. Manual workflow dispatch defaults to
+`linux-only`; `full` remains an explicit option when Android evidence is needed.
+The prior running Android job does not block subsequent work and is never treated
+as successful while pending.
 
 ## Development stages
 

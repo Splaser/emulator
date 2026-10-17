@@ -1298,8 +1298,13 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     on_gpu([&] { content = renderer->scheduler.TransferContentForMapping(content_transfer, device_memory); });
     REQUIRE(content);
     const Content* current_content{};
+    bool current_root{};
     on_gpu([&] { current_content = renderer->scheduler.CurrentTransferContent(content_transfer, device_memory); });
     REQUIRE(current_content == content);
+    on_gpu([&] { current_root = renderer->scheduler.CurrentTransferHasRoot(content_transfer, device_memory, 1, 16, 16, 1, 16); });
+    REQUIRE(current_root);
+    on_gpu([&] { current_root = renderer->scheduler.CurrentTransferHasRoot(content_transfer, device_memory, 1, 0, 64, 0, 0); });
+    REQUIRE_FALSE(current_root); // Complete eligibility does not flatten mixed content roots.
     REQUIRE(content->HasRoot(1, 16, 16, 1, 16));
     REQUIRE(content->HasRoot(1, 0, 16, 0, 0));
     REQUIRE(content->HasRoot(1, 32, 32, 0, 32));
@@ -1329,6 +1334,10 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     REQUIRE(middle_content == nullptr);
     REQUIRE(right_content == immutable_history.get());
     REQUIRE(current_content == immutable_history.get()); // Different native replica, same physical bytes.
+    on_gpu([&] { current_root = renderer->scheduler.CurrentTransferHasRoot(content_transfer, device_memory, 1, 0, 16, 0, 0); });
+    REQUIRE(current_root);
+    on_gpu([&] { current_root = renderer->scheduler.CurrentTransferHasRoot(content_transfer, device_memory, 1, 16, 16, 1, 16); });
+    REQUIRE_FALSE(current_root); // The historical root still exists, but these bytes are no longer current.
     on_gpu([&] { content_b = Access::ReadPin(rasterizer, content_targets[1].pin); });
     std::fill(mixed.begin() + 16, mixed.begin() + 32, u8{238});
     REQUIRE(content_b == mixed);
@@ -1349,6 +1358,8 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     REQUIRE(unknown_content);
     REQUIRE(unknown_content->WrittenBy(0, 1, 0, 64));
     REQUIRE_FALSE(unknown_content->HasRoot(1, 0, 64, 0, 0)); // No cross-submission root import.
+    on_gpu([&] { current_root = renderer->scheduler.CurrentTransferHasRoot(unknown_root, device_memory, 1, 0, 64, 0, 0); });
+    REQUIRE_FALSE(current_root); // Current eligibility and a successful readback cannot manufacture a root.
     on_gpu([&] { content_b = Access::ReadPin(rasterizer, content_targets[1].pin); });
     REQUIRE(content_b == std::vector<u8>(64, 77));
     REQUIRE(content->HasRoot(1, 16, 16, 1, 16)); // Earlier history never becomes current content.
@@ -1377,6 +1388,10 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     std::fill(copied_middle.begin() + 16, copied_middle.begin() + 32, u8{77});
     REQUIRE(content_b == copied_middle);
     REQUIRE(retirement_history->HasRoot(0, 0, 64, 0, 0));
+    on_gpu([&] { current_root = renderer->scheduler.CurrentTransferHasRoot(retirement_snapshot, device_memory, 0, 0, 64, 0, 0); });
+    REQUIRE_FALSE(current_root); // A true historical full-range root is not a current full-range root.
+    on_gpu([&] { current_root = renderer->scheduler.CurrentTransferHasRoot(retirement_snapshot, device_memory, 0, 0, 16, 0, 0); });
+    REQUIRE(current_root);
     on_gpu([&] {
         Access::RetireOrdinary(rasterizer, B);
         current_content = renderer->scheduler.CurrentTransferContentRange(retirement_snapshot, device_memory, 0, 0, 16);

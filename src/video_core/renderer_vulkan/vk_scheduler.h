@@ -130,6 +130,14 @@ public:
         }
         return content; // Scheduler-local snapshot qualification only, never physical authority.
     }
+    // Both gates apply to exactly the same bytes; no historical-pointer promotion to a wider interval.
+    template <typename Memory>
+    bool CurrentTransferHasRoot(const Transfer& transfer, const Memory& memory, size_t buffer,
+        u64 offset, u64 size, TransferContent::Index fill, u64 root_offset) const noexcept {
+        const auto* content = CurrentTransferContentRange(transfer, memory, buffer, offset, size);
+        return content && content->HasRoot(static_cast<TransferContent::Index>(buffer), offset, size, fill, root_offset);
+    }
+
     // Typed commands bind exact destination cancellation to the actual Vulkan operation.
     // Other recording APIs remain unclassified and revoke all current eligibility.
     void RecordBufferFill(VkBuffer destination, u64 offset, u64 size, u32 value);

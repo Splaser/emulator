@@ -144,6 +144,7 @@ void TestTransferContent() {
             s->scheduler.Record([](vk::CommandBuffer) { ++driver->draws; });
             assert(!s->scheduler.CurrentTransferContent(transfer, s->runtime.test_mapping));
             assert(s->scheduler.TransferContentForMapping(transfer, s->runtime.test_mapping) == historical.get());
+            assert(!s->scheduler.CurrentTransferHasRoot(transfer, s->runtime.test_mapping, 1, 16, 16, 1, 16));
             s->scheduler.RunWorker();
             assert(driver->draws == 1);
             // A genuinely completed previous submission is not an admissible root.
@@ -198,6 +199,13 @@ void TestTransferContent() {
             const bool unknown = mode == 36;
             const bool disjoint = mode == 37 || mode == 38 || mode == 44;
             assert(bool(range(1, 0, 16)) == !unknown); // Before execution/submit: intent cancellation already applies.
+            const auto has_root = [&](u64 begin, u64 length, Plan::Index fill, u64 root_begin) {
+                return s->scheduler.CurrentTransferHasRoot(transfer, s->runtime.test_mapping, 1, begin, length, fill, root_begin);
+            };
+            assert(has_root(0, 16, 0, 0) == !unknown);
+            assert(has_root(16, 16, 1, 16) == disjoint);
+            assert(!has_root(0, 64, 0, 0)); // Valid subrange never qualifies the whole historical graph.
+            assert(!has_root(0, 16, 1, 0) && !has_root(0, 16, 0, 4)); // Wrong root or projection.
             assert(bool(range(1, 16, 16)) == disjoint);
             assert(bool(range(1, 32, 32)) == !unknown);
             assert(bool(range(0, 0, 64)) == (!unknown && mode != 44));

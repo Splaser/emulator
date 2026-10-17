@@ -73,7 +73,8 @@ for key, value in [('CHECKED_SUBMISSION', checked), ('SUBMISSION_METHODS', metho
 scaffold = scaffold.replace('// @TRANSFER_MAPPING_GATE@', 'template <typename Memory>\n' +
                            body(header, '    const TransferContent* TransferContentForMapping(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContent(') +
-                           '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContentRange('))
+                           '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContentRange(') +
+                           '\ntemplate <typename Memory>\n' + body(header, '    bool CurrentTransferHasRoot('))
 scaffold = scaffold.replace('// @SCHEDULER_RECORDING@', '\n'.join([
     'template <typename T>\n' + body(header, marker) for marker in [
         '    void RecordWithUploadBuffer(', '    void EnqueueCommand(', '    void Record(T&& c)']]) +
@@ -155,6 +156,8 @@ for name, guard, replacement in [
     print('PASS expected mutation failure:', name)
 if a.content:
     for name, guard, replacement in [
+        ('current-root-without-current-interval', 'const auto* content = CurrentTransferContentRange(transfer, memory, buffer, offset, size);', 'const auto* content = transfer ? transfer->PlannedContent().get() : nullptr;'),
+        ('current-root-without-exact-root', 'content->HasRoot(static_cast<TransferContent::Index>(buffer), offset, size, fill, root_offset)', 'true'),
         ('range-without-overlap-gate', '!transfer->current_ranges[buffer].Contains(offset, size)', 'false'),
         ('range-without-native-allocation', 'if (pin.Handle() != destination) continue;', 'if (false) continue;'),
         ('range-without-pin-offset', 'Revoke(begin - pin.Offset(), end - begin)', 'Revoke(begin, end - begin)'),

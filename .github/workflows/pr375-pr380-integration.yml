@@ -6,12 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       validation_scope:
-        description: Full validation, or Linux only when unchanged Android sources already passed
+        description: Linux validation by default; choose full when Android verification is needed
         type: choice
-        default: full
+        default: linux-only
         options:
-          - full
           - linux-only
+          - full
 
 permissions:
   contents: read
