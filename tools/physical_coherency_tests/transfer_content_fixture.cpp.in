@@ -4,7 +4,7 @@ void TestTransferContent() {
     using Plan = Vulkan::TransferContent;
     using Kind = Plan::Kind;
     using State = Scheduler::WriteState;
-    for (int mode = 0; mode < 23; ++mode) {
+    for (int mode = 0; mode < 31; ++mode) {
         auto s = std::make_unique<Scenario>();
         Vulkan::StorageObserverHarness observation{s->scheduler, s->runtime};
         std::array<std::unique_ptr<Vulkan::Buffer>, 3> buffers;
@@ -60,8 +60,13 @@ void TestTransferContent() {
             continue;
         }
         assert(transfer && transfer->PlannedContent() && transfer->ResourcesRetained());
+        if (mode == 29) {
+            // A queued later writer revokes before the snapshot worker has even run.
+            s->scheduler.Record([](vk::CommandBuffer) {});
+        }
         assert(!s->scheduler.CompletedTransferContent(transfer));
         assert(!s->scheduler.TransferContentForMapping(transfer, s->runtime.test_mapping));
+        assert(!s->scheduler.CurrentTransferContent(transfer, s->runtime.test_mapping));
         targets.clear();
         if (mode == 17) for (auto& buffer : buffers) buffer.reset();
         if (mode == 4) s->runtime.staged_pin_domain->Seal();
@@ -128,6 +133,14 @@ void TestTransferContent() {
             assert(!s->scheduler.CompletedTransferContent(transfer)); // Unknown is sticky.
         }
         if (mode == 0) {
+            const auto historical = transfer->PlannedContent();
+            assert(s->scheduler.CurrentTransferContent(transfer, s->runtime.test_mapping) == historical.get());
+            // Default observer-off recording must revoke before a command executes or submits.
+            s->scheduler.Record([](vk::CommandBuffer) { ++driver->draws; });
+            assert(!s->scheduler.CurrentTransferContent(transfer, s->runtime.test_mapping));
+            assert(s->scheduler.TransferContentForMapping(transfer, s->runtime.test_mapping) == historical.get());
+            s->scheduler.RunWorker();
+            assert(driver->draws == 1);
             // A genuinely completed previous submission is not an admissible root.
             std::vector<Scheduler::TransferBuffer> next_targets;
             for (auto& buffer : buffers) next_targets.push_back({*buffer->PinStagedRepresentation(0, 64),
@@ -140,10 +153,54 @@ void TestTransferContent() {
             assert(unknown && unknown->WrittenBy(0, 1, 0, 64));
             assert(!unknown->HasRoot(1, 0, 64, 0, 0));
         }
-        if (mode == 13) {s->gpu.Complete();assert(s->scheduler.CompletedTransferContent(transfer));}
+        if (mode >= 23) {
+            const auto history = transfer->PlannedContent();
+            const auto origins = transfer->HistoricalOrigins();
+            assert(bool(s->scheduler.CurrentTransferContent(transfer, s->runtime.test_mapping)) == (mode != 29));
+            if (mode == 23) s->scheduler.Record([handle = handles[1]](vk::CommandBuffer cmd) {
+                cmd.FillBuffer(handle, 16, 16, 0xeeeeeeee);
+            });
+            if (mode == 24) s->scheduler.Record([a = handles[0], b = handles[1]](vk::CommandBuffer cmd) {
+                const std::array<VkBufferCopy, 1> region{{{0, 0, 64}}};cmd.CopyBuffer(a, b, region);
+            });
+            if (mode == 25) s->scheduler.Record([](vk::CommandBuffer) { ++driver->draws; });
+            if (mode == 26) s->scheduler.RecordWithUploadBuffer([](vk::CommandBuffer, vk::CommandBuffer) {});
+            if (mode == 27) buffers[1]->RevokeContentEligibility();
+            if (mode == 28) {
+                s->runtime.test_mapping.generation += 2; // Even identical geometry after ABA is stale.
+            }
+            if (mode == 30) {
+                std::vector<Scheduler::TransferBuffer> again;
+                for (auto& buffer : buffers) again.push_back({*buffer->PinStagedRepresentation(0, 64),
+                    s->runtime.PhysicalIdentityForBinding(*buffer, 0, 64)});
+                driver->fail_copy_record = true;
+                const auto failed = s->scheduler.RecordTransferBatch(again, commands);
+                assert(failed);
+                s->scheduler.RunWorker();s->gpu.Complete();
+                assert(s->scheduler.PollCheckedTransfer(failed) == State::Unknown);
+            }
+            assert(!s->scheduler.CurrentTransferContent(transfer, s->runtime.test_mapping));
+            assert(s->scheduler.CompletedTransferContent(transfer) == history.get());
+            assert(transfer->HistoricalOrigins() == origins && history->HasRoot(1, 16, 16, 1, 16));
+            if (mode <= 26) {
+                (void)s->scheduler.Flush();s->scheduler.RunWorker();s->gpu.Complete();
+                assert(!s->scheduler.CurrentTransferContent(transfer, s->runtime.test_mapping));
+                const auto& bytes = reinterpret_cast<Allocation*>(handles[1])->bytes;
+                if (mode == 23) assert(std::all_of(bytes.begin() + 16, bytes.begin() + 32,
+                    [](u8 byte) {return byte == 238;}));
+                if (mode == 24) assert(std::all_of(bytes.begin(), bytes.begin() + 64,
+                    [](u8 byte) {return byte == 77;}));
+                if (mode == 25) assert(driver->draws == 1);
+            }
+        }
+        if (mode == 13) {
+            assert(!s->scheduler.CurrentTransferContent(transfer, s->runtime.test_mapping));
+            s->gpu.Complete();assert(s->scheduler.CurrentTransferContent(transfer, s->runtime.test_mapping));
+        }
         s->scheduler.RetireCheckedWritesAfterDeviceIdle();
         assert(transfer->ResourcesRetained() == (mode == 14)); // No queue attempt: quarantined until teardown.
         assert(!s->scheduler.CompletedTransferContent(transfer));
+        assert(!s->scheduler.CurrentTransferContent(transfer, s->runtime.test_mapping));
         assert(transfer->PlannedContent() && !transfer->HistoricalOrigins().empty());
         if (mode == 17) assert(weak.expired());
     }

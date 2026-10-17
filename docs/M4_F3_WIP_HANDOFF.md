@@ -289,3 +289,17 @@ The initial `f682e086e9` run was cancelled/superseded, not accepted. Artifacts a
 source-hash correspondence are recorded in the transfer contract. Original F3
 require-fixed still fails exactly two aliases (exit 42); F2 remains backing 77/cache
 10. Cross-submission/queue roots stay Unknown; no latest-writer authority is added.
+
+### Current-content cancellation follow-up (2026-10-17)
+
+See [M4_F3_CURRENT_CONTENT_GATE.md](M4_F3_CURRENT_CONTENT_GATE.md). Historical
+ancestry remains immutable. A separate current query requires checked completion,
+strict physical mapping, live cache membership and no subsequent unclassified
+Scheduler recording. Ordinary Fill/Copy, observer-off shader recording and upload
+commands cancel before device execution; reads/disjoint commands conservatively
+cancel too. Unregister cancels staged payload membership without releasing pins.
+Worker completion cannot restore eligibility. Cross-submission/queue ancestry
+remains Unknown and no authority or replica synchronization is published.
+
+The actual-body red control is retained in `.diagnostics/m4-current-gate-red.log`.
+Final focused and native/Android CI results follow after source validation.

@@ -158,6 +158,9 @@ same production validation.
 
 ## Next boundary
 
+The follow-up [current-content gate](M4_F3_CURRENT_CONTENT_GATE.md) adds separate,
+conservative Scheduler-local cancellation without changing these historical APIs.
+
 Do not start physical latest-writer publication from this slice. Broader producer
 enrollment, shader exact coverage, cross-submission/queue synchronization, external
 initial-content roots, ordinary transfer observation and current-content lifetime

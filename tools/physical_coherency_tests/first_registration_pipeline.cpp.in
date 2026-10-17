@@ -141,8 +141,12 @@ public:
     const std::shared_ptr<std::atomic_bool> submission_owner{std::make_shared<std::atomic_bool>(true)};
     std::unique_ptr<MasterSemaphore> master_semaphore;
     std::mutex submit_mutex;
-    struct Chunk {void MarkSubmit() {}} chunk_storage;Chunk* chunk=&chunk_storage;
     std::deque<std::function<void(vk::CommandBuffer,vk::CommandBuffer)>> commands;
+    struct Chunk {
+        decltype(commands)* queue;
+        template<class T> bool Record(T& command) {queue->emplace_back(std::move(command));return true;}
+        void MarkSubmit() {}
+    } chunk_storage{&commands};Chunk* chunk=&chunk_storage;
     explicit Scheduler(Device& device_):device{device_},master_semaphore{std::make_unique<MasterSemaphore>(device_)} {}
     Submission FlushChecked();VkResult PollChecked(const Submission&) const noexcept;
     u64 Flush(VkSemaphore = nullptr, VkSemaphore = nullptr);
@@ -169,8 +173,7 @@ public:
     void EndPendingOperations() {if(fail_end_pending) throw std::runtime_error("host submit failure");}
     void InvalidateState() {} void AllocateNewContext() {}
     std::function<void()> on_submit;
-    template<class F> void RecordWithUploadBuffer(F f) {commands.push_back(std::move(f));}
-    template<class F> void Record(F f) {RecordWithUploadBuffer([=](vk::CommandBuffer main,vk::CommandBuffer){f(main);});}
+    // @SCHEDULER_RECORDING@
     void DispatchWork() {} // Deliberately independent worker rendezvous.
     void RunWorker() {while(!commands.empty()) {auto f=std::move(commands.front());commands.pop_front();f({},{});}}
     void RunOneWorkerCommandForTest() {assert(!commands.empty());auto f=std::move(commands.front());commands.pop_front();f({},{});}
@@ -211,6 +214,7 @@ public:
     void setLRUID(size_t n) {lru=n;}size_t getLRUID() const {return lru;}
     auto PinStagedRepresentation(u64 offset,u64 length) const {return StagedBufferPin::Build(payload,offset,length);}
     std::weak_ptr<StagedBufferPayload> WeakPayload() const {return payload;}
+    // @REVOKE_BUFFER_CONTENT@
 };
 class BufferCacheRuntime {
 public:

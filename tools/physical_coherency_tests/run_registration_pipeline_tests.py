@@ -139,12 +139,20 @@ old = (previous / 'first_registration.cpp').read_text()
 cpu = old[:old.index('using DAddr=u64;')]
 tracker = old[old.index('struct DeviceTracker {'):old.index('struct BufferCopy {')]
 template = read('tools/physical_coherency_tests/first_registration_pipeline.cpp.in')
+template = template.replace('// @SCHEDULER_RECORDING@', '\n'.join([
+    'template <typename T>\n' + body('src/video_core/renderer_vulkan/vk_scheduler.h', marker) for marker in [
+        '    void RecordWithUploadBuffer(', '    void EnqueueCommand(', '    void Record(T&& c)']]) +
+    '\n' + body('src/video_core/renderer_vulkan/vk_scheduler.h', '    void RevokeTransferContentEligibility('))
+template = template.replace('// @REVOKE_BUFFER_CONTENT@', body(
+    'src/video_core/renderer_vulkan/vk_buffer_cache.h', '    void RevokeContentEligibility('))
 template = template.replace('using DAddr=u64;',
     'using VideoCommon::ControlledBufferTransfer;\nusing VideoCommon::ControlledTransferPoll;\nusing DAddr=u64;')
 for name, value in [('POLL_TIMELINE', timeline), ('CHECKED_SUBMISSION', checked),
                     ('TRANSFER_MAPPING_GATE', 'template <typename Memory>\n' + body(
                         'src/video_core/renderer_vulkan/vk_scheduler.h',
-                        '    const TransferContent* TransferContentForMapping(')),
+                        '    const TransferContent* TransferContentForMapping(') + '\ntemplate <typename Memory>\n' + body(
+                        'src/video_core/renderer_vulkan/vk_scheduler.h',
+                        '    const TransferContent* CurrentTransferContent(')),
                     ('RAW_STORAGE_BIND', body('src/video_core/renderer_vulkan/vk_buffer_cache.h',
                         '    void BindStorageBuffer(VkBuffer buffer,')),
                     ('DEVICE_WRITE_GUARDS',

@@ -224,6 +224,7 @@ Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffe
             }
             transfer->worker_pending.store(false, std::memory_order_release);
         });
+        transfer->current_eligible = true; // Arm once after recording; the worker never rearms.
         (void)Flush(); // Adopts the checked token while preserving ordinary queue-error propagation.
     } catch (...) {
         transfer->emission.store(CheckedTransfer::Emission::Unknown, std::memory_order_release);
@@ -632,7 +633,7 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
 
         const u64 signal_value = master_semaphore->NextTick();
         if (checked) checked->tick = signal_value;
-        RecordWithUploadBuffer([signal_semaphore, wait_semaphore, signal_value, checked, ordinary_errors,
+        EnqueueCommand([signal_semaphore, wait_semaphore, signal_value, checked, ordinary_errors,
                                 this](vk::CommandBuffer cmdbuf, vk::CommandBuffer upload_cmdbuf) {
             try {
                 static constexpr VkMemoryBarrier WRITE_BARRIER{

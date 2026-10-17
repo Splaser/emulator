@@ -52,6 +52,9 @@ public:
     }
 
     [[nodiscard]] bool IsDirectGuest() const { return direct != nullptr; }
+    void RevokeContentEligibility() noexcept {
+        if (payload) payload->content_eligible.store(false, std::memory_order_release);
+    }
     [[nodiscard]] const Common::GuestBackingRange* DirectBacking() const {
         return direct ? &direct->backing : nullptr;
     }

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
@@ -72,6 +73,7 @@ public:
         std::array<SyncProvenance::Position, TransferContent::MaxCommands> positions{};
         std::atomic<Emission> emission{Emission::Pending};
         std::atomic_bool worker_pending{};
+        bool current_eligible{}; // GPU/cache-thread cancellation only, never an execution version.
         bool retired{};
     public:
         // Planned metadata is inspectable before execution, never completed evidence.
@@ -99,6 +101,22 @@ public:
             return nullptr;
         }
         return content; // Historical callback-end content, never current/latest authority.
+    }
+    // Current qualification is separate from immutable historical ancestry.
+    template <typename Memory>
+    const TransferContent* CurrentTransferContent(const Transfer& transfer, const Memory& memory) const noexcept {
+        if (!transfer || !transfer->current_eligible) return nullptr;
+        // Pending is not current evidence, but must not cancel eventual completion.
+        const auto state = PollCheckedTransfer(transfer);
+        if (state != WriteState::Complete) return nullptr;
+        const auto* content = TransferContentForMapping(transfer, memory);
+        if (!content || std::ranges::any_of(transfer->resources, [](const auto& resource) {
+                return !resource.pin.ContentEligible();
+            })) {
+            transfer->current_eligible = false;
+            return nullptr;
+        }
+        return content; // Scheduler-local snapshot qualification only, never physical authority.
     }
     class CheckedWrite {
         friend class Scheduler;
@@ -242,6 +260,19 @@ public:
     template <typename T>
         requires std::is_invocable_v<T, vk::CommandBuffer, vk::CommandBuffer>
     void RecordWithUploadBuffer(T&& command) {
+        RevokeTransferContentEligibility();
+        EnqueueCommand(std::forward<T>(command));
+    }
+
+    // GPU/cache-thread only. Unclassified reads/disjoint operations also conservatively cancel.
+private:
+    void RevokeTransferContentEligibility() noexcept {
+        for (const auto& transfer : checked_transfers) transfer->current_eligible = false;
+    }
+
+    // Submission closure only: no new data producer. Other callbacks use ordinary Record.
+    template <typename T>
+    void EnqueueCommand(T&& command) {
         if (chunk->Record(command)) {
             return;
         }
@@ -249,6 +280,7 @@ public:
         (void)chunk->Record(command);
     }
 
+public:
     template <typename T>
         requires std::is_invocable_v<T, vk::CommandBuffer>
     void Record(T&& c) {

@@ -1297,6 +1297,9 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     const Content* content{};
     on_gpu([&] { content = renderer->scheduler.TransferContentForMapping(content_transfer, device_memory); });
     REQUIRE(content);
+    const Content* current_content{};
+    on_gpu([&] { current_content = renderer->scheduler.CurrentTransferContent(content_transfer, device_memory); });
+    REQUIRE(current_content == content);
     REQUIRE(content->HasRoot(1, 16, 16, 1, 16));
     REQUIRE(content->HasRoot(1, 0, 16, 0, 0));
     REQUIRE(content->HasRoot(1, 32, 32, 0, 32));
@@ -1318,6 +1321,12 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     on_gpu([&] { unknown_root = renderer->scheduler.RecordTransferBatch(content_targets, copy_only); });
     REQUIRE(unknown_root);
     finish_content(unknown_root);
+    on_gpu([&] {
+        current_content = renderer->scheduler.CurrentTransferContent(content_transfer, device_memory);
+    });
+    REQUIRE(current_content == nullptr); // Later recorded Copy revoked the earlier snapshot.
+    on_gpu([&] { current_content = renderer->scheduler.CurrentTransferContent(unknown_root, device_memory); });
+    REQUIRE(current_content);
     const Content* unknown_content{};
     on_gpu([&] { unknown_content = renderer->scheduler.CompletedTransferContent(unknown_root); });
     REQUIRE(unknown_content);
@@ -1326,6 +1335,24 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     on_gpu([&] { content_b = Access::ReadPin(rasterizer, content_targets[1].pin); });
     REQUIRE(content_b == std::vector<u8>(64, 77));
     REQUIRE(content->HasRoot(1, 16, 16, 1, 16)); // Earlier history never becomes current content.
+    on_gpu([&] { current_content = renderer->scheduler.CurrentTransferContent(unknown_root, device_memory); });
+    REQUIRE(current_content == nullptr); // Even unclassified readback conservatively cancels.
+    Vulkan::Scheduler::Transfer retirement_snapshot;
+    const std::array<Content::Command, 1> retirement_fill{{{Kind::Fill, 0, 0, 0, 0, 64, 0x12121212}}};
+    on_gpu([&] { retirement_snapshot = renderer->scheduler.RecordTransferBatch(
+        std::span{content_targets}.subspan(1, 1), retirement_fill); });
+    REQUIRE(retirement_snapshot);
+    finish_content(retirement_snapshot);
+    const auto retirement_history = retirement_snapshot->PlannedContent();
+    on_gpu([&] { current_content = renderer->scheduler.CurrentTransferContent(retirement_snapshot, device_memory); });
+    REQUIRE(current_content == retirement_history.get());
+    on_gpu([&] {
+        Access::RetireOrdinary(rasterizer, B);
+        current_content = renderer->scheduler.CurrentTransferContent(retirement_snapshot, device_memory);
+    });
+    REQUIRE(current_content == nullptr);
+    on_gpu([&] { current_content = renderer->scheduler.CompletedTransferContent(retirement_snapshot); });
+    REQUIRE(current_content == retirement_history.get()); // Cache retirement retains immutable history and pins.
     const auto historical_content_origin = content_transfer->HistoricalOrigins()[0];
     on_gpu([&] {
         device_memory.Unmap(A, Footprint);

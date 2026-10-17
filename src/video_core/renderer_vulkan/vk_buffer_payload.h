@@ -40,6 +40,7 @@ private:
     vk::Buffer buffer;
     const u64 size;
     const std::shared_ptr<const StagedBufferPinDomain> domain;
+    std::atomic_bool content_eligible{true}; // Membership cancellation, not native lifetime.
 };
 
 /// Immutable byte interval and real staged-buffer ownership. Not cache membership, physical
@@ -55,6 +56,9 @@ public:
         return payload && payload->domain && !payload->domain->IsSealed() && payload->buffer;
     }
     [[nodiscard]] u64 Offset() const noexcept { return offset; }
+    [[nodiscard]] bool ContentEligible() const noexcept {
+        return IsUsable() && payload->content_eligible.load(std::memory_order_acquire);
+    }
     [[nodiscard]] u64 Size() const noexcept { return size; }
     [[nodiscard]] const void* Identity() const noexcept { return payload.get(); }
     // Ownership only; no allocation, mapping, content or completion qualification.

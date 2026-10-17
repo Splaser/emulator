@@ -2942,6 +2942,9 @@ void BufferCache<P>::Register(BufferId buffer_id) {
 
 template <class P>
 void BufferCache<P>::Unregister(BufferId buffer_id) {
+    if constexpr (requires(Buffer& buffer) { buffer.RevokeContentEligibility(); }) {
+        slot_buffers[buffer_id].RevokeContentEligibility();
+    }
     ChangeRegister<false>(buffer_id);
 }
 

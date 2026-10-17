@@ -70,7 +70,14 @@ for key, value in [('CHECKED_SUBMISSION', checked), ('SUBMISSION_METHODS', metho
                    ('RAW_STORAGE_BIND', '')]:
     scaffold = scaffold.replace('// @' + key + '@', value)
 scaffold = scaffold.replace('// @TRANSFER_MAPPING_GATE@', 'template <typename Memory>\n' +
-                           body(header, '    const TransferContent* TransferContentForMapping('))
+                           body(header, '    const TransferContent* TransferContentForMapping(') +
+                           '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContent('))
+scaffold = scaffold.replace('// @SCHEDULER_RECORDING@', '\n'.join([
+    'template <typename T>\n' + body(header, marker) for marker in [
+        '    void RecordWithUploadBuffer(', '    void EnqueueCommand(', '    void Record(T&& c)']]) +
+    '\n' + body(header, '    void RevokeTransferContentEligibility('))
+scaffold = scaffold.replace('// @REVOKE_BUFFER_CONTENT@', body(
+    'src/video_core/renderer_vulkan/vk_buffer_cache.h', '    void RevokeContentEligibility('))
 source = '''#include <algorithm>
 #include <array>
 #include <atomic>
@@ -144,6 +151,9 @@ for name, guard, replacement in [
     print('PASS expected mutation failure:', name)
 if a.content:
     for name, guard, replacement in [
+        ('current-without-record-revocation', 'RevokeTransferContentEligibility();', '/* missing cancellation */'),
+        ('current-without-eligibility-gate', 'if (!transfer || !transfer->current_eligible) return nullptr;', 'if (!transfer) return nullptr;'),
+        ('current-without-retirement-gate', 'return !resource.pin.ContentEligible();', 'return false;'),
         ('content-without-completion', 'if (PollCheckedTransfer(transfer) != WriteState::Complete) return nullptr;', 'if (false) return nullptr;'),
         ('content-without-mapping-check', 'if (!origin->MatchesCurrent(memory)) return nullptr;', '(void)origin;'),
         ('copy-without-device-command', 'cmdbuf.CopyBuffer(source.Handle(), destination.Handle(), region);', '(void)region;'),
