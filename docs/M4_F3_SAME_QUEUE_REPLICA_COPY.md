@@ -33,8 +33,8 @@ pipeline barriers can scope commands across submissions in same-queue submission
 order; submission order alone does not establish the required memory dependency.
 See the [Vulkan synchronization specification](https://docs.vulkan.org/spec/latest/chapters/synchronization.html)
 and [`vkCmdPipelineBarrier`](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdPipelineBarrier.html).
-Different queues, absent/wrong scopes, incomplete journals, failed submission or
-unconfirmed completion remain Unknown.
+Different queues, absent/wrong scopes, incomplete journals and failed submissions
+remain unproved/Unknown. Pending completion does not qualify as completed content.
 
 ## Immutable ancestry and current qualification
 
@@ -82,6 +82,26 @@ assertion rather than compilation error. These are simulated-driver evidence.
 The native Vulkan witness separately creates two private staged allocations over
 physical aliases, submits parent Fills and a second checked Copy, waits for real
 completion and reads back the middle plus both complements. It also checks later
-source/target writes, remap and retained allocation lifetime. Linux CI evidence
-will be recorded after the source run completes. Android validation is on demand;
-this portable scheduler slice uses Linux compilation and unit/native regressions.
+source/target writes, remap and retained allocation lifetime.
+
+Source `d783250b0d7cb1f79558566f00d544cb84248178` passed
+[Linux-only workflow 39022879191](https://github.com/Splaser/emulator/actions/runs/39022879191),
+Linux job `117368038043`:
+
+- Full CLI/shader/unit build and all five CTest processes passed. The native
+  provenance case passed 211 assertions, followed by three independent repeated
+  processes with the same 211 assertions each.
+- The 49 new replica modes passed alongside the previous 46 transfer-content
+  modes. All 42 mutation controls failed by assertion as required. The 43 fixture
+  logs and all 17 extracted production input hashes were checked against the
+  committed Git blobs.
+- Standalone content/eligibility tests passed, including 512 content and 2,048
+  eligibility oracle prefixes and the replica overlay cases. Full registration,
+  physical coherency, backing-import and lifecycle regressions passed.
+- Original F3 fixed-required mode still failed two alias checks with process exit
+  42; F2 still reported `expected=77 observed=10 backing=77`. Controlled copy
+  acceptance is separate from those open production defects.
+
+Logs and downloaded artifacts are retained in `.diagnostics/ci-39022879191/`.
+Android was intentionally skipped. Device/game acceptance is untested. The
+following documentation-only evidence update does not repeat source validation.

@@ -379,3 +379,14 @@ Scope remains one hop from one controlled parent batch, with no intervening
 unchecked submission. Cross-queue and unsupported chains remain Unknown. There
 is no physical latest-writer publication, ordinary game selection or F3/F2 closure.
 Use Linux-only CI and relevant unit/native tests; Android remains on demand.
+
+Source `d783250b0d` passed
+[Linux-only workflow 39022879191](https://github.com/Splaser/emulator/actions/runs/39022879191):
+all five CTest processes, native Vulkan provenance 211 assertions plus three
+independent repeats, 49 new replica modes alongside the existing 46 transfer
+modes, 42 expected assertion-failure mutations, byte oracles and the full
+registration/coherency/lifecycle regression suite. Seventeen extracted production
+input hashes match committed blobs; all 43 fixture logs are retained under
+`.diagnostics/ci-39022879191/`. Original F3 fixed-required mode still fails two
+alias checks (exit 42); F2 remains backing 77/cache 10. Android was intentionally
+skipped. This evidence update changes documentation only and does not rerun CI.
