@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <future>
+#include <functional>
 #include <iostream>
 #include <thread>
 
@@ -164,6 +165,11 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     });
     SCOPE_EXIT { system.ShutdownMainProcess(); };
     auto& gpu = system.GPU();
+    // TryQueueCpuWrite explicitly permits pre-enqueue try-lock/full-transport
+    // refusal. Retry only that no-effect boundary, never an accepted CPU request.
+    const auto enqueue = [&](std::function<bool()> callback) {
+        return Until([&] { return gpu.TryQueueCpuWrite(callback); });
+    };
     auto& rasterizer = renderer->rasterizer;
     auto& device_memory = system.Host1x().MemoryManager();
     auto channel = gpu.AllocateChannel();
@@ -194,7 +200,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
             return thread->GetState() == Kernel::ThreadState::Waiting;
         }));
         std::atomic<bool> release{}, retired{};
-        REQUIRE(gpu.TryQueueCpuWrite([request, &release, &retired] {
+        REQUIRE(enqueue([request, &release, &retired] {
             if (!release.load()) return false;
             (void)request->Cancel();
             retired = true;
@@ -209,7 +215,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
         REQUIRE(!request->Owner()->TryVisit([](auto&) {}));
         // This unrelated callback must retire while the old per-process continuation remains.
         std::atomic<bool> other_progress{};
-        REQUIRE(gpu.TryQueueCpuWrite([&] { other_progress = true; return true; }));
+        REQUIRE(enqueue([&] { other_progress = true; return true; }));
         REQUIRE(Until([&] { return other_progress.load(); }));
         release = true;
         REQUIRE(Until([&] { return retired.load(); }));
@@ -238,7 +244,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     }
     Registration operation;
     std::atomic<bool> registered{};
-    REQUIRE(gpu.TryQueueCpuWrite([&] {
+    REQUIRE(enqueue([&] {
         if (!operation) operation = rasterizer.BeginControlledBufferRegistration(address, 1, views);
         if (!operation) { registered = true; return true; }
         const auto phase = rasterizer.PollControlledBufferRegistration(operation);
@@ -303,7 +309,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
         return thread->GetState() == Kernel::ThreadState::Waiting;
     });
     std::atomic<bool> marker{};
-    REQUIRE(gpu.TryQueueCpuWrite([&] { marker = true; return true; }));
+    REQUIRE(enqueue([&] { marker = true; return true; }));
     const bool progressed = Until([&] { return marker.load(); }, 500ms);
     const auto before_unlock = request->State();
     cache_lock.unlock(); // Always break the negative-control cycle before reporting failure.
@@ -349,7 +355,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     // consumer must see Cancelled rather than waiting forever or reporting completion.
     std::atomic<bool> release_slots{};
     for (unsigned slot = 0; slot < 64; ++slot)
-        REQUIRE(gpu.TryQueueCpuWrite([&] { return release_slots.load(); }));
+        REQUIRE(enqueue([&] { return release_slots.load(); }));
     gpu.SynchronizeGPUThread();
     auto cancelled = memory.PrepareControlledWrite8(owner.heap + 9, 78);
     REQUIRE(cancelled);
@@ -373,7 +379,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     gpu.RunOnGpuThread([&] { refresh_started = rasterizer.RefreshControlledBufferRegistration(operation); });
     REQUIRE(refresh_started);
     registered = false;
-    REQUIRE(gpu.TryQueueCpuWrite([&] {
+    REQUIRE(enqueue([&] {
         if (rasterizer.PollControlledBufferRegistration(operation) ==
             Vulkan::BufferCache::ControlledRegistration::Phase::Ready) {
             registered = true;
@@ -412,7 +418,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     // A CPU PTE owner waits for a later GPU callback; the GPU must refuse rather than
     // synchronously acquire this PTE lock while this CPU waits for its progress.
     marker = false;
-    REQUIRE(gpu.TryQueueCpuWrite([&] { marker = true; return true; }));
+    REQUIRE(enqueue([&] { marker = true; return true; }));
     const bool pte_progress = Until([&] { return marker.load() && consumer_done.load(); }, 500ms);
     pte_lock.unlock();
     REQUIRE(pte_progress);
@@ -432,14 +438,14 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
         if (!counter) pte.lock();
         std::atomic<bool> legacy_entered{};
         marker = false;
-        REQUIRE(gpu.TryQueueCpuWrite([&] {
+        REQUIRE(enqueue([&] {
             legacy_entered = true;
             if (counter) Access::LegacyPublish(rasterizer, address);
             else memory.RasterizerMarkRegionCached(owner.heap, 4096, true);
             return true;
         }));
         REQUIRE(Until([&] { return legacy_entered.load(); }));
-        REQUIRE(gpu.TryQueueCpuWrite([&] { marker = true; return true; }));
+        REQUIRE(enqueue([&] { marker = true; return true; }));
         const bool bypassed_blocking_legacy = Until([&] { return marker.load(); }, 50ms);
         range.reset();
         if (pte.owns_lock()) pte.unlock();
@@ -464,7 +470,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     }
     Registration pending_operation;
     registered = false;
-    REQUIRE(gpu.TryQueueCpuWrite([&] {
+    REQUIRE(enqueue([&] {
         if (!pending_operation)
             pending_operation = rasterizer.BeginControlledBufferRegistration(
                 pending_address, 1, pending_views);
@@ -518,7 +524,7 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     // Delayed preservation must not write the former process's GPU99 over this new content.
     std::fill(pending_pin->Bytes().begin(), pending_pin->Bytes().end(), u8{55});
     marker = false;
-    REQUIRE(gpu.TryQueueCpuWrite([&] { marker = true; return true; }));
+    REQUIRE(enqueue([&] { marker = true; return true; }));
     const bool unrelated_during_native_wait = Until([&] { return marker.load(); }, 500ms);
     submit_lock.unlock();
     REQUIRE(unrelated_during_native_wait);
