@@ -1,5 +1,10 @@
 # M4 F3: isolated submission-linked write provenance
 
+The subsequent [opt-in ordinary storage observer](M4_F3_STORAGE_WRITE_OBSERVER.md)
+extends the ordinary Draw/Dispatch capture boundary. The sections below retain
+the verified isolated slice's scope and evidence; neither slice provides physical
+latest-writer authority.
+
 This is the first submission-provenance slice following the review of
 `d8764c0cf0`. Resource-local revisions remain write intent. F2/F3 remain Open,
 restricted eligibility remains blocked, and ordinary Memory::Write/UMA routing

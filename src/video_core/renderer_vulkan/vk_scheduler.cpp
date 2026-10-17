@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <limits>
+#include <stdexcept>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -82,7 +83,8 @@ u64 Scheduler::Flush(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {
 Scheduler::Submission Scheduler::FlushChecked() {
     if (!submission_owner->load(std::memory_order_acquire) || !device.HasTimelineSemaphore())
         return {};
-    auto submission = Submission{new CheckedSubmission{submission_owner}};
+    auto submission = observed_submission ? observed_submission :
+        Submission{new CheckedSubmission{submission_owner}};
     SubmitExecution(nullptr, nullptr, submission);
     AllocateNewContext();
     return submission;
@@ -146,7 +148,66 @@ Scheduler::WriteState Scheduler::PollCheckedWrite(const Write& write) const noex
     return emission == Emission::Skipped ? WriteState::Skipped : WriteState::Complete;
 }
 
+Scheduler::ObservedWrites Scheduler::RecordObservedWrites(std::span<const WriteFootprint> footprints,
+    std::function<bool(vk::CommandBuffer)> command) {
+    if (!command) return {};
+    std::shared_ptr<std::vector<Write>> writes;
+    Submission submission;
+    try {
+        if (footprints.size() > 64 || checked_writes.size() + footprints.size() > 256 ||
+            !submission_owner->load(std::memory_order_acquire) || !device.HasTimelineSemaphore())
+            throw std::runtime_error("unsupported observed write batch");
+        for (const auto& range : footprints) {
+            if (!range.resources || !range.identity || !range.size || !range.intent_revision ||
+                range.size > std::numeric_limits<u64>::max() - range.offset)
+                throw std::runtime_error("invalid observed write footprint");
+        }
+        writes = std::make_shared<std::vector<Write>>();
+        writes->reserve(footprints.size());
+        checked_writes.reserve(checked_writes.size() + footprints.size());
+        if (!footprints.empty()) {
+            submission = observed_submission ? observed_submission :
+                Submission{new CheckedSubmission{submission_owner}};
+            for (const auto& range : footprints) {
+                auto write = Write{new CheckedWrite{range.resources, range.identity, range.offset,
+                    range.size, range.intent_revision, submission_owner}};
+                write->submission = submission;
+                writes->push_back(std::move(write));
+            }
+        }
+    } catch (...) {
+        // No observed command has been queued. Diagnostics never drop/replay rendering.
+        Record(std::move(command));
+        return {};
+    }
+    if (submission) observed_submission = submission;
+    checked_writes.insert(checked_writes.end(), writes->begin(), writes->end());
+    try {
+        Record([writes, bound_command = std::move(command)](vk::CommandBuffer cmdbuf) {
+            try {
+                const auto emission = bound_command(cmdbuf) ? CheckedWrite::Emission::Recorded :
+                                                            CheckedWrite::Emission::Skipped;
+                for (const auto& write : *writes) {
+                    auto expected = CheckedWrite::Emission::Pending;
+                    (void)write->emission.compare_exchange_strong(expected, emission,
+                        std::memory_order_release, std::memory_order_relaxed);
+                }
+            } catch (...) {
+                for (const auto& write : *writes)
+                    write->emission.store(CheckedWrite::Emission::Unknown, std::memory_order_release);
+                throw; // Preserve the ordinary worker's exception behavior.
+            }
+        });
+    } catch (...) {
+        for (const auto& write : *writes)
+            write->emission.store(CheckedWrite::Emission::Unknown, std::memory_order_release);
+        throw;
+    }
+    return writes;
+}
+
 void Scheduler::RetireCheckedWritesAfterDeviceIdle() {
+    if (observed_submission) return; // Device idle does not submit recorded host work.
     for (const auto& write : checked_writes) {
         write->retired = true;
         write->resources.reset();
@@ -361,57 +422,66 @@ void Scheduler::AllocateWorkerCommandBuffer() {
 u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore,
                                Submission checked) {
     CITRON_PROFILE_SCOPE("Vulkan::SubmitExecution");
-    EndPendingOperations();
-    InvalidateState();
+    const bool ordinary_errors = !checked;
+    if (observed_submission) {
+        checked = std::exchange(observed_submission, {});
+    }
+    try {
+        EndPendingOperations();
+        InvalidateState();
 
-    const u64 signal_value = master_semaphore->NextTick();
-    if (checked) checked->tick = signal_value;
-    RecordWithUploadBuffer([signal_semaphore, wait_semaphore, signal_value, checked,
-                            this](vk::CommandBuffer cmdbuf, vk::CommandBuffer upload_cmdbuf) {
-        try {
-            static constexpr VkMemoryBarrier WRITE_BARRIER{
-                .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-                .pNext = nullptr,
-                .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
-            };
-            upload_cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, WRITE_BARRIER);
-            upload_cmdbuf.End();
-            cmdbuf.End();
+        const u64 signal_value = master_semaphore->NextTick();
+        if (checked) checked->tick = signal_value;
+        RecordWithUploadBuffer([signal_semaphore, wait_semaphore, signal_value, checked, ordinary_errors,
+                                this](vk::CommandBuffer cmdbuf, vk::CommandBuffer upload_cmdbuf) {
+            try {
+                static constexpr VkMemoryBarrier WRITE_BARRIER{
+                    .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                    .pNext = nullptr,
+                    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                    .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                };
+                upload_cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                              VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, WRITE_BARRIER);
+                upload_cmdbuf.End();
+                cmdbuf.End();
 
-            if (on_submit) {
-                on_submit();
-            }
+                if (on_submit) {
+                    on_submit();
+                }
 
-            std::scoped_lock lock{submit_mutex};
-            const VkResult result = master_semaphore->SubmitQueue(
-                cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value);
-            if (checked) {
-                checked->result.store(result, std::memory_order_release);
-                return; // Caller observes failures as Unknown; never fabricate GPU completion.
+                std::scoped_lock lock{submit_mutex};
+                const VkResult result = master_semaphore->SubmitQueue(
+                    cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value);
+                if (checked) {
+                    checked->result.store(result, std::memory_order_release);
+                    if (!ordinary_errors) return; // Explicit checked callers observe Unknown.
+                }
+                switch (result) {
+                case VK_SUCCESS:
+                    break;
+                case VK_ERROR_DEVICE_LOST:
+                    device.ReportLoss();
+                    [[fallthrough]];
+                default:
+                    vk::Check(result);
+                    break;
+                }
+            } catch (const vk::Exception& error) {
+                if (checked) checked->result.store(error.GetResult(), std::memory_order_release);
+                if (ordinary_errors || !checked) throw;
+            } catch (...) {
+                if (checked) checked->result.store(VK_ERROR_UNKNOWN, std::memory_order_release);
+                if (ordinary_errors || !checked) throw;
             }
-            switch (result) {
-            case VK_SUCCESS:
-                break;
-            case VK_ERROR_DEVICE_LOST:
-                device.ReportLoss();
-                [[fallthrough]];
-            default:
-                vk::Check(result);
-                break;
-            }
-        } catch (const vk::Exception& error) {
-            if (!checked) throw;
-            checked->result.store(error.GetResult(), std::memory_order_release);
-        } catch (...) {
-            if (!checked) throw;
-            checked->result.store(VK_ERROR_UNKNOWN, std::memory_order_release);
-        }
-    });
-    chunk->MarkSubmit();
-    DispatchWork();
-    return signal_value;
+        });
+        chunk->MarkSubmit();
+        DispatchWork();
+        return signal_value;
+    } catch (...) {
+        if (checked) checked->result.store(VK_ERROR_UNKNOWN, std::memory_order_release);
+        throw; // Host-side failure before queue acceptance is not indefinitely Pending.
+    }
 }
 
 void Scheduler::AllocateNewContext() {

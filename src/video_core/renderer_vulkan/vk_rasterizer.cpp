@@ -53,6 +53,40 @@
 
 namespace Vulkan {
 
+bool RasterizerVulkan::SetControlledStorageWriteObservation(bool enabled) {
+    std::shared_lock shutdown_guard{shutdown_mutex, std::try_to_lock};
+    if (!shutdown_guard.owns_lock() || is_shutting_down || !gpu.IsGpuThread()) return false;
+    try { if (enabled) observed_storage_writes.reserve(256); }
+    catch (...) { return false; }
+    observe_storage_writes = enabled;
+    storage_observation_incomplete = false;
+    observed_storage_writes.clear();
+    return true;
+}
+
+std::optional<RasterizerVulkan::StorageWriteObservation>
+RasterizerVulkan::GetControlledStorageWriteObservation() {
+    std::shared_lock shutdown_guard{shutdown_mutex, std::try_to_lock};
+    if (!shutdown_guard.owns_lock() || is_shutting_down || !gpu.IsGpuThread()) return {};
+    return StorageWriteObservation{observe_storage_writes && !storage_observation_incomplete,
+                                   observed_storage_writes};
+}
+
+void RasterizerVulkan::RecordObservedShaderStorageWrite(std::function<bool(vk::CommandBuffer)> command) {
+    if (!observe_storage_writes || !buffer_cache_runtime.StorageWriteObservationValid()) {
+        if (observe_storage_writes) storage_observation_incomplete = true;
+        scheduler.Record(std::move(command));
+        return;
+    }
+    const auto writes = scheduler.RecordObservedWrites(buffer_cache_runtime.StorageWriteFootprints(),
+                                                       std::move(command));
+    if (!writes || observed_storage_writes.size() + writes->size() > 256) {
+        storage_observation_incomplete = true;
+        return; // Command was already recorded once, including observation refusal.
+    }
+    observed_storage_writes.insert(observed_storage_writes.end(), writes->begin(), writes->end());
+}
+
 struct ControlledAliasCopy {
     struct Owners {
         const Tegra::PhysicalAccessPlan source, destination;
@@ -608,6 +642,15 @@ GraphicsPipeline* RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_fun
     if (!pipeline) {
         return nullptr;
     }
+    const bool observing = observe_storage_writes;
+    bool observed_command_recorded{};
+    if (observing) buffer_cache_runtime.BeginStorageWriteObservation(true);
+    SCOPE_EXIT {
+        if (observing) {
+            if (!observed_command_recorded) storage_observation_incomplete = true;
+            buffer_cache_runtime.EndStorageWriteObservation();
+        }
+    };
     std::exception_ptr configure_exception;
     {
         std::scoped_lock lock{buffer_cache.mutex, texture_cache.mutex};
@@ -667,6 +710,7 @@ GraphicsPipeline* RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_fun
             query_cache.CounterEnable(VideoCommon::QueryType::ZPassPixelCount64,
                                       maxwell3d->regs.zpass_pixel_count_enable);
             draw_func();
+            observed_command_recorded = true;
             buffer_cache.FlushGatherWrites();
         }
     }
@@ -804,7 +848,7 @@ void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
         // An async build is only known to have failed on the worker thread, hence the check
         // there.
         const GraphicsPipeline* const draw_pipeline{pipeline_cache.CurrentGraphicsPipeline()};
-        scheduler.Record([draw_params, draw_pipeline](vk::CommandBuffer cmdbuf) {
+        RecordShaderStorageWrite([draw_params, draw_pipeline](vk::CommandBuffer cmdbuf) {
             if (draw_pipeline->IsFailed()) {
                 return false;
             }
@@ -838,13 +882,14 @@ void RasterizerVulkan::DrawIndirect() {
         // Dropped with a failed pipeline, as in Draw.
         const GraphicsPipeline* const draw_pipeline{pipeline_cache.CurrentGraphicsPipeline()};
         if (params.is_byte_count) {
-            scheduler.Record([buffer_obj = buffer->Handle(), offset, stride = params.stride,
+            RecordShaderStorageWrite([buffer_obj = buffer->Handle(), offset, stride = params.stride,
                               draw_pipeline](vk::CommandBuffer cmdbuf) {
                 if (draw_pipeline->IsFailed()) {
-                    return;
+                    return false;
                 }
                 cmdbuf.DrawIndirectByteCountEXT(1, 0, buffer_obj, offset, 0,
                                                 static_cast<u32>(stride));
+                return true;
             });
             return;
         }
@@ -852,11 +897,11 @@ void RasterizerVulkan::DrawIndirect() {
             const auto count = buffer_cache.GetDrawIndirectCount();
             const auto& draw_buffer = count.first;
             const auto& offset_base = count.second;
-            scheduler.Record([draw_buffer_obj = draw_buffer->Handle(),
+            RecordShaderStorageWrite([draw_buffer_obj = draw_buffer->Handle(),
                               buffer_obj = buffer->Handle(), offset_base, offset, params,
                               draw_pipeline](vk::CommandBuffer cmdbuf) {
                 if (draw_pipeline->IsFailed()) {
-                    return;
+                    return false;
                 }
                 if (params.is_indexed) {
                     cmdbuf.DrawIndexedIndirectCount(
@@ -867,13 +912,14 @@ void RasterizerVulkan::DrawIndirect() {
                                              static_cast<u32>(params.max_draw_counts),
                                              static_cast<u32>(params.stride));
                 }
+                return true;
             });
             return;
         }
-        scheduler.Record([buffer_obj = buffer->Handle(), offset, params,
+        RecordShaderStorageWrite([buffer_obj = buffer->Handle(), offset, params,
                           draw_pipeline](vk::CommandBuffer cmdbuf) {
             if (draw_pipeline->IsFailed()) {
-                return;
+                return false;
             }
             if (params.is_indexed) {
                 cmdbuf.DrawIndexedIndirect(buffer_obj, offset,
@@ -883,6 +929,7 @@ void RasterizerVulkan::DrawIndirect() {
                 cmdbuf.DrawIndirect(buffer_obj, offset, static_cast<u32>(params.max_draw_counts),
                                     static_cast<u32>(params.stride));
             }
+            return true;
         });
     });
     buffer_cache.SetDrawIndirect(nullptr);
@@ -1087,6 +1134,15 @@ void RasterizerVulkan::DispatchCompute() {
     if (!pipeline) {
         return;
     }
+    const bool observing = observe_storage_writes;
+    bool observed_command_recorded{};
+    if (observing) buffer_cache_runtime.BeginStorageWriteObservation(true);
+    SCOPE_EXIT {
+        if (observing) {
+            if (!observed_command_recorded) storage_observation_incomplete = true;
+            buffer_cache_runtime.EndStorageWriteObservation();
+        }
+    };
     std::scoped_lock lock{texture_cache.mutex, buffer_cache.mutex};
     if (physical_shadow) {
         physical_shadow->BeginDispatch();
@@ -1114,16 +1170,22 @@ void RasterizerVulkan::DispatchCompute() {
         const auto [buffer, offset] =
             buffer_cache.ObtainBuffer(*indirect_address, 12, sync_info, post_op);
         scheduler.RequestOutsideRenderPassOperationContext();
-        scheduler.Record([indirect_buffer = buffer->Handle(),
+        RecordShaderStorageWrite([indirect_buffer = buffer->Handle(),
                           indirect_offset = offset](vk::CommandBuffer cmdbuf) {
             cmdbuf.DispatchIndirect(indirect_buffer, indirect_offset);
+            return true;
         });
+        observed_command_recorded = true;
         buffer_cache.FlushGatherWrites();
         return;
     }
     const std::array<u32, 3> dim{qmd.grid_dim_x, qmd.grid_dim_y, qmd.grid_dim_z};
     scheduler.RequestOutsideRenderPassOperationContext();
-    scheduler.Record([dim](vk::CommandBuffer cmdbuf) { cmdbuf.Dispatch(dim[0], dim[1], dim[2]); });
+    RecordShaderStorageWrite([dim](vk::CommandBuffer cmdbuf) {
+        cmdbuf.Dispatch(dim[0], dim[1], dim[2]);
+        return true;
+    });
+    observed_command_recorded = true;
     buffer_cache.FlushGatherWrites();
 }
 

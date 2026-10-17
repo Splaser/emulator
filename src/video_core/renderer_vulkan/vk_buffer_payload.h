@@ -57,6 +57,8 @@ public:
     [[nodiscard]] u64 Offset() const noexcept { return offset; }
     [[nodiscard]] u64 Size() const noexcept { return size; }
     [[nodiscard]] const void* Identity() const noexcept { return payload.get(); }
+    // Ownership only; no allocation, mapping, content or completion qualification.
+    [[nodiscard]] std::shared_ptr<const void> RetainedOwner() const noexcept { return payload; }
 
     [[nodiscard]] static std::optional<StagedBufferPin> Build(
         const std::shared_ptr<StagedBufferPayload>& owner, u64 offset_bytes, u64 size_bytes) {

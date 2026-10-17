@@ -135,5 +135,43 @@ struct SchedulerTestAccess : SystemTestAccess {
         std::scoped_lock lock{cache.mutex};
         cache.DeleteBuffer(cache.FindBuffer(address, 1));
     }
+    // Exercise the ordinary batch observer with real transfer commands. This is not
+    // an actual shader binding test; extracted Draw/Dispatch fixtures cover that wiring.
+    static Vulkan::Scheduler::Write ObserveOrdinaryFill(Vulkan::RasterizerVulkan& rasterizer,
+        DAddr address, u32 size, u32 value) {
+        auto& cache = Cache(rasterizer);
+        std::optional<Vulkan::StagedBufferPin> pin;
+        std::optional<u64> revision;
+        {
+            std::scoped_lock lock{cache.mutex};
+            auto [buffer, offset] = cache.ObtainCPUBuffer(address, size,
+                VideoCommon::ObtainBufferSynchronize::FullSynchronize,
+                VideoCommon::ObtainBufferOperation::MarkAsWritten);
+            pin = buffer->PinStagedRepresentation(offset, size);
+            revision = buffer->gpu_write_revision.Snapshot();
+        }
+        if (!pin || !revision) throw std::runtime_error("observed fill pin or intent unavailable");
+        const std::array<Vulkan::Scheduler::WriteFootprint, 1> ranges{{
+            {pin->RetainedOwner(), pin->Identity(), pin->Offset(), pin->Size(), *revision}}};
+        auto& scheduler = rasterizer.scheduler;
+        scheduler.RequestOutsideRenderPassOperationContext();
+        const auto writes = scheduler.RecordObservedWrites(ranges,
+            [bound_pin = *pin, value](Vulkan::vk::CommandBuffer cmdbuf) {
+                // Serialize the test's consecutive fills; submission identity alone
+                // does not supply Vulkan memory/execution dependencies.
+                const VkMemoryBarrier barrier{
+                    .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                    .pNext = nullptr,
+                    .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+                    .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                };
+                cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, 0, barrier);
+                cmdbuf.FillBuffer(bound_pin.Handle(), bound_pin.Offset(), bound_pin.Size(), value);
+                return true;
+            });
+        if (!writes || writes->size() != 1) throw std::runtime_error("observed fill refused");
+        return writes->front();
+    }
 };
 } // namespace Core

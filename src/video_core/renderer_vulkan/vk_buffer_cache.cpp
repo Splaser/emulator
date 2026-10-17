@@ -1046,6 +1046,37 @@ Scheduler::Write BufferCacheRuntime::ClearBufferChecked(StagedBufferPin pin, u64
         });
 }
 
+void BufferCacheRuntime::BeginStorageWriteObservation(bool enabled) {
+    storage_write_footprints.clear();
+    storage_observation_active = enabled;
+    storage_observation_valid = true;
+    if (enabled) {
+        try { storage_write_footprints.reserve(64); }
+        catch (...) { storage_observation_valid = false; }
+    }
+}
+
+void BufferCacheRuntime::EndStorageWriteObservation() {
+    storage_observation_active = false;
+    storage_write_footprints.clear();
+}
+
+void BufferCacheRuntime::BindStorageBuffer(Buffer& buffer, u32 offset, u32 size, bool is_written) {
+    // Capture the actual descriptor resource here, before a later binding can
+    // merge/retire its cache representation. No cold mapping or allocation here.
+    if (storage_observation_active && storage_observation_valid && is_written && size) {
+        const auto pin = buffer.PinStagedRepresentation(offset, size);
+        const auto revision = buffer.gpu_write_revision.Snapshot();
+        if (!buffer.CpuAddr() || !pin || !revision || storage_write_footprints.size() == 64) {
+            storage_observation_valid = false; // Scratch/direct/overflow is not observed coverage.
+        } else {
+            storage_write_footprints.push_back({pin->RetainedOwner(), pin->Identity(),
+                pin->Offset(), pin->Size(), *revision});
+        }
+    }
+    BindBuffer(buffer.Handle(), offset, size);
+}
+
 void BufferCacheRuntime::BindIndexBuffer(PrimitiveTopology topology, IndexFormat index_format,
                                          u32 base_vertex, u32 num_indices, VkBuffer buffer,
                                          u32 offset, [[maybe_unused]] u32 size) {

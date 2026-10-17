@@ -12,6 +12,7 @@
 #include <utility>
 #include <queue>
 #include <vector>
+#include <span>
 
 #include "common/alignment.h"
 #include "common/common_types.h"
@@ -73,6 +74,17 @@ public:
         bool retired{};
     };
     using Write = std::shared_ptr<CheckedWrite>;
+    struct WriteFootprint {
+        std::shared_ptr<const void> resources;
+        const void* identity;
+        u64 offset, size, intent_revision;
+    };
+    using ObservedWrites = std::shared_ptr<const std::vector<Write>>;
+
+    // Diagnostic storage projection. Uses the existing batch, without flushing.
+    // Null means observation refused; the original command is still recorded once.
+    [[nodiscard]] ObservedWrites RecordObservedWrites(std::span<const WriteFootprint> footprints,
+        std::function<bool(vk::CommandBuffer)> command);
 
     // Explicit isolated producer only. Record and flush are inseparable: the returned
     // identity is the submission containing this command, not a later timeline tick.
@@ -337,6 +349,7 @@ private:
     std::unique_ptr<CommandChunk> chunk;
     std::function<void()> on_submit;
     std::vector<Write> checked_writes;
+    Submission observed_submission;
 
     State state;
 

@@ -55,6 +55,13 @@ struct CommandBuffer {
     }
     template<class... T> void Draw(T...) {++driver->draws;FillBuffer(driver->draw_target,0,4096,0x63636363);}
     template<class... T> void DrawIndexed(T... args) {Draw(args...);}
+    template<class... T> void DrawIndirectByteCountEXT(T... args) {Draw(args...);}
+    template<class... T> void DrawIndexedIndirectCount(T... args) {Draw(args...);}
+    template<class... T> void DrawIndirectCount(T... args) {Draw(args...);}
+    template<class... T> void DrawIndexedIndirect(T... args) {Draw(args...);}
+    template<class... T> void DrawIndirect(T... args) {Draw(args...);}
+    template<class... T> void Dispatch(T... args) {Draw(args...);}
+    template<class... T> void DispatchIndirect(T... args) {Draw(args...);}
     void Begin(...) {} void End() {}
     VkCommandBuffer operator*() const {return reinterpret_cast<VkCommandBuffer>(uintptr_t{1});}
     void PipelineBarrier(VkPipelineStageFlags,VkPipelineStageFlags dst,u32,const VkMemoryBarrier& barrier) {
@@ -76,6 +83,7 @@ struct CommandBuffer {
 }
 // The pin and payload ownership implementations are the actual production header.
 #include "video_core/renderer_vulkan/vk_buffer_payload.h"
+#include "video_core/buffer_cache/gpu_write_revision.h"
 namespace VideoCommon {struct BufferCopy {u64 src_offset,dst_offset,size;};}
 namespace Vulkan {
 struct Semaphore {
@@ -128,11 +136,15 @@ public:
     explicit Scheduler(Device& device_):device{device_},master_semaphore{std::make_unique<MasterSemaphore>(device_)} {}
     Submission FlushChecked();VkResult PollChecked(const Submission&) const noexcept;
     std::vector<Write> checked_writes;
+    Submission observed_submission;
+    ObservedWrites RecordObservedWrites(std::span<const WriteFootprint>,std::function<bool(vk::CommandBuffer)>);
     Write RecordCheckedWrite(std::shared_ptr<const void>,const void*,u64,u64,u64,std::function<bool(vk::CommandBuffer)>);
     WriteState PollCheckedWrite(const Write&) const noexcept;
     void RetireCheckedWritesAfterDeviceIdle();
     u64 SubmitExecution(VkSemaphore,VkSemaphore,Submission checked={});
-    void EndPendingOperations() {} void InvalidateState() {} void AllocateNewContext() {}
+    bool fail_end_pending{};
+    void EndPendingOperations() {if(fail_end_pending) throw std::runtime_error("host submit failure");}
+    void InvalidateState() {} void AllocateNewContext() {}
     std::function<void()> on_submit;
     template<class F> void RecordWithUploadBuffer(F f) {commands.push_back(std::move(f));}
     template<class F> void Record(F f) {RecordWithUploadBuffer([=](vk::CommandBuffer main,vk::CommandBuffer){f(main);});}
@@ -155,6 +167,8 @@ class Buffer {
     u64 base,size;size_t lru{};
 public:
     Buffer(BufferCacheRuntime&,u64,u64);
+    VideoCommon::GpuWriteRevision gpu_write_revision;
+    VkBuffer Handle() const {return payload->buffer ? *payload->buffer : VK_NULL_HANDLE;}
     u64 CpuAddr() const {return base;}u64 SizeBytes() const {return size;}
     void setLRUID(size_t n) {lru=n;}size_t getLRUID() const {return lru;}
     auto PinStagedRepresentation(u64 offset,u64 length) const {return StagedBufferPin::Build(payload,offset,length);}
@@ -170,6 +184,16 @@ public:
     BufferCacheRuntime(Device& device_,Scheduler& scheduler_):device{device_},scheduler{scheduler_} {}
     bool SupportsControlledTransfers() const;
     Scheduler::Write ClearBufferChecked(StagedBufferPin,u64,u32,std::function<bool()> = {});
+    bool storage_observation_active{},storage_observation_valid{true};
+    std::vector<Scheduler::WriteFootprint> storage_write_footprints;
+    void BeginStorageWriteObservation(bool);
+    void EndStorageWriteObservation();
+    bool StorageWriteObservationValid() const {return storage_observation_active && storage_observation_valid;}
+    auto StorageWriteFootprints() const {return std::span<const Scheduler::WriteFootprint>{storage_write_footprints};}
+    size_t descriptor_binds{};
+    void BindBuffer(VkBuffer,u32,u32) {++descriptor_binds;}
+    void BindStorageBuffer(Buffer&,u32,u32,bool);
+    // @RAW_STORAGE_BIND@
     std::shared_ptr<VideoCommon::ControlledBufferTransfer> PrepareControlledTransfer(const Buffer&);
     void RetireControlledTransfersAfterDeviceIdle();
     void CopyBuffer(VkBuffer,VkBuffer,std::span<const VideoCommon::BufferCopy>,bool,bool=false);

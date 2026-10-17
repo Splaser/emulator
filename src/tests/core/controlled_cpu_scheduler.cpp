@@ -1118,6 +1118,33 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     on_gpu([&] { old_bytes = Access::ReadPin(rasterizer, *old_pin); });
     REQUIRE(old_bytes == std::vector<u8>(Page, 99));
     REQUIRE(delayed->ResourceIdentity() == old_pin->Identity());
+    Vulkan::Scheduler::Write batch_first, batch_second, next_batch;
+    std::array<State, 2> batch_pending{};
+    on_gpu([&] {
+        batch_first = Access::ObserveOrdinaryFill(rasterizer, A, Page, 0x21212121);
+        batch_second = Access::ObserveOrdinaryFill(rasterizer, A, Page, 0x22222222);
+        batch_pending = {renderer->scheduler.PollCheckedWrite(batch_first),
+                         renderer->scheduler.PollCheckedWrite(batch_second)};
+        renderer->scheduler.Flush(); // The ordinary flush submits both observed writes.
+    });
+    REQUIRE(batch_first);
+    REQUIRE(batch_second);
+    REQUIRE(batch_first->SubmissionIdentity() == batch_second->SubmissionIdentity());
+    REQUIRE(batch_first->IntentRevision() != batch_second->IntentRevision());
+    REQUIRE(batch_pending[0] == State::Pending);
+    REQUIRE(batch_pending[1] == State::Pending);
+    finish(batch_first, State::Complete);
+    finish(batch_second, State::Complete);
+    REQUIRE(read(A) == std::vector<u8>(Page, 34));
+    on_gpu([&] {
+        next_batch = Access::ObserveOrdinaryFill(rasterizer, A, Page, 0x23232323);
+        renderer->scheduler.Finish(); // Ordinary Finish also publishes the actual checked result.
+    });
+    REQUIRE(next_batch);
+    REQUIRE(next_batch->SubmissionIdentity() != batch_first->SubmissionIdentity());
+    finish(next_batch, State::Complete);
+    REQUIRE(read(A) == std::vector<u8>(Page, 35));
+    REQUIRE(read(B) == std::vector<u8>(Page, 10));
     on_gpu([&] {
         renderer->scheduler.Finish();
         std::scoped_lock lock{renderer->scheduler.submit_mutex};

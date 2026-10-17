@@ -6,9 +6,11 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <shared_mutex>
+#include <utility>
 
 #include <boost/container/static_vector.hpp>
 
@@ -97,6 +99,13 @@ public:
         DAddr source, DAddr destination, u32 size);
     [[nodiscard]] ControlledAliasPhase PollControlledAliasCopy(
         const std::shared_ptr<ControlledAliasCopy>& operation);
+    struct StorageWriteObservation {
+        bool capture_valid;
+        std::vector<Scheduler::Write> writes;
+    };
+    // Explicit GPU-owner diagnostics. No physical authority or eligibility certificate.
+    bool SetControlledStorageWriteObservation(bool enabled);
+    [[nodiscard]] std::optional<StorageWriteObservation> GetControlledStorageWriteObservation();
 
     void Shutdown() override;
 
@@ -245,6 +254,24 @@ private:
     /// Returns the pipeline the draw was recorded with, or nullptr when it was skipped
     template <typename Func>
     GraphicsPipeline* PrepareDraw(bool is_indexed, Func&&);
+    template <typename Command>
+    void RecordShaderStorageWrite(Command&& command) {
+        if (!observe_storage_writes) {
+            scheduler.Record(std::forward<Command>(command));
+            return;
+        }
+        std::function<bool(vk::CommandBuffer)> observed_command;
+        try {
+            observed_command = command;
+        } catch (...) {
+            storage_observation_incomplete = true;
+            scheduler.Record(std::forward<Command>(command));
+            return;
+        }
+        // Once recording starts, exceptions must propagate without replaying.
+        RecordObservedShaderStorageWrite(std::move(observed_command));
+    }
+    void RecordObservedShaderStorageWrite(std::function<bool(vk::CommandBuffer)> command);
 
     /// Performs the pipeline's vertex pointer stores, instance_count is empty for indirect draws
     void PerformVertexPointerStores(const GraphicsPipeline& pipeline, bool is_indexed,
@@ -310,6 +337,9 @@ private:
     BufferCacheRuntime buffer_cache_runtime;
     BufferCache buffer_cache;
     std::vector<std::shared_ptr<ControlledAliasCopy>> controlled_alias_copies;
+    bool observe_storage_writes{};
+    bool storage_observation_incomplete{};
+    std::vector<Scheduler::Write> observed_storage_writes;
     const std::shared_ptr<const u8> controlled_alias_owner{std::make_shared<const u8>(0)};
     QueryCacheRuntime query_cache_runtime;
     QueryCache query_cache;

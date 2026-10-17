@@ -190,6 +190,14 @@ public:
     // Isolated write provenance, not ordinary routing or physical content authority.
     [[nodiscard]] Scheduler::Write ClearBufferChecked(StagedBufferPin pin, u64 intent_revision, u32 value,
         std::function<bool()> emit = {});
+    void BeginStorageWriteObservation(bool enabled);
+    void EndStorageWriteObservation();
+    [[nodiscard]] bool StorageWriteObservationValid() const {
+        return storage_observation_active && storage_observation_valid;
+    }
+    [[nodiscard]] std::span<const Scheduler::WriteFootprint> StorageWriteFootprints() const {
+        return storage_write_footprints;
+    }
 
     void BindIndexBuffer(PrimitiveTopology topology, IndexFormat index_format, u32 num_indices,
                          u32 base_vertex, VkBuffer buffer, u32 offset, u32 size);
@@ -236,10 +244,11 @@ public:
         BindBuffer(buffer, offset, size);
     }
 
-    void BindStorageBuffer(VkBuffer buffer, u32 offset, u32 size,
-                           [[maybe_unused]] bool is_written) {
+    void BindStorageBuffer(VkBuffer buffer, u32 offset, u32 size, bool is_written) {
+        if (storage_observation_active && is_written) storage_observation_valid = false;
         BindBuffer(buffer, offset, size);
     }
+    void BindStorageBuffer(Buffer& buffer, u32 offset, u32 size, bool is_written);
 
     void BindTextureBuffer(Buffer& buffer, u32 offset, u32 size,
                            VideoCore::Surface::PixelFormat format) {
@@ -247,6 +256,9 @@ public:
     }
 
 private:
+    bool storage_observation_active{};
+    bool storage_observation_valid{true};
+    std::vector<Scheduler::WriteFootprint> storage_write_footprints;
     std::vector<std::weak_ptr<VideoCommon::ControlledBufferTransfer>> controlled_transfers;
     std::vector<std::weak_ptr<VideoCommon::ControlledAliasTransfer>> alias_transfers;
     std::shared_ptr<StagedBufferPinDomain> staged_pin_domain{

@@ -71,6 +71,8 @@ checked += ';\n    using Submission=std::shared_ptr<CheckedSubmission>;\n'
 checked += 'enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };\n'
 checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    class CheckedWrite {')
 checked += ';\n    using Write=std::shared_ptr<CheckedWrite>;\n'
+checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    struct WriteFootprint {')
+checked += ';\n using ObservedWrites=std::shared_ptr<const std::vector<Write>>;\n'
 timeline = body('src/video_core/renderer_vulkan/vk_master_semaphore.h',
                 '    [[nodiscard]] VkResult PollTimeline(')
 scheduler_path = 'src/video_core/renderer_vulkan/vk_scheduler.cpp'
@@ -81,12 +83,17 @@ submission += body('src/video_core/renderer_vulkan/vk_master_semaphore.cpp',
 for marker in ['Scheduler::Submission Scheduler::FlushChecked(',
                'VkResult Scheduler::PollChecked(', 'u64 Scheduler::SubmitExecution(',
                'Scheduler::Write Scheduler::RecordCheckedWrite(',
+               'Scheduler::ObservedWrites Scheduler::RecordObservedWrites(',
                'Scheduler::WriteState Scheduler::PollCheckedWrite(',
                'void Scheduler::RetireCheckedWritesAfterDeviceIdle(']:
     submission += body(scheduler_path, marker) + '\n'
 runtime_path = 'src/video_core/renderer_vulkan/vk_buffer_cache.cpp'
 transfer = body(runtime_path, 'VkBufferCopy MakeBufferCopy(') + '\n'
 transfer += body(runtime_path, 'class ControlledTransfer final') + ';\n'
+for marker in ['void BufferCacheRuntime::BeginStorageWriteObservation(',
+               'void BufferCacheRuntime::EndStorageWriteObservation(',
+               'void BufferCacheRuntime::BindStorageBuffer(Buffer&']:
+    transfer += body(runtime_path, marker) + '\n'
 for marker in ['bool BufferCacheRuntime::SupportsControlledTransfers(',
                'std::shared_ptr<VideoCommon::ControlledBufferTransfer> BufferCacheRuntime::\n    PrepareControlledTransfer(',
                'void BufferCacheRuntime::RetireControlledTransfersAfterDeviceIdle(',
@@ -123,6 +130,8 @@ template = read('tools/physical_coherency_tests/first_registration_pipeline.cpp.
 template = template.replace('using DAddr=u64;',
     'using VideoCommon::ControlledBufferTransfer;\nusing VideoCommon::ControlledTransferPoll;\nusing DAddr=u64;')
 for name, value in [('POLL_TIMELINE', timeline), ('CHECKED_SUBMISSION', checked),
+                    ('RAW_STORAGE_BIND', body('src/video_core/renderer_vulkan/vk_buffer_cache.h',
+                        '    void BindStorageBuffer(VkBuffer buffer,')),
                     ('DEVICE_WRITE_GUARDS',
                      'template <typename Func>\n' + body('src/core/device_memory_manager.h', '    [[nodiscard]] bool WithControlledPhysicalAliases(') + '\n' +
                      'template <typename Func>\n' + body('src/core/device_memory_manager.h', '    [[nodiscard]] bool WithControlledMapping(') + '\n' +
@@ -382,7 +391,7 @@ provenance = source.rsplit('int main(int argc,char** argv) {', 1)[0]
 provenance += '\nnamespace Vulkan {\n' + body(runtime_path, 'auto MakeBufferClear(') + '\n'
 provenance += body(runtime_path, 'Scheduler::Write BufferCacheRuntime::ClearBufferChecked(') + '\n}\n'
 draw = body('src/video_core/renderer_vulkan/vk_rasterizer.cpp',
-            '        scheduler.Record([draw_params, draw_pipeline]')
+            '        RecordShaderStorageWrite([draw_params, draw_pipeline]')
 draw = draw[draw.index('{') + 1:-1]
 provenance += r'''
 struct DrawParams {bool is_indexed=false;u32 num_vertices=3,num_instances=1,first_index=0,base_vertex=0,base_instance=0;};
@@ -450,6 +459,172 @@ provenance_cpp.write_text(provenance)
 provenance_exe = out / ('write_provenance.exe' if os.name == 'nt' else 'write_provenance')
 subprocess.run(cmd + [str(provenance_cpp), '-o', str(provenance_exe)], check=True)
 subprocess.run([str(provenance_exe)], check=True, timeout=60)
+
+# Ordinary recorder integration: actual binding capture, actual rasterizer recorder,
+# actual Draw worker and actual scheduler; descriptor/driver execution stays fake.
+observer = provenance[:provenance.index('int main() {')]
+for index, marker in enumerate([
+        '            RecordShaderStorageWrite([buffer_obj = buffer->Handle(), offset, stride',
+        '            RecordShaderStorageWrite([draw_buffer_obj = draw_buffer->Handle(),',
+        '        RecordShaderStorageWrite([buffer_obj = buffer->Handle(), offset, params,',
+        '        RecordShaderStorageWrite([indirect_buffer = buffer->Handle(),',
+        '    RecordShaderStorageWrite([dim]']):
+    worker = body('src/video_core/renderer_vulkan/vk_rasterizer.cpp', marker)
+    observer += f'\nbool ShaderWorker{index}(vk::CommandBuffer cmdbuf, [[maybe_unused]] const Pipeline* draw_pipeline) {{\n'
+    observer += '''[[maybe_unused]] VkBuffer buffer_obj=driver->draw_target,draw_buffer_obj=buffer_obj,indirect_buffer=buffer_obj;
+[[maybe_unused]] u32 offset=0,offset_base=0,stride=4,indirect_offset=0;
+[[maybe_unused]] std::array<u32,3> dim{1,1,1};
+struct Params {bool is_indexed=true;u32 max_draw_counts=1,stride=4;};
+[[maybe_unused]] Params params;
+'''
+    observer += worker[worker.index('{') + 1:-1] + '\n}\n'
+observer += r'''
+namespace Vulkan {
+struct StorageObserverHarness {
+    Scheduler& scheduler;BufferCacheRuntime& buffer_cache_runtime;
+    bool observe_storage_writes=true,storage_observation_incomplete=false;
+    std::vector<Scheduler::Write> observed_storage_writes;
+    StorageObserverHarness(Scheduler& s,BufferCacheRuntime& r):scheduler{s},buffer_cache_runtime{r} {
+        observed_storage_writes.reserve(256);
+    }
+    void RecordObservedShaderStorageWrite(std::function<bool(vk::CommandBuffer)>);
+''' + 'template <typename Command>\n' + body('src/video_core/renderer_vulkan/vk_rasterizer.h',
+           '    void RecordShaderStorageWrite(Command&& command)') + r'''
+};
+''' + body('src/video_core/renderer_vulkan/vk_rasterizer.cpp',
+           'void RasterizerVulkan::RecordObservedShaderStorageWrite(').replace(
+               'RasterizerVulkan::', 'StorageObserverHarness::') + '\n}\n'
+observer += r'''
+int main() {
+    using State=Vulkan::Scheduler::WriteState;
+    for(int mode=0;mode<9;++mode) {
+        auto s=std::make_unique<Scenario>();
+        Vulkan::StorageObserverHarness rasterizer{s->scheduler,s->runtime};
+        auto buffer=std::make_unique<Vulkan::Buffer>(s->runtime,mode==4?0:A,4096);
+        auto weak=buffer->WeakPayload();
+        const auto handle=buffer->Handle();
+        driver->draw_target=handle;
+        Pipeline pipeline{mode==1};
+        std::fill(reinterpret_cast<Allocation*>(handle)->bytes.begin(),
+                  reinterpret_cast<Allocation*>(handle)->bytes.end(),u8{10});
+        if(mode==3) rasterizer.observe_storage_writes=false;
+        s->runtime.BeginStorageWriteObservation(rasterizer.observe_storage_writes);
+        if(mode==0) {
+            s->runtime.BindStorageBuffer(*buffer,0,4096,false);
+            assert(s->runtime.StorageWriteObservationValid() && s->runtime.StorageWriteFootprints().empty());
+        }
+        buffer->gpu_write_revision.Mark();
+        s->runtime.BindStorageBuffer(*buffer,0,4096,true);
+        if(mode==5) s->runtime.BindStorageBuffer(handle,0,4096,true);
+        if(mode==6) for(int i=0;i<64;++i) s->runtime.BindStorageBuffer(*buffer,0,4096,true);
+        if(mode==7) s->scheduler.checked_writes.resize(256); // Capacity refusal, never command refusal.
+        auto draw=[&](vk::CommandBuffer command) {return ActualDrawWorker(command,&pipeline,{});};
+        rasterizer.RecordShaderStorageWrite(draw);
+        const bool covered=mode<3 || mode==8;
+        assert(rasterizer.storage_observation_incomplete==(!covered && mode!=3));
+        assert(rasterizer.observed_storage_writes.size()==(covered?1u:0u));
+        assert(driver->submissions==0 && driver->draws==0); // No per-command flush or execution.
+        if(covered) {
+            auto first=rasterizer.observed_storage_writes.front();
+            assert(first->IntentRevision()==2 && first->Offset()==0 && first->Size()==4096);
+            buffer->gpu_write_revision.Mark();
+            s->runtime.EndStorageWriteObservation();
+            s->runtime.BeginStorageWriteObservation(true);
+            s->runtime.BindStorageBuffer(*buffer,128,256,true);
+            rasterizer.RecordShaderStorageWrite(draw);
+            auto second=rasterizer.observed_storage_writes.back();
+            assert(second->IntentRevision()==3 && second->Offset()==128 && second->Size()==256);
+            assert(first->ResourceIdentity()==second->ResourceIdentity());
+            assert(first->SubmissionIdentity()==second->SubmissionIdentity());
+            assert(s->scheduler.PollCheckedWrite(first)==State::Pending);
+            s->scheduler.RetireCheckedWritesAfterDeviceIdle();
+            assert(first->ResourceIdentity()!=nullptr); // Idle cannot release unsubmitted host work.
+            s->runtime.EndStorageWriteObservation();buffer.reset();
+            assert(!weak.expired());
+            s->scheduler.RunWorker(); // Command recording alone is not queue acceptance.
+            assert(s->scheduler.PollCheckedWrite(first)==State::Pending && driver->submissions==0);
+            if(mode==2) driver->submit_result=VK_ERROR_DEVICE_LOST;
+            bool threw=false;
+            s->scheduler.fail_end_pending=mode==8;
+            try {
+                s->scheduler.SubmitExecution(nullptr,nullptr); // Ordinary Flush's actual submit body.
+                s->scheduler.RunWorker();
+            } catch(const std::exception&) {threw=true;}
+            s->scheduler.fail_end_pending=false;
+            const bool failed=mode==2 || mode==8;
+            assert(threw==failed); // Ordinary failure policy must survive diagnostics.
+            assert(s->scheduler.PollCheckedWrite(first)==(failed?State::Unknown:State::Submitted));
+            if(!failed) {
+                s->gpu.Complete();
+                assert(s->scheduler.PollCheckedWrite(first)==(mode==1?State::Skipped:State::Complete));
+                assert(driver->draws==(mode==1?0u:2u));
+                for(auto byte:reinterpret_cast<Allocation*>(handle)->bytes) assert(byte==(mode==1?10:99));
+            }
+            s->scheduler.RetireCheckedWritesAfterDeviceIdle();
+            assert(weak.expired() && s->scheduler.PollCheckedWrite(first)==State::Unknown);
+        } else {
+            s->runtime.EndStorageWriteObservation();
+            s->scheduler.SubmitExecution(nullptr,nullptr);s->scheduler.RunWorker();s->gpu.Complete();
+            assert(driver->draws==1 && driver->submissions==1);
+            if(mode==7) s->scheduler.checked_writes.clear();
+        }
+    }
+    {
+        auto s=std::make_unique<Scenario>();
+        Vulkan::StorageObserverHarness rasterizer{s->scheduler,s->runtime};
+        Vulkan::Buffer a{s->runtime,A,4096},b{s->runtime,ALIAS,4096};
+        driver->draw_target=a.Handle();
+        s->runtime.BeginStorageWriteObservation(true);
+        s->runtime.BindStorageBuffer(a,0,128,true);
+        s->runtime.BindStorageBuffer(b,256,512,true);
+        Pipeline pipeline;
+        rasterizer.RecordShaderStorageWrite([&](vk::CommandBuffer command) {
+            return ActualDrawWorker(command,&pipeline,{});
+        });
+        s->runtime.EndStorageWriteObservation();
+        const auto& writes=rasterizer.observed_storage_writes;
+        assert(writes.size()==2 && writes[0]->ResourceIdentity()!=writes[1]->ResourceIdentity());
+        assert(writes[0]->SubmissionIdentity()==writes[1]->SubmissionIdentity());
+        assert(writes[0]->Offset()==0 && writes[0]->Size()==128);
+        assert(writes[1]->Offset()==256 && writes[1]->Size()==512);
+        s->scheduler.SubmitExecution(nullptr,nullptr);s->scheduler.RunWorker();s->gpu.Complete();
+        for(const auto& write:writes) assert(s->scheduler.PollCheckedWrite(write)==State::Complete);
+        s->scheduler.RetireCheckedWritesAfterDeviceIdle();
+    }
+    for(bool skipped:{false,true}) {
+        auto s=std::make_unique<Scenario>();
+        Vulkan::Buffer buffer{s->runtime,A,4096};
+        driver->draw_target=buffer.Handle();
+        auto pin=buffer.PinStagedRepresentation(0,4096);assert(pin);
+        const std::array<Vulkan::Scheduler::WriteFootprint,1> ranges{{
+            {pin->RetainedOwner(),pin->Identity(),0,4096,1}}};
+        Pipeline pipeline{skipped};
+        std::vector<Vulkan::Scheduler::Write> writes;
+        for(auto worker:{ShaderWorker0,ShaderWorker1,ShaderWorker2,ShaderWorker3,ShaderWorker4}) {
+            auto observed=s->scheduler.RecordObservedWrites(ranges,[&,worker](vk::CommandBuffer command) {
+                return worker(command,&pipeline);
+            });
+            assert(observed && observed->size()==1);
+            writes.push_back(observed->front());
+            assert(writes.front()->SubmissionIdentity()==writes.back()->SubmissionIdentity());
+        }
+        assert(driver->submissions==0);
+        s->scheduler.SubmitExecution(nullptr,nullptr);s->scheduler.RunWorker();s->gpu.Complete();
+        assert(driver->draws==(skipped?2u:5u)); // Compute emits; all three failed Draw variants skip.
+        for(size_t i=0;i<writes.size();++i)
+            assert(s->scheduler.PollCheckedWrite(writes[i])==(skipped && i<3?State::Skipped:State::Complete));
+        s->scheduler.RetireCheckedWritesAfterDeviceIdle();
+    }
+    std::cout<<"PASS ordinary storage observer actual-body fixture: bind identity/range/revision, "
+               "shared batch without flush, skipped Draw, pending versus completed, ordinary submit throws, "
+               "unsubmitted retention, disabled/scratch/raw/capacity refusal executes once; no authority\n";
+}
+'''
+observer_cpp = out / 'storage_observer.cpp'
+observer_cpp.write_text(observer)
+observer_exe = out / ('storage_observer.exe' if os.name == 'nt' else 'storage_observer')
+subprocess.run(cmd + [str(observer_cpp), '-o', str(observer_exe)], check=True)
+subprocess.run([str(observer_exe)], check=True, timeout=60)
 inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
                'src/video_core/buffer_cache/controlled_conflict.h', 'src/common/range_sets.inc',
                'src/video_core/gpu_thread.cpp','src/video_core/gpu_thread.h',
