@@ -59,5 +59,31 @@ negative controls.
 
 The native Linux test adds checked positive qualification, later Copy/readback
 cancellation, and actual BufferCache retirement with retained historical content.
-Full Linux/native and Android compilation results are recorded after CI; local
-actual-body execution alone is not native Vulkan, Android or device acceptance.
+
+Final source `95ab388bd9af25ecefb6d40d232bfab63cdd6a69` passed full
+[workflow 39015687982](https://github.com/Splaser/emulator/actions/runs/39015687982):
+
+- [Linux](https://github.com/Splaser/emulator/actions/runs/39015687982/job/117347346403):
+  all five CTest processes, 159 native provenance assertions and three repeated
+  provenance processes, 31 actual-body transfer-content cases, 17 expected
+  mutation failures (including the three new current-gate controls), the existing
+  byte oracle, and complete coherency/lifecycle regressions.
+- [Android](https://github.com/Splaser/emulator/actions/runs/39015687982/job/117347346772):
+  actual arm64 NCE/HostMemory/Vulkan/shader production library compilation through
+  GitHub workflow. No local Android compilation or APK/device/game acceptance.
+
+The original F3 require-fixed control still rejects both stale aliases (exit 42);
+the F2 negative still exposes backing 77/cache 10. This slice does not close them.
+
+The initial `e7ee346913` run
+[39015411364](https://github.com/Splaser/emulator/actions/runs/39015411364) passed
+the focused controls but failed the native translation-unit check on
+`-Werror=shadow`: the query-local `state` shadowed `Scheduler::state`. Its Android
+job was cancelled. `95ab388bd9` renames that variable without weakening warnings;
+the final complete run above supersedes the initial run.
+
+Full job logs, native results, separate positive/negative fixture logs, source
+stamp and Android configure artifacts are retained in
+`.diagnostics/ci-39015687982/`. All 11 extraction input hashes match the committed
+Git blobs; 18 fixture logs retain the positive run and 17 expected failures.
+The documentation-only follow-up does not repeat identical source validation.

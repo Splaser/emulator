@@ -302,4 +302,17 @@ Worker completion cannot restore eligibility. Cross-submission/queue ancestry
 remains Unknown and no authority or replica synchronization is published.
 
 The actual-body red control is retained in `.diagnostics/m4-current-gate-red.log`.
-Final focused and native/Android CI results follow after source validation.
+Final source `95ab388bd9` passed complete
+[workflow 39015687982](https://github.com/Splaser/emulator/actions/runs/39015687982):
+all five Linux CTest processes, native provenance 159 assertions plus three repeat
+processes, 31 actual-body content cases, 17 expected mutation failures, full
+coherency/lifecycle regressions, and actual Android arm64 production library
+compilation. Eleven extraction input hashes match committed Git blobs. Logs and
+artifacts are retained in `.diagnostics/ci-39015687982/`.
+
+The first run at `e7ee346913` exposed a native `-Werror=shadow` diagnostic and was
+superseded after the local variable rename, without changing warning policy.
+No APK/device/game acceptance is claimed. Next work must preserve this separate
+cancellation contract: returned graph pointers are historical metadata across
+subsequent work, read/disjoint commands conservatively cancel, and no current
+query constitutes physical authority or a concurrent data-admission lease.
