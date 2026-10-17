@@ -135,6 +135,18 @@ struct SchedulerTestAccess : SystemTestAccess {
         std::scoped_lock lock{cache.mutex};
         cache.DeleteBuffer(cache.FindBuffer(address, 1));
     }
+    static Vulkan::Scheduler::TransferBuffer ContentTransferTarget(
+        Vulkan::RasterizerVulkan& rasterizer, DAddr address, u32 size) {
+        auto& cache = Cache(rasterizer);
+        std::scoped_lock lock{cache.mutex};
+        auto [buffer, offset] = cache.ObtainCPUBuffer(address, size,
+            VideoCommon::ObtainBufferSynchronize::FullSynchronize,
+            VideoCommon::ObtainBufferOperation::MarkAsWritten);
+        auto pin = buffer->PinStagedRepresentation(offset, size);
+        auto physical = rasterizer.buffer_cache_runtime.PhysicalIdentityForBinding(*buffer, offset, size);
+        if (!pin || !physical) throw std::runtime_error("content transfer origin unavailable");
+        return {*pin, physical};
+    }
     // Exercise the ordinary batch observer with real transfer commands. This is not
     // an actual shader binding test; extracted Draw/Dispatch fixtures cover that wiring.
     static Vulkan::Scheduler::Write ObserveOrdinaryFill(Vulkan::RasterizerVulkan& rasterizer,

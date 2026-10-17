@@ -1258,6 +1258,87 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     on_gpu([&] { physical_old_bytes = Access::ReadPin(rasterizer, *retained_physical_a); });
     REQUIRE(physical_old_bytes == std::vector<u8>(Page, 49));
     REQUIRE(read(Alias) == std::vector<u8>(Page, 50)); // Independent staged replica, no source selection.
+    // Explicit transfer-only content history. No normal cache producer is enrolled
+    // or repaired, and nothing publishes a latest physical writer.
+    using Content = Vulkan::TransferContent;
+    using Kind = Content::Kind;
+    std::vector<Vulkan::Scheduler::TransferBuffer> content_targets;
+    Vulkan::Scheduler::Transfer content_transfer;
+    const std::array<Content::Command, 4> content_commands{{
+        {Kind::Fill, 1, 0, 0, 0, 64, 0x0a0a0a0a},
+        {Kind::Fill, 0, 0, 0, 0, 64, 0x63636363},
+        {Kind::Copy, 1, 0, 16, 16, 16},
+        {Kind::Fill, 0, 0, 0, 0, 64, 0x4d4d4d4d},
+    }};
+    on_gpu([&] {
+        enabled = rasterizer.SetControlledStorageWriteObservation(true);
+        Access::RetireOrdinary(rasterizer, A);
+        Access::RetireOrdinary(rasterizer, B);
+        content_targets.push_back(Access::ContentTransferTarget(rasterizer, A, 64));
+        content_targets.push_back(Access::ContentTransferTarget(rasterizer, B, 64));
+        renderer->scheduler.Finish();
+        content_transfer = renderer->scheduler.RecordTransferBatch(content_targets, content_commands);
+    });
+    REQUIRE(enabled);
+    REQUIRE(content_transfer);
+    REQUIRE(content_targets[0].pin.Identity() != content_targets[1].pin.Identity());
+    REQUIRE(content_targets[0].physical->OverlapsPhysical(*content_targets[1].physical));
+    const auto finish_content = [&](const Vulkan::Scheduler::Transfer& transfer) {
+        REQUIRE(Until([&] {
+            State state{};
+            on_gpu([&] { state = renderer->scheduler.PollCheckedTransfer(transfer); });
+            return state == State::Complete || state == State::Unknown;
+        }));
+        State state{};
+        on_gpu([&] { state = renderer->scheduler.PollCheckedTransfer(transfer); });
+        REQUIRE(state == State::Complete);
+    };
+    finish_content(content_transfer);
+    const Content* content{};
+    on_gpu([&] { content = renderer->scheduler.TransferContentForMapping(content_transfer, device_memory); });
+    REQUIRE(content);
+    REQUIRE(content->HasRoot(1, 16, 16, 1, 16));
+    REQUIRE(content->HasRoot(1, 0, 16, 0, 0));
+    REQUIRE(content->HasRoot(1, 32, 32, 0, 32));
+    REQUIRE_FALSE(content->HasRoot(1, 0, 64, 1, 0));
+    REQUIRE_FALSE(content->HasRoot(1, 16, 16, 3, 16));
+    REQUIRE(content->WrittenBy(2, 1, 16, 16));
+    REQUIRE_FALSE(content->WrittenBy(2, 1, 0, 64));
+    std::vector<u8> content_a, content_b;
+    on_gpu([&] {
+        content_a = Access::ReadPin(rasterizer, content_targets[0].pin);
+        content_b = Access::ReadPin(rasterizer, content_targets[1].pin);
+    });
+    REQUIRE(content_a == std::vector<u8>(64, 77));
+    auto mixed = std::vector<u8>(64, 10);
+    std::fill(mixed.begin() + 16, mixed.begin() + 32, u8{99});
+    REQUIRE(content_b == mixed);
+    Vulkan::Scheduler::Transfer unknown_root;
+    const std::array<Content::Command, 1> copy_only{{{Kind::Copy, 1, 0, 0, 0, 64}}};
+    on_gpu([&] { unknown_root = renderer->scheduler.RecordTransferBatch(content_targets, copy_only); });
+    REQUIRE(unknown_root);
+    finish_content(unknown_root);
+    const Content* unknown_content{};
+    on_gpu([&] { unknown_content = renderer->scheduler.CompletedTransferContent(unknown_root); });
+    REQUIRE(unknown_content);
+    REQUIRE(unknown_content->WrittenBy(0, 1, 0, 64));
+    REQUIRE_FALSE(unknown_content->HasRoot(1, 0, 64, 0, 0)); // No cross-submission root import.
+    on_gpu([&] { content_b = Access::ReadPin(rasterizer, content_targets[1].pin); });
+    REQUIRE(content_b == std::vector<u8>(64, 77));
+    REQUIRE(content->HasRoot(1, 16, 16, 1, 16)); // Earlier history never becomes current content.
+    const auto historical_content_origin = content_transfer->HistoricalOrigins()[0];
+    on_gpu([&] {
+        device_memory.Unmap(A, Footprint);
+        device_memory.Map(A, GetInteger(owner.heap) + Footprint, Footprint, asid);
+        content = renderer->scheduler.TransferContentForMapping(content_transfer, device_memory);
+        unknown_content = renderer->scheduler.TransferContentForMapping(unknown_root, device_memory);
+        enabled = rasterizer.SetControlledStorageWriteObservation(false);
+    });
+    REQUIRE(enabled);
+    REQUIRE(content == nullptr);
+    REQUIRE(unknown_content == nullptr);
+    REQUIRE(content_transfer->HistoricalOrigins()[0] == historical_content_origin);
+    REQUIRE_FALSE(historical_content_origin->MatchesCurrent(device_memory));
     on_gpu([&] {
         renderer->scheduler.Finish();
         std::scoped_lock lock{renderer->scheduler.submit_mutex};
@@ -1267,6 +1348,7 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     });
     REQUIRE(delayed->ResourceIdentity() == nullptr);
     REQUIRE(poll(delayed) == State::Unknown);
+    REQUIRE_FALSE(content_transfer->ResourcesRetained());
     std::cout << "PASS checked write provenance: skipped intent, distinct actual submissions, "
                  "repeated dirty interval, historical completion versus current snapshot, "
                  "pending worker, independent replica, remap and retained old native allocation; "

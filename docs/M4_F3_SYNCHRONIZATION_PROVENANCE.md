@@ -110,6 +110,10 @@ test or workflow source and does not require repeating the same validation.
 
 ## Next boundary
 
+The bounded [transfer content extension](M4_F3_TRANSFER_CONTENT_PROVENANCE.md)
+establishes exact coverage and copy ancestry for explicitly requested Fill/Copy
+callbacks. It does not enroll ordinary transfers/shaders or introduce authority.
+
 Before physical latest-writer authority, separately establish actual content
 coverage and replica-copy provenance. Cross-submission/queue edges require linked
 signal/wait identities, stage scopes and applicable ownership transfer. Preserve

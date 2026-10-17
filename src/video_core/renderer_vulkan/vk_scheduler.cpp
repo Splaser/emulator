@@ -148,6 +148,128 @@ Scheduler::WriteState Scheduler::PollCheckedWrite(const Write& write) const noex
     return emission == Emission::Skipped ? WriteState::Skipped : WriteState::Complete;
 }
 
+Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffer> buffers,
+    std::span<const TransferContent::Command> commands) {
+    if (observed_submission || !device.HasTimelineSemaphore() ||
+        !submission_owner->load(std::memory_order_acquire) || checked_transfers.size() >= 16 ||
+        buffers.empty() || buffers.size() > TransferContent::MaxBuffers) return {};
+    Transfer transfer;
+    try {
+        std::array<TransferContent::Offset, TransferContent::MaxBuffers> sizes{};
+        for (size_t i = 0; i < buffers.size(); ++i) {
+            const auto& buffer = buffers[i];
+            const auto& physical = buffer.physical;
+            if (!buffer.pin.IsUsable() || buffer.pin.Offset() % 4 || !physical || !physical->OwnersAlive() ||
+                physical->Representation() != buffer.pin.Identity() || physical->Size() != buffer.pin.Size() ||
+                physical->NativeOffset() != buffer.pin.Offset()) return {};
+            for (size_t j = 0; j < i; ++j)
+                if (buffers[j].pin.Identity() == buffer.pin.Identity()) return {}; // No hidden native aliases.
+            sizes[i] = buffer.pin.Size();
+        }
+        auto content = TransferContent::Build({sizes.data(), buffers.size()}, commands);
+        if (!content) return {};
+        transfer = Transfer{new CheckedTransfer{submission_owner}};
+        transfer->resources.assign(buffers.begin(), buffers.end());
+        for (const auto& buffer : buffers) transfer->origins.push_back(buffer.physical);
+        transfer->content = std::make_shared<const TransferContent>(std::move(*content));
+        transfer->submission = Submission{new CheckedSubmission{submission_owner}};
+        checked_transfers.push_back(transfer); // Retain uncertain effects until trusted device idle.
+    } catch (...) {
+        return {}; // No command has been recorded.
+    }
+    try {
+        RequestOutsideRenderPassOperationContext();
+        observed_submission = transfer->submission;
+        transfer->worker_pending.store(true, std::memory_order_release);
+        Record([transfer](vk::CommandBuffer cmdbuf) {
+            if (transfer->emission.load(std::memory_order_acquire) == CheckedTransfer::Emission::Unknown) {
+                transfer->worker_pending.store(false, std::memory_order_release);
+                return;
+            }
+            try {
+                auto& journal = transfer->submission->synchronization;
+                size_t index{};
+                for (const auto& operation : transfer->content->Commands()) {
+                    const VkMemoryBarrier dependency{
+                        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                        .pNext = nullptr,
+                        .srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+                    };
+                    const auto source_stage = index ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+                    cmdbuf.PipelineBarrier(source_stage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, dependency);
+                    journal.RecordBarrier(source_stage, VK_PIPELINE_STAGE_TRANSFER_BIT, dependency);
+                    const auto& destination = transfer->resources[operation.destination].pin;
+                    if (!destination.IsUsable()) throw std::runtime_error("transfer destination sealed");
+                    if (operation.kind == TransferContent::Kind::Fill) {
+                        cmdbuf.FillBuffer(destination.Handle(), destination.Offset() + operation.destination_offset,
+                                          operation.size, operation.value);
+                    } else {
+                        const auto& source = transfer->resources[operation.source].pin;
+                        if (!source.IsUsable()) throw std::runtime_error("transfer source sealed");
+                        const std::array<VkBufferCopy, 1> region{{{
+                            .srcOffset = source.Offset() + operation.source_offset,
+                            .dstOffset = destination.Offset() + operation.destination_offset,
+                            .size = operation.size,
+                        }}};
+                        cmdbuf.CopyBuffer(source.Handle(), destination.Handle(), region);
+                    }
+                    transfer->positions[index++] = journal.RecordAccess();
+                }
+                auto expected = CheckedTransfer::Emission::Pending;
+                (void)transfer->emission.compare_exchange_strong(expected, CheckedTransfer::Emission::Recorded,
+                    std::memory_order_release, std::memory_order_relaxed);
+            } catch (...) {
+                transfer->emission.store(CheckedTransfer::Emission::Unknown, std::memory_order_release);
+            }
+            transfer->worker_pending.store(false, std::memory_order_release);
+        });
+        (void)Flush(); // Adopts the checked token while preserving ordinary queue-error propagation.
+    } catch (...) {
+        transfer->emission.store(CheckedTransfer::Emission::Unknown, std::memory_order_release);
+    }
+    return transfer;
+}
+
+Scheduler::WriteState Scheduler::PollCheckedTransfer(const Transfer& transfer) const noexcept {
+    if (!transfer || transfer->owner != submission_owner || transfer->retired ||
+        !submission_owner->load(std::memory_order_acquire)) return WriteState::Unknown;
+    if (transfer->emission.load(std::memory_order_acquire) == CheckedTransfer::Emission::Unknown)
+        return WriteState::Unknown;
+    for (const auto& resource : transfer->resources) {
+        if (!resource.pin.IsUsable() || !resource.physical->OwnersAlive()) {
+            transfer->emission.store(CheckedTransfer::Emission::Unknown, std::memory_order_release);
+            return WriteState::Unknown;
+        }
+    }
+    const auto result = PollChecked(transfer->submission);
+    if (result != VK_SUCCESS && result != VK_NOT_READY) {
+        transfer->emission.store(CheckedTransfer::Emission::Unknown, std::memory_order_release);
+        return WriteState::Unknown;
+    }
+    if (transfer->emission.load(std::memory_order_acquire) == CheckedTransfer::Emission::Pending)
+        return WriteState::Pending;
+    if (result != VK_SUCCESS)
+        return transfer->submission->result.load(std::memory_order_acquire) == VK_SUCCESS
+            ? WriteState::Submitted : WriteState::Pending;
+    return WriteState::Complete;
+}
+
+const TransferContent* Scheduler::CompletedTransferContent(const Transfer& transfer) const noexcept {
+    if (PollCheckedTransfer(transfer) != WriteState::Complete) return nullptr;
+    const auto commands = transfer->content->Commands();
+    for (size_t i = 1; i < commands.size(); ++i) {
+        const SyncProvenance::Access previous{VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT};
+        VkAccessFlags destination_access = VK_ACCESS_TRANSFER_WRITE_BIT;
+        if (commands[i].kind == TransferContent::Kind::Copy) destination_access |= VK_ACCESS_TRANSFER_READ_BIT;
+        const SyncProvenance::Access next{VK_PIPELINE_STAGE_TRANSFER_BIT, destination_access};
+        if (!transfer->submission->synchronization.Proves(transfer->positions[i - 1], previous,
+                                                          transfer->positions[i], next)) return nullptr;
+    }
+    return transfer->content.get();
+}
+
 Scheduler::ObservedWrites Scheduler::RecordObservedWrites(std::span<const WriteFootprint> footprints,
     std::function<bool(vk::CommandBuffer)> command,
     std::shared_ptr<VideoCommon::PhysicalWriteCoverage> coverage) {
@@ -279,11 +401,18 @@ void Scheduler::RecordProvenanceBarrier(VkPipelineStageFlags source,
 
 void Scheduler::RetireCheckedWritesAfterDeviceIdle() {
     if (observed_submission) return; // Device idle does not submit recorded host work.
+    for (const auto& transfer : checked_transfers)
+        if (transfer->worker_pending.load(std::memory_order_acquire)) return;
     for (const auto& write : checked_writes) {
         write->retired = true;
         write->resources.reset();
     }
     checked_writes.clear();
+    for (const auto& transfer : checked_transfers) {
+        transfer->retired = true;
+        transfer->resources.clear();
+    }
+    checked_transfers.clear();
 }
 
 void Scheduler::Finish(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {

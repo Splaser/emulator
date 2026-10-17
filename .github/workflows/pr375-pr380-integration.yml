@@ -111,7 +111,12 @@ jobs:
             -o .diagnostics/pr375-pr380/sync-provenance
           .diagnostics/pr375-pr380/sync-provenance \
             | tee .diagnostics/pr375-pr380/sync-provenance.txt
-          python tools/physical_coherency_tests/run_sync_provenance_tests.py
+          python tools/physical_coherency_tests/run_sync_provenance_tests.py --content
+          g++ -std=c++23 -Wall -Wextra -Werror -I src \
+            tools/physical_coherency_tests/transfer_content_tests.cpp \
+            -o .diagnostics/pr375-pr380/transfer-content
+          .diagnostics/pr375-pr380/transfer-content \
+            | tee .diagnostics/pr375-pr380/transfer-content.txt
       - name: Check native scheduler integration translation units first
         run: |
           cmake --build build-integration --parallel 3 --target \

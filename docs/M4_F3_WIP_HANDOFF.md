@@ -265,3 +265,17 @@ processes, focused actual-body controls and five expected mutation failures, ful
 coherency/lifecycle regressions and Android arm64 production library compilation.
 F3 require-fixed still fails exactly two aliases (exit 42); F2 remains backing
 77/cache 10. Detailed boundaries and retained artifacts are in the contract.
+
+### M4 F3 exact transfer content extension
+
+See [the transfer content contract](M4_F3_TRANSFER_CONTENT_PROVENANCE.md). Explicit
+bounded Scheduler Fill/Copy requests now retain exact command coverage, immutable
+copy ancestry and both untouched complements inside one checked callback. Initial
+bytes are Unknown; previous submissions and shader bindings cannot seed roots.
+The mapping gate refuses remap/dead origins. No ordinary caller routing, automatic
+replica synchronization or physical latest-writer publication is added.
+
+The actual-body fixture passes completion/partial-copy/remap/pin-lifetime controls
+and nine expected content mutation failures, alongside the five earlier sync
+mutations. Exact native transfer/readback and Android production library validation
+must be read from the new workflow source, not inferred from the previous run.

@@ -20,7 +20,9 @@
 #include "common/profiling.h"
 #include "video_core/buffer_cache/physical_write_identity.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
+#include "video_core/renderer_vulkan/vk_buffer_payload.h"
 #include "video_core/renderer_vulkan/vk_sync_provenance.h"
+#include "video_core/renderer_vulkan/vk_transfer_content.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
 namespace VideoCommon {
@@ -53,7 +55,50 @@ public:
     };
     using Submission = std::shared_ptr<CheckedSubmission>;
 
+    struct TransferBuffer {
+        StagedBufferPin pin;
+        std::shared_ptr<const VideoCommon::PhysicalWriteIdentity> physical;
+    };
+    class CheckedTransfer {
+        friend class Scheduler;
+        explicit CheckedTransfer(std::shared_ptr<std::atomic_bool> owner_) : owner{std::move(owner_)} {}
+        enum class Emission { Pending, Recorded, Unknown };
+        const std::shared_ptr<std::atomic_bool> owner;
+        std::vector<TransferBuffer> resources;
+        std::vector<std::shared_ptr<const VideoCommon::PhysicalWriteIdentity>> origins;
+        std::shared_ptr<const TransferContent> content;
+        Submission submission;
+        std::array<SyncProvenance::Position, TransferContent::MaxCommands> positions{};
+        std::atomic<Emission> emission{Emission::Pending};
+        std::atomic_bool worker_pending{};
+        bool retired{};
+    public:
+        // Planned metadata is inspectable before execution, never completed evidence.
+        const auto& PlannedContent() const noexcept { return content; }
+        const auto& HistoricalOrigins() const noexcept { return origins; }
+        bool ResourcesRetained() const noexcept { return !resources.empty(); }
+    };
+    using Transfer = std::shared_ptr<CheckedTransfer>;
+
     enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };
+    // Explicit, bounded transfer-only callback, with its own actual checked submission.
+    // No previously completed replica or external submission is imported as known content.
+    [[nodiscard]] Transfer RecordTransferBatch(std::span<const TransferBuffer> buffers,
+                                              std::span<const TransferContent::Command> commands);
+    [[nodiscard]] WriteState PollCheckedTransfer(const Transfer& transfer) const noexcept;
+    [[nodiscard]] const TransferContent* CompletedTransferContent(const Transfer& transfer) const noexcept;
+    template <typename Memory>
+    const TransferContent* TransferContentForMapping(const Transfer& transfer, const Memory& memory) const noexcept {
+        const auto* content = CompletedTransferContent(transfer);
+        if (!content) return nullptr;
+        try {
+            for (const auto& origin : transfer->origins)
+                if (!origin->MatchesCurrent(memory)) return nullptr;
+        } catch (...) {
+            return nullptr;
+        }
+        return content; // Historical callback-end content, never current/latest authority.
+    }
     class CheckedWrite {
         friend class Scheduler;
     public:
@@ -372,6 +417,7 @@ private:
     std::unique_ptr<CommandChunk> chunk;
     std::function<void()> on_submit;
     std::vector<Write> checked_writes;
+    std::vector<Transfer> checked_transfers;
     Submission observed_submission;
 
     State state;
