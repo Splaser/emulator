@@ -25,6 +25,7 @@
 #include "video_core/renderer_vulkan/vk_sync_provenance.h"
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
 #include "video_core/renderer_vulkan/vk_transfer_eligibility.h"
+#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
 namespace VideoCommon {
@@ -53,6 +54,8 @@ public:
         const std::shared_ptr<std::atomic_bool> owner;
         std::atomic<VkResult> result{VK_NOT_READY};
         std::atomic_bool queue_attempted{};
+        VkQueue queue{};
+        std::weak_ptr<CheckedSubmission> queue_predecessor;
         u64 tick{};
         SyncProvenance synchronization;
     };
@@ -70,6 +73,8 @@ public:
         std::vector<TransferBuffer> resources;
         std::vector<std::shared_ptr<const VideoCommon::PhysicalWriteIdentity>> origins;
         std::shared_ptr<const TransferContent> content;
+        std::shared_ptr<const ReplicaCopyProvenance> replica_copy;
+        std::shared_ptr<CheckedTransfer> replica_parent;
         Submission submission;
         std::array<SyncProvenance::Position, TransferContent::MaxCommands> positions{};
         std::atomic<Emission> emission{Emission::Pending};
@@ -81,9 +86,62 @@ public:
         // Planned metadata is inspectable before execution, never completed evidence.
         const auto& PlannedContent() const noexcept { return content; }
         const auto& HistoricalOrigins() const noexcept { return origins; }
+        const auto& PlannedReplicaCopy() const noexcept { return replica_copy; }
         bool ResourcesRetained() const noexcept { return !resources.empty(); }
     };
     using Transfer = std::shared_ptr<CheckedTransfer>;
+    struct ReplicaCopyRequest {
+        Transfer parent;
+        TransferContent::Index source{}, destination{};
+        u64 source_offset{}, destination_offset{}, size{};
+        TransferContent::Index source_fill{}, destination_fill{};
+        u64 source_root_offset{}, destination_root_offset{};
+    };
+    template <typename Memory>
+    Transfer RecordControlledReplicaCopy(const Memory& memory, const ReplicaCopyRequest& request) {
+        const auto& parent = request.parent;
+        if (!parent || parent->replica_copy || request.source >= parent->resources.size() ||
+            request.destination >= parent->resources.size()) return {};
+        const auto& source = parent->resources[request.source];
+        const auto& destination = parent->resources[request.destination];
+        if (!source.pin.CopyProvenanceEligible() || !destination.pin.CopyProvenanceEligible() ||
+            source.pin.Identity() == destination.pin.Identity() ||
+            !CurrentTransferHasRoot(parent, memory, request.source, request.source_offset, request.size,
+                                    request.source_fill, request.source_root_offset) ||
+            !CurrentTransferHasRoot(parent, memory, request.destination, 0, destination.pin.Size(),
+                                    request.destination_fill, request.destination_root_offset)) return {};
+        const auto source_physical = source.physical->Slice(request.source_offset, request.size);
+        const auto destination_physical = destination.physical->Slice(request.destination_offset, request.size);
+        if (!source_physical || !destination_physical ||
+            source_physical->Backing() != destination_physical->Backing() ||
+            source_physical->DeviceEpoch() != destination_physical->DeviceEpoch() ||
+            source_physical->DeviceAddress() == destination_physical->DeviceAddress() ||
+            !std::ranges::equal(source_physical->Segments(), destination_physical->Segments())) return {};
+        auto plan = ReplicaCopyProvenance::Build(parent->content, request.source, request.destination,
+            request.source_offset, request.destination_offset, request.size, destination.pin.Size(),
+            request.source_fill, request.source_root_offset, request.destination_fill, request.destination_root_offset);
+        if (!plan) return {};
+        RequestOutsideRenderPassOperationContext();
+        if (!CurrentTransferHasRoot(parent, memory, request.source, request.source_offset, request.size,
+                                    request.source_fill, request.source_root_offset) ||
+            !CurrentTransferHasRoot(parent, memory, request.destination, 0, destination.pin.Size(),
+                                    request.destination_fill, request.destination_root_offset)) return {};
+        const std::array<TransferBuffer, 2> buffers{source, destination};
+        const std::array<TransferContent::Command, 1> commands{{{TransferContent::Kind::Copy,
+            1, 0, request.destination_offset, request.source_offset, request.size}}};
+        return RecordTransferBatchImpl(buffers, commands,
+            std::make_shared<const ReplicaCopyProvenance>(std::move(*plan)), parent);
+    }
+    template <typename Memory>
+    bool CurrentReplicaCopyHasRoot(const Transfer& result, const Memory& memory, const Transfer& parent,
+        u64 offset, u64 size, TransferContent::Index fill, u64 root_offset) const noexcept {
+        return result && result->resources.size() == 2 &&
+            result->resources[0].pin.CopyProvenanceEligible() && result->resources[1].pin.CopyProvenanceEligible() &&
+            CurrentTransferContentRange(result, memory, 1, offset, size) &&
+            CompletedReplicaCopyHasRoot(result, parent, offset, size, fill, root_offset);
+    }
+    bool CompletedReplicaCopyHasRoot(const Transfer& result, const Transfer& parent,
+        u64 offset, u64 size, TransferContent::Index fill, u64 root_offset) const noexcept;
 
     enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };
     // Explicit, bounded transfer-only callback, with its own actual checked submission.
@@ -292,6 +350,9 @@ public:
     // GPU/cache-thread only. Unclassified reads/disjoint operations also conservatively cancel.
 private:
     void RevokeBufferContent(VkBuffer destination, u64 offset, u64 size) noexcept;
+    Transfer RecordTransferBatchImpl(std::span<const TransferBuffer> buffers,
+        std::span<const TransferContent::Command> commands,
+        std::shared_ptr<const ReplicaCopyProvenance> replica_copy, Transfer parent);
     void RevokeTransferContentEligibility() noexcept {
         for (const auto& transfer : checked_transfers) transfer->current_eligible = false;
     }
@@ -479,6 +540,7 @@ private:
     std::vector<Transfer> checked_transfers;
     std::atomic_bool current_content_uncertain{}; // Sticky submission failure; no worker mutation of range sets.
     Submission observed_submission;
+    std::weak_ptr<CheckedSubmission> last_accepted_submission; // Worker-only, actual owned graphics queue, no ranking.
 
     State state;
 

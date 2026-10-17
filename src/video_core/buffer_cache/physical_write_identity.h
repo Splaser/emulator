@@ -54,6 +54,10 @@ public:
         return backing && device_epoch && backing->alive.load(std::memory_order_acquire) &&
                device_epoch->alive.load(std::memory_order_acquire);
     }
+    // Worker-safe rejection only: no owner/PTE pointer is dereferenced, no mapping is re-resolved.
+    bool CapturedEpochCurrent() const noexcept {
+        return OwnersAlive() && device_epoch->generation.load(std::memory_order_acquire) == mapping_generation;
+    }
 
     template <typename Memory>
     static std::optional<PhysicalWriteIdentity> Capture(const Memory& memory, u64 address,

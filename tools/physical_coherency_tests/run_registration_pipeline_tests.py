@@ -71,6 +71,7 @@ checked += ';\n    using Submission=std::shared_ptr<CheckedSubmission>;\n'
 checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    struct TransferBuffer {') + ';\n'
 checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    class CheckedTransfer {')
 checked += ';\n using Transfer=std::shared_ptr<CheckedTransfer>;\n'
+checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    struct ReplicaCopyRequest {') + ';\n'
 checked += 'enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };\n'
 checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    class CheckedWrite {')
 checked += ';\n    using Write=std::shared_ptr<CheckedWrite>;\n'
@@ -93,6 +94,7 @@ for marker in ['Scheduler::Submission Scheduler::FlushChecked(',
                'void Scheduler::RecordProvenanceBarrier(',
                'Scheduler::WriteState Scheduler::PollCheckedWrite(',
                'Scheduler::Transfer Scheduler::RecordTransferBatch(',
+               'Scheduler::Transfer Scheduler::RecordTransferBatchImpl(', 'bool Scheduler::CompletedReplicaCopyHasRoot(',
                'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
                'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
                'const TransferContent* Scheduler::CompletedTransferContent(',
@@ -146,6 +148,8 @@ template = template.replace('// @SCHEDULER_RECORDING@', '\n'.join([
     '\n' + body('src/video_core/renderer_vulkan/vk_scheduler.h', '    void RevokeTransferContentEligibility('))
 template = template.replace('// @REVOKE_BUFFER_CONTENT@', body(
     'src/video_core/renderer_vulkan/vk_buffer_cache.h', '    void RevokeContentEligibility('))
+template = template.replace('// @BUFFER_MAPPED@', body('src/video_core/renderer_vulkan/vk_buffer_cache.h',
+    '    [[nodiscard]] std::span<u8> Mapped('))
 template = template.replace('using DAddr=u64;',
     'using VideoCommon::ControlledBufferTransfer;\nusing VideoCommon::ControlledTransferPoll;\nusing DAddr=u64;')
 for name, value in [('POLL_TIMELINE', timeline), ('CHECKED_SUBMISSION', checked),
@@ -157,7 +161,10 @@ for name, value in [('POLL_TIMELINE', timeline), ('CHECKED_SUBMISSION', checked)
                         'src/video_core/renderer_vulkan/vk_scheduler.h',
                         '    const TransferContent* CurrentTransferContentRange(') + '\ntemplate <typename Memory>\n' + body(
                         'src/video_core/renderer_vulkan/vk_scheduler.h',
-                        '    bool CurrentTransferHasRoot(')),
+                        '    bool CurrentTransferHasRoot(') + '\ntemplate <typename Memory>\n' + body(
+                        'src/video_core/renderer_vulkan/vk_scheduler.h', '    Transfer RecordControlledReplicaCopy(') +
+                        '\ntemplate <typename Memory>\n' + body('src/video_core/renderer_vulkan/vk_scheduler.h',
+                        '    bool CurrentReplicaCopyHasRoot(')),
                     ('RAW_STORAGE_BIND', body('src/video_core/renderer_vulkan/vk_buffer_cache.h',
                         '    void BindStorageBuffer(VkBuffer buffer,')),
                     ('DEVICE_WRITE_GUARDS',
@@ -743,9 +750,10 @@ int main() {
 observer_cpp = out / 'storage_observer.cpp'
 sync_fixture = read('tools/physical_coherency_tests/sync_dependency_fixture.cpp.in')
 sync_fixture += '\n' + read('tools/physical_coherency_tests/transfer_content_fixture.cpp.in')
+sync_fixture += '\n' + read('tools/physical_coherency_tests/replica_copy_fixture.cpp.in')
 observer = observer.replace('int main() {', sync_fixture + '\nint main() {')
 observer = observer.replace('    std::cout<<"PASS ordinary storage observer',
-                            '    TestSyncDependencies();\n    TestTransferContent();\n    std::cout<<"PASS ordinary storage observer')
+                            '    TestSyncDependencies();\n    TestTransferContent();\n    TestReplicaCopy();\n    std::cout<<"PASS ordinary storage observer')
 observer_cpp.write_text(observer)
 observer_exe = out / ('storage_observer.exe' if os.name == 'nt' else 'storage_observer')
 subprocess.run(cmd + [str(observer_cpp), '-o', str(observer_exe)], check=True)
@@ -770,6 +778,8 @@ inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled
                'src/video_core/renderer_vulkan/vk_sync_provenance.h',
                'src/video_core/renderer_vulkan/vk_transfer_content.h',
                'src/video_core/renderer_vulkan/vk_transfer_eligibility.h',
+               'src/video_core/renderer_vulkan/vk_replica_copy_provenance.h',
+               'src/video_core/vulkan_common/vulkan_wrapper.h',
                'src/video_core/buffer_cache/physical_alias_copy.h'])
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sorted(inputs)},

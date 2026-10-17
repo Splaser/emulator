@@ -4,6 +4,7 @@
 #include <vector>
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
 #include "video_core/renderer_vulkan/vk_transfer_eligibility.h"
+#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"
 
 int main() {
     // Independent byte-validity oracle. Unknown producers use a separate whole-snapshot latch.
@@ -42,6 +43,28 @@ int main() {
     using Plan = Vulkan::TransferContent;
     using Kind = Plan::Kind;
     const std::array<Plan::Offset, 3> sizes{64, 64, 64};
+    const std::array<Plan::Command, 3> seeded{{
+        {Kind::Fill, 0, 0, 0, 0, 64, 99}, {Kind::Fill, 1, 0, 0, 0, 64, 10},
+        {Kind::Copy, 2, 0, 0, 0, 64}}};
+    const auto seed = Plan::Build(sizes, seeded);
+    assert(seed);
+    const auto parent_content = std::make_shared<const Plan>(*seed);
+    for (unsigned trial = 0; trial < 64; ++trial) {
+        const u64 source_begin = (trial % 8) * 4;
+        const u64 destination_begin = ((trial / 8) % 8) * 4;
+        const auto ancestry = Vulkan::ReplicaCopyProvenance::Build(parent_content, trial % 2 ? 0 : 2, 1,
+            source_begin, destination_begin, 16, 64, 0, source_begin, 1, 0);
+        assert(ancestry && ancestry->ParentContent() == parent_content);
+        for (u64 byte = 0; byte < 64; ++byte) {
+            const bool copied = byte >= destination_begin && byte < destination_begin + 16;
+            assert(ancestry->HasRoot(byte, 1, copied ? 0 : 1, copied ? source_begin + byte - destination_begin : byte));
+            assert(!ancestry->HasRoot(byte, 1, copied ? 1 : 0, byte));
+        }
+        assert(!ancestry->HasRoot(0, 64, 0, 0) && !ancestry->HasRoot(0, 64, 1, 0));
+        assert(!ancestry->HasRoot(0, 0, 1, 0) && !ancestry->HasRoot(~u64{0}, 4, 1, 0));
+    }
+    assert(!Vulkan::ReplicaCopyProvenance::Build(parent_content, 0, 1, 16, 60, 16, 64, 0, 16, 1, 0));
+    assert(!Vulkan::ReplicaCopyProvenance::Build(parent_content, 0, 0, 16, 16, 16, 64, 0, 16, 0, 0));
     const std::array<Plan::Command, 5> operations{{
         {Kind::Fill, 1, 0, 0, 0, 64, 10},
         {Kind::Fill, 0, 0, 0, 0, 64, 99},

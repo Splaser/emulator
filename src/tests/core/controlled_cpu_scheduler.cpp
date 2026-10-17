@@ -1399,17 +1399,95 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     REQUIRE(current_content == nullptr);
     on_gpu([&] { current_content = renderer->scheduler.CompletedTransferContent(retirement_snapshot); });
     REQUIRE(current_content == retirement_history.get()); // Cache retirement retains immutable history and pins.
+    // Closed one-hop same-queue copy, using private staged buffers outside ordinary cache selection.
+    std::array<std::shared_ptr<Vulkan::Buffer>, 2> isolated_owners;
+    std::vector<Vulkan::Scheduler::TransferBuffer> isolated_targets;
+    Vulkan::Scheduler::Transfer replica_parent, replica_copy, asynchronous_parent, asynchronous_copy;
+    const std::array<Content::Command, 2> replica_initialize{{
+        {Kind::Fill, 0, 0, 0, 0, 64, 0x63636363}, {Kind::Fill, 1, 0, 0, 0, 64, 0x0a0a0a0a}}};
+    on_gpu([&] {
+        isolated_owners[0] = Access::IsolatedContentBuffer(rasterizer, A, 4096);
+        isolated_owners[1] = Access::IsolatedContentBuffer(rasterizer, B, 4096);
+        for (const auto& buffer : isolated_owners) isolated_targets.push_back(Access::IsolatedContentTarget(rasterizer, buffer, 64));
+        replica_parent = renderer->scheduler.RecordTransferBatch(isolated_targets, replica_initialize);
+    });
+    REQUIRE(isolated_targets[0].pin.Identity() != isolated_targets[1].pin.Identity());
+    REQUIRE(isolated_targets[0].physical->Backing() == isolated_targets[1].physical->Backing());
+    REQUIRE(isolated_targets[0].physical->OverlapsPhysical(*isolated_targets[1].physical));
+    REQUIRE(replica_parent);
+    finish_content(replica_parent);
+    const auto replica_parent_history = replica_parent->PlannedContent();
+    Vulkan::Scheduler::ReplicaCopyRequest replica_request{replica_parent, 0, 1, 16, 16, 16, 0, 1, 16, 0};
+    on_gpu([&] { replica_copy = renderer->scheduler.RecordControlledReplicaCopy(device_memory, replica_request); });
+    REQUIRE(replica_copy);
+    finish_content(replica_copy);
+    std::array<bool, 4> replica_roots{};
+    const auto query_replica = [&] {
+        replica_roots[0] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_copy, device_memory, replica_parent, 0, 16, 1, 0);
+        replica_roots[1] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_copy, device_memory, replica_parent, 16, 16, 0, 16);
+        replica_roots[2] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_copy, device_memory, replica_parent, 32, 32, 1, 32);
+        replica_roots[3] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_copy, device_memory, replica_parent, 0, 64, 0, 0);
+    };
+    on_gpu(query_replica);
+    REQUIRE(replica_roots[0]); REQUIRE(replica_roots[1]); REQUIRE(replica_roots[2]); REQUIRE_FALSE(replica_roots[3]);
+    on_gpu([&] { content_b = Access::ReadPin(rasterizer, isolated_targets[1].pin); });
+    auto replica_expected = std::vector<u8>(64, 10);
+    std::fill(replica_expected.begin() + 16, replica_expected.begin() + 32, u8{99});
+    REQUIRE(content_b == replica_expected);
+    REQUIRE(replica_parent_history->HasRoot(1, 0, 64, 1, 0)); // The old target's whole history is still 10.
+    on_gpu([&] {
+        Access::FillPinRange(rasterizer, isolated_targets[0].pin, 16, 16, 0x4d4d4d4d);
+        content_a = Access::ReadPin(rasterizer, isolated_targets[0].pin);
+        query_replica();
+    });
+    REQUIRE(content_a[16] == 77);
+    REQUIRE(replica_roots[1]); // Copy captured 99; a later source overwrite must not rebase it to 77.
+    on_gpu([&] {
+        Access::FillPinRange(rasterizer, isolated_targets[1].pin, 20, 4, 0x4d4d4d4d);
+        content_b = Access::ReadPin(rasterizer, isolated_targets[1].pin);
+        query_replica();
+    });
+    REQUIRE_FALSE(replica_roots[1]); REQUIRE(replica_roots[0]); REQUIRE(replica_roots[2]);
+    std::fill(replica_expected.begin() + 20, replica_expected.begin() + 24, u8{77});
+    REQUIRE(content_b == replica_expected);
+    on_gpu([&] { current_root = renderer->scheduler.CompletedReplicaCopyHasRoot(replica_copy, replica_parent, 16, 16, 0, 16); });
+    REQUIRE(current_root); // Historical completed copy remains recorded after new target writes.
+    on_gpu([&] { asynchronous_parent = renderer->scheduler.RecordTransferBatch(isolated_targets, replica_initialize); });
+    REQUIRE(asynchronous_parent);
+    finish_content(asynchronous_parent);
+    std::weak_ptr<const void> asynchronous_payload = isolated_targets[1].pin.RetainedOwner();
+    on_gpu([&] {
+        replica_request.parent = asynchronous_parent;
+        asynchronous_copy = renderer->scheduler.RecordControlledReplicaCopy(device_memory, replica_request);
+        if (!asynchronous_copy) throw std::runtime_error("asynchronous copy refused");
+        isolated_owners[1]->RevokeContentEligibility();
+        isolated_owners[1].reset();
+        isolated_targets.clear();
+    });
+    REQUIRE(asynchronous_copy);
+    REQUIRE_FALSE(asynchronous_payload.expired());
+    REQUIRE(Until([&] {
+        State status{};
+        on_gpu([&] {status = renderer->scheduler.PollCheckedTransfer(asynchronous_copy);});
+        return status == State::Complete || status == State::Unknown;
+    }));
+    on_gpu([&] {current_root = renderer->scheduler.CurrentReplicaCopyHasRoot(asynchronous_copy, device_memory, asynchronous_parent, 16, 16, 0, 16);});
+    REQUIRE_FALSE(current_root);
     const auto historical_content_origin = content_transfer->HistoricalOrigins()[0];
     on_gpu([&] {
         device_memory.Unmap(A, Footprint);
         device_memory.Map(A, GetInteger(owner.heap) + Footprint, Footprint, asid);
         content = renderer->scheduler.TransferContentForMapping(content_transfer, device_memory);
         unknown_content = renderer->scheduler.TransferContentForMapping(unknown_root, device_memory);
+        query_replica();
         enabled = rasterizer.SetControlledStorageWriteObservation(false);
     });
     REQUIRE(enabled);
     REQUIRE(content == nullptr);
     REQUIRE(unknown_content == nullptr);
+    REQUIRE_FALSE(replica_roots[0]); REQUIRE_FALSE(replica_roots[2]); // Remap invalidates still-untouched complements too.
+    REQUIRE(replica_parent->PlannedContent() == replica_parent_history);
+    REQUIRE(replica_copy->PlannedReplicaCopy()->HasRoot(16, 16, 0, 16));
     REQUIRE(content_transfer->HistoricalOrigins()[0] == historical_content_origin);
     REQUIRE_FALSE(historical_content_origin->MatchesCurrent(device_memory));
     on_gpu([&] {
@@ -1422,6 +1500,7 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     REQUIRE(delayed->ResourceIdentity() == nullptr);
     REQUIRE(poll(delayed) == State::Unknown);
     REQUIRE_FALSE(content_transfer->ResourcesRetained());
+    REQUIRE(asynchronous_payload.expired());
     std::cout << "PASS checked write provenance: skipped intent, distinct actual submissions, "
                  "repeated dirty interval, historical completion versus current snapshot, "
                  "pending worker, independent replica, remap and retained old native allocation; "

@@ -362,3 +362,20 @@ claim an unrun Android or device/game acceptance. The previous `cc055d3426` full
 Linux job passed independently (170 native assertions). Its already running
 Android job did not block this follow-up. This documentation-only handoff does
 not repeat the same source validation.
+
+### Controlled same-queue submission handoff (2026-10-17)
+
+See [M4_F3_SAME_QUEUE_REPLICA_COPY.md](M4_F3_SAME_QUEUE_REPLICA_COPY.md).
+This follow-up copies one exact current interval between different private staged
+allocations over the same saved physical alias, preserving explicit parent roots
+for copied bytes and untouched target complements. Actual accepted graphics-queue
+predecessor identity, entry/release barriers and checked completion are required;
+ticks/revisions do not rank producers. Writable host pointer exposure disqualifies
+the payload. Missing synchronization, stale source/target intervals, failures,
+remap, unknown recording and retirement fail closed. Source writes after a
+completed copy do not rewrite its historical ancestry.
+
+Scope remains one hop from one controlled parent batch, with no intervening
+unchecked submission. Cross-queue and unsupported chains remain Unknown. There
+is no physical latest-writer publication, ordinary game selection or F3/F2 closure.
+Use Linux-only CI and relevant unit/native tests; Android remains on demand.

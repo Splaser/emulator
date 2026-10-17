@@ -114,6 +114,18 @@ struct SchedulerTestAccess : SystemTestAccess {
         runtime.CopyBuffer(destination.Handle(), source.Handle(), copies, false, false);
         runtime.PostCopyBarrier();
     }
+    static std::shared_ptr<Vulkan::Buffer> IsolatedContentBuffer(Vulkan::RasterizerVulkan& rasterizer,
+                                                                DAddr address, u64 size) {
+        // No cache registration, uploads, host mappings or ordinary-game selection can find this allocation.
+        return std::make_shared<Vulkan::Buffer>(rasterizer.buffer_cache_runtime, address, size);
+    }
+    static Vulkan::Scheduler::TransferBuffer IsolatedContentTarget(Vulkan::RasterizerVulkan& rasterizer,
+        const std::shared_ptr<Vulkan::Buffer>& buffer, u64 size) {
+        const auto pin = buffer->PinStagedRepresentation(0, size);
+        const auto physical = rasterizer.buffer_cache_runtime.PhysicalIdentityForBinding(*buffer, 0, size);
+        if (!pin || !physical || !pin->CopyProvenanceEligible()) throw std::runtime_error("unqualified isolated copy target");
+        return {*pin, physical};
+    }
     static void WriteOrdinaryGpu(Vulkan::RasterizerVulkan& rasterizer,
                                  DAddr address, u32 size, u32 value) {
         auto& cache = Cache(rasterizer);

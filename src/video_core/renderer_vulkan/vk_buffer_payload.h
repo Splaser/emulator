@@ -41,6 +41,7 @@ private:
     const u64 size;
     const std::shared_ptr<const StagedBufferPinDomain> domain;
     std::atomic_bool content_eligible{true}; // Membership cancellation, not native lifetime.
+    std::atomic_bool host_pointer_exposed{}; // Escaped writable mappings cannot be excluded by Scheduler recording.
 };
 
 /// Immutable byte interval and real staged-buffer ownership. Not cache membership, physical
@@ -58,6 +59,9 @@ public:
     [[nodiscard]] u64 Offset() const noexcept { return offset; }
     [[nodiscard]] bool ContentEligible() const noexcept {
         return IsUsable() && payload->content_eligible.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] bool CopyProvenanceEligible() const noexcept {
+        return ContentEligible() && !payload->host_pointer_exposed.load(std::memory_order_acquire);
     }
     [[nodiscard]] u64 Size() const noexcept { return size; }
     [[nodiscard]] const void* Identity() const noexcept { return payload.get(); }

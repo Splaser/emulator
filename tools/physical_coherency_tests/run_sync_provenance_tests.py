@@ -40,6 +40,7 @@ cpp = 'src/video_core/renderer_vulkan/vk_scheduler.cpp'
 checked = body(header, '    class CheckedSubmission {') + ';\nusing Submission=std::shared_ptr<CheckedSubmission>;\n'
 checked += body(header, '    struct TransferBuffer {') + ';\n'
 checked += body(header, '    class CheckedTransfer {') + ';\nusing Transfer=std::shared_ptr<CheckedTransfer>;\n'
+checked += body(header, '    struct ReplicaCopyRequest {') + ';\n'
 checked += 'enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };\n'
 checked += body(header, '    class CheckedWrite {') + ';\nusing Write=std::shared_ptr<CheckedWrite>;\n'
 checked += body(header, '    struct WriteFootprint {') + ';\nusing ObservedWrites=std::shared_ptr<const std::vector<Write>>;\n'
@@ -52,6 +53,7 @@ methods = '\n'.join(body(cpp, marker) for marker in [
     'bool Scheduler::HasConfirmedMemoryDependency(', 'void Scheduler::RecordProvenanceBarrier(',
     'Scheduler::WriteState Scheduler::PollCheckedWrite(',
     'Scheduler::Transfer Scheduler::RecordTransferBatch(',
+    'Scheduler::Transfer Scheduler::RecordTransferBatchImpl(', 'bool Scheduler::CompletedReplicaCopyHasRoot(',
     'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
     'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
     'const TransferContent* Scheduler::CompletedTransferContent(',
@@ -74,13 +76,17 @@ scaffold = scaffold.replace('// @TRANSFER_MAPPING_GATE@', 'template <typename Me
                            body(header, '    const TransferContent* TransferContentForMapping(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContent(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContentRange(') +
-                           '\ntemplate <typename Memory>\n' + body(header, '    bool CurrentTransferHasRoot('))
+                           '\ntemplate <typename Memory>\n' + body(header, '    bool CurrentTransferHasRoot(') +
+                           '\ntemplate <typename Memory>\n' + body(header, '    Transfer RecordControlledReplicaCopy(') +
+                           '\ntemplate <typename Memory>\n' + body(header, '    bool CurrentReplicaCopyHasRoot('))
 scaffold = scaffold.replace('// @SCHEDULER_RECORDING@', '\n'.join([
     'template <typename T>\n' + body(header, marker) for marker in [
         '    void RecordWithUploadBuffer(', '    void EnqueueCommand(', '    void Record(T&& c)']]) +
     '\n' + body(header, '    void RevokeTransferContentEligibility('))
 scaffold = scaffold.replace('// @REVOKE_BUFFER_CONTENT@', body(
     'src/video_core/renderer_vulkan/vk_buffer_cache.h', '    void RevokeContentEligibility('))
+scaffold = scaffold.replace('// @BUFFER_MAPPED@', body('src/video_core/renderer_vulkan/vk_buffer_cache.h',
+    '    [[nodiscard]] std::span<u8> Mapped('))
 source = '''#include <algorithm>
 #include <array>
 #include <atomic>
@@ -102,6 +108,7 @@ source = '''#include <algorithm>
 #include "video_core/renderer_vulkan/vk_sync_provenance.h"
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
 #include "video_core/renderer_vulkan/vk_transfer_eligibility.h"
+#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"
 ''' + scaffold + bindings + '''
 struct StorageObserverHarness {
     std::shared_ptr<VideoCommon::PhysicalWriteCoverage> storage_write_coverage =
@@ -122,7 +129,8 @@ struct Scenario {
 ''' + read('tools/physical_coherency_tests/sync_dependency_fixture.cpp.in')
 if a.content:
     source += read('tools/physical_coherency_tests/transfer_content_fixture.cpp.in')
-source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();' if a.content else '') + '}\n'
+    source += read('tools/physical_coherency_tests/replica_copy_fixture.cpp.in')
+source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();' if a.content else '') + '}\n'
 command = [a.cxx, '-std=c++23', '-O1', '-Wall', '-Wextra', '-Werror',
            '-Wno-unused-parameter', '-Wno-missing-field-initializers',
            '-I', str(out / 'stubs'), '-I', str(root / 'src'),
@@ -155,6 +163,27 @@ for name, guard, replacement in [
         raise RuntimeError(f'{name} failed to expose the removed guard: {result.returncode} {result.stderr}')
     print('PASS expected mutation failure:', name)
 if a.content:
+    for name, guard, replacement, count in [
+        ('replica-without-entry-sync', '!consumer->synchronization.ProvesEarlierSubmission(prior, result->positions[0], copy)', '(static_cast<void>(prior), false)', 1),
+        ('replica-without-release-sync', '!consumer->synchronization.ProvesRelease(result->positions[0], copy, later)', '(static_cast<void>(later), false)', 1),
+        ('replica-without-queue-link', 'consumer->queue_predecessor.lock() != producer', 'false', 1),
+        ('replica-without-queue-identity', 'consumer->queue != producer->queue || consumer->queue != device.GetGraphicsQueue().Handle()', 'false', 1),
+        ('replica-without-physical-alias', '!std::ranges::equal(source_physical->Segments(), destination_physical->Segments())', 'false', 1),
+        ('replica-without-host-exclusion', '!source.pin.CopyProvenanceEligible() || !destination.pin.CopyProvenanceEligible()', 'false', 1),
+        ('replica-without-worker-epoch', '!resource.physical->CapturedEpochCurrent()', 'false', 1),
+        ('replica-without-release-command', 'cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, release);', '(void)release;', 1),
+        ('replica-without-copy-coupling', '!replica_copy->MatchesCopy(commands[0].source_offset, commands[0].destination_offset, commands[0].size)', 'false', 1),
+        ('replica-without-buffer-coupling', '!matches(0, replica_copy->SourceBuffer()) || !matches(1, replica_copy->DestinationBuffer())', '(static_cast<void>(matches), false)', 1),
+        ('replica-without-completion', 'PollCheckedTransfer(result) != WriteState::Complete', 'false', 1),
+        ('replica-without-current-interval', 'CurrentTransferContentRange(result, memory, 1, offset, size) &&', 'true &&', 1),
+        ('replica-without-exact-root', 'return result->replica_copy->HasRoot(offset, size, fill, root_offset);', 'return true;', 1),
+        ('replica-without-current-source', '!CurrentTransferHasRoot(parent, memory, request.source, request.source_offset, request.size,\n                                    request.source_fill, request.source_root_offset)', 'false', 2),
+        ('replica-without-current-target', '!CurrentTransferHasRoot(parent, memory, request.destination, 0, destination.pin.Size(),\n                                    request.destination_fill, request.destination_root_offset)', 'false', 2)]:
+        assert source.count(guard) == count, name
+        result = run(name, source.replace(guard, replacement))
+        if result.returncode == 0 or 'Assertion' not in result.stderr:
+            raise RuntimeError(f'{name} failed incorrectly: {result.returncode} {result.stderr}')
+        print('PASS expected replica mutation failure:', name)
     for name, guard, replacement in [
         ('current-root-without-current-interval', 'const auto* content = CurrentTransferContentRange(transfer, memory, buffer, offset, size);', 'const auto* content = transfer ? transfer->PlannedContent().get() : nullptr;'),
         ('current-root-without-exact-root', 'content->HasRoot(static_cast<TransferContent::Index>(buffer), offset, size, fill, root_offset)', 'true'),
@@ -182,6 +211,9 @@ if a.content:
         print('PASS expected content mutation failure:', name)
     header = read('src/video_core/renderer_vulkan/vk_transfer_content.h').replace('#pragma once', '')
     expanded = source.replace('#include "video_core/renderer_vulkan/vk_transfer_content.h"', header)
+    replica_header = read('src/video_core/renderer_vulkan/vk_replica_copy_provenance.h').replace('#pragma once', '').replace(
+        '#include "video_core/renderer_vulkan/vk_transfer_content.h"', '')
+    expanded = expanded.replace('#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"', replica_header)
     for name, guard, replacement in [
         ('stale-whole-replica-promotion', 'if (!root || root->command != fill || root->offset != root_offset + begin - offset) return false;', 'if (!root) return false;'),
         ('missing-left-complement', 'if (part.offset < offset) {', 'if (false) {'),
@@ -204,6 +236,9 @@ if a.content:
 inputs.add('src/video_core/renderer_vulkan/vk_sync_provenance.h')
 inputs.add('src/video_core/renderer_vulkan/vk_transfer_content.h')
 inputs.add('src/video_core/renderer_vulkan/vk_transfer_eligibility.h')
+inputs.update(['src/video_core/renderer_vulkan/vk_replica_copy_provenance.h',
+    'src/video_core/renderer_vulkan/vk_buffer_payload.h', 'src/video_core/buffer_cache/physical_write_identity.h',
+    'src/video_core/vulkan_common/vulkan_wrapper.h'])
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sorted(inputs)},
     'boundary': 'Actual production dependency and submission methods, simulated Vulkan/device execution; no authority',

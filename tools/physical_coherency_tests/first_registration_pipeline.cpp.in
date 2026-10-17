@@ -7,6 +7,7 @@
 #include "video_core/renderer_vulkan/vk_sync_provenance.h"
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
 #include "video_core/renderer_vulkan/vk_transfer_eligibility.h"
+#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"
 #include "common/slot_vector.h"
 #include "common/scratch_buffer.h"
 #include "common/range_sets.inc"
@@ -18,6 +19,7 @@ struct Driver {
     VkResult submit_result=VK_SUCCESS,counter_result=VK_SUCCESS,wait_result=VK_SUCCESS,flush_result=VK_SUCCESS,invalidate_result=VK_SUCCESS;
     u64 counter=0,submitted_tick=0;
     size_t submissions=0,barriers=0,reported_losses=0;
+    uintptr_t queue_id{1};
     bool corrupt=false;
     bool fail_allocation=false;
     bool fail_copy_record=false;
@@ -108,6 +110,7 @@ struct Semaphore {
     VkSemaphore operator*() const {return reinterpret_cast<VkSemaphore>(uintptr_t{1});}
 };
 struct Queue {
+    VkQueue Handle() const {return reinterpret_cast<VkQueue>(driver->queue_id);}
     VkResult Submit(const VkSubmitInfo& info) {
         ++driver->submissions;
         if(driver->submit_result!=VK_SUCCESS) return driver->submit_result;
@@ -156,10 +159,14 @@ public:
     std::vector<Transfer> checked_transfers;
     std::atomic_bool current_content_uncertain{};
     Submission observed_submission;
+    std::weak_ptr<CheckedSubmission> last_accepted_submission;
     ObservedWrites RecordObservedWrites(std::span<const WriteFootprint>,std::function<bool(vk::CommandBuffer)>,
         std::shared_ptr<VideoCommon::PhysicalWriteCoverage> = {});
     const VideoCommon::PhysicalWriteIdentity* CompletedPhysicalIdentity(const Write&) const noexcept;
     Transfer RecordTransferBatch(std::span<const TransferBuffer>,std::span<const TransferContent::Command>);
+    Transfer RecordTransferBatchImpl(std::span<const TransferBuffer>,std::span<const TransferContent::Command>,
+        std::shared_ptr<const ReplicaCopyProvenance>,Transfer);
+    bool CompletedReplicaCopyHasRoot(const Transfer&,const Transfer&,u64,u64,TransferContent::Index,u64) const noexcept;
     WriteState PollCheckedTransfer(const Transfer&) const noexcept;
     const TransferContent* CompletedTransferContent(const Transfer&) const noexcept;
     void RevokeBufferContent(VkBuffer,u64,u64) noexcept;
@@ -167,6 +174,29 @@ public:
     void RecordBufferCopy(VkBuffer,VkBuffer,std::span<const VkBufferCopy>,bool,bool = false);
     void ForgetTransferSyncEvidenceForTest(const Transfer& transfer) {
         transfer->submission->synchronization = {};
+    }
+    void BreakReplicaQueueLinkForTest(const Transfer& transfer) {transfer->submission->queue_predecessor.reset();}
+    void BreakReplicaQueueIdentityForTest(const Transfer& transfer) {transfer->submission->queue=reinterpret_cast<VkQueue>(uintptr_t{99});}
+    Transfer ForgeReplicaForTest(const Transfer& parent, bool wrong_geometry) {
+        auto plan = ReplicaCopyProvenance::Build(parent->content, 0, 1, 16, 16, 16, 64, 0, 16, 1, 0);
+        assert(plan);
+        const std::array<TransferBuffer,2> buffers{parent->resources[wrong_geometry ? 0 : 2], parent->resources[1]};
+        const std::array<TransferContent::Command,1> commands{{{TransferContent::Kind::Copy,1,0,wrong_geometry ? 0u : 16u,16,16}}};
+        return RecordTransferBatchImpl(buffers,commands,std::make_shared<const ReplicaCopyProvenance>(std::move(*plan)),parent);
+    }
+    void BreakReplicaSyncForTest(const Transfer& transfer, int mode) {
+        auto& journal = transfer->submission->synchronization;
+        journal = {};
+        const VkMemoryBarrier entry{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_MEMORY_WRITE_BIT,
+            mode == 3 ? VkAccessFlags{VK_ACCESS_TRANSFER_WRITE_BIT} : VkAccessFlags{VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT}};
+        const VkMemoryBarrier release{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
+            VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+            mode == 5 ? VkAccessFlags{VK_ACCESS_MEMORY_READ_BIT} : VkAccessFlags{VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT}};
+        if (mode != 0) journal.RecordBarrier(mode == 2 ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                             VK_PIPELINE_STAGE_TRANSFER_BIT, entry);
+        transfer->positions[0] = journal.RecordAccess();
+        if (mode != 1) journal.RecordBarrier(mode == 4 ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, release);
     }
     // @TRANSFER_MAPPING_GATE@
     bool HasConfirmedMemoryDependency(const Write&,const Write&,u64,u64) const noexcept;
@@ -200,6 +230,7 @@ struct ObservationMapping {
     std::shared_ptr<Common::MappingEpoch> epoch=std::make_shared<Common::MappingEpoch>();
     u64 generation{},bias{};bool hole{};
     template<class F> auto ReadPhysicalMappingSnapshot(F&& callback) const {
+        epoch->generation.store(generation);
         return callback(epoch,generation,backing,u64{4*1024*1024},[&](u64 address)->std::optional<u64> {
             if(hole) return {};
             return address%131072+bias;
@@ -221,6 +252,7 @@ public:
     auto PinStagedRepresentation(u64 offset,u64 length) const {return StagedBufferPin::Build(payload,offset,length);}
     std::weak_ptr<StagedBufferPayload> WeakPayload() const {return payload;}
     // @REVOKE_BUFFER_CONTENT@
+    // @BUFFER_MAPPED@
 };
 class BufferCacheRuntime {
 public:

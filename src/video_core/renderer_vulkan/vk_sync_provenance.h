@@ -46,7 +46,37 @@ public:
         }
         return false;
     }
+    // Requires an independently proved same-queue predecessor; this journal alone grants no cross-submit edge.
+    bool ProvesEarlierSubmission(Access source, Position after, Access destination) const noexcept {
+        if (!intact || !after || after > position || !SupportedAccess(source) || !SupportedAccess(destination) ||
+            !(source.accesses & (VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT))) return false;
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& barrier = barriers[i];
+            if (barrier.at < after && CoversStages(barrier.source.stages, source.stages) &&
+                CoversStages(barrier.destination.stages, destination.stages) &&
+                CoversAccess(barrier.source.accesses, source.accesses) &&
+                CoversAccess(barrier.destination.accesses, destination.accesses)) return true;
+        }
+        return false;
+    }
+    bool ProvesRelease(Position before, Access source, Access destination) const noexcept {
+        if (!intact || !before || before > position || !SupportedAccess(source) || !SupportedAccess(destination) ||
+            !(source.accesses & (VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT))) return false;
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& barrier = barriers[i];
+            if (before < barrier.at && CoversStages(barrier.source.stages, source.stages) &&
+                CoversStages(barrier.destination.stages, destination.stages) &&
+                CoversAccess(barrier.source.accesses, source.accesses) &&
+                CoversAccess(barrier.destination.accesses, destination.accesses)) return true;
+        }
+        return false;
+    }
 private:
+    static bool SupportedAccess(Access access) noexcept {
+        constexpr VkAccessFlags known_access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+            VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+        return access.accesses && !(access.accesses & ~known_access) && Stages(access.stages);
+    }
     static constexpr VkPipelineStageFlags graphics =
         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT |
         VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT |

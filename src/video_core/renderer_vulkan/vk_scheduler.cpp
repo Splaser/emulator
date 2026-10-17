@@ -221,6 +221,25 @@ void Scheduler::RecordBufferCopy(VkBuffer destination, VkBuffer source, std::spa
 
 Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffer> buffers,
     std::span<const TransferContent::Command> commands) {
+    return RecordTransferBatchImpl(buffers, commands, {}, {});
+}
+
+Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferBuffer> buffers,
+    std::span<const TransferContent::Command> commands,
+    std::shared_ptr<const ReplicaCopyProvenance> replica_copy, Transfer parent) {
+    if (replica_copy) {
+        if (!parent || parent->replica_copy || replica_copy->ParentContent() != parent->content ||
+            buffers.size() != 2 || commands.size() != 1 || commands[0].kind != TransferContent::Kind::Copy ||
+            commands[0].source != 0 || commands[0].destination != 1 ||
+            !replica_copy->MatchesCopy(commands[0].source_offset, commands[0].destination_offset, commands[0].size)) return {};
+        const auto matches = [&](size_t slot, size_t original) {
+            if (original >= parent->resources.size()) return false;
+            const auto& saved = parent->resources[original];
+            return buffers[slot].pin.Identity() == saved.pin.Identity() && buffers[slot].pin.Offset() == saved.pin.Offset() &&
+                buffers[slot].pin.Size() == saved.pin.Size() && buffers[slot].physical == saved.physical;
+        };
+        if (!matches(0, replica_copy->SourceBuffer()) || !matches(1, replica_copy->DestinationBuffer())) return {};
+    }
     if (observed_submission || !device.HasTimelineSemaphore() ||
         !submission_owner->load(std::memory_order_acquire) || checked_transfers.size() >= 16 ||
         buffers.empty() || buffers.size() > TransferContent::MaxBuffers) return {};
@@ -243,6 +262,8 @@ Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffe
         transfer->resources.assign(buffers.begin(), buffers.end());
         for (const auto& buffer : buffers) transfer->origins.push_back(buffer.physical);
         transfer->content = std::make_shared<const TransferContent>(std::move(*content));
+        transfer->replica_copy = std::move(replica_copy);
+        transfer->replica_parent = std::move(parent);
         transfer->submission = Submission{new CheckedSubmission{submission_owner}};
         checked_transfers.push_back(transfer); // Retain uncertain effects until trusted device idle.
     } catch (...) {
@@ -256,12 +277,21 @@ Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffe
             const auto& destination = transfer->resources[operation.destination].pin;
             RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);
         }
-        EnqueueCommand([transfer](vk::CommandBuffer cmdbuf, vk::CommandBuffer) {
+        EnqueueCommand([this, transfer](vk::CommandBuffer cmdbuf, vk::CommandBuffer) {
             if (transfer->emission.load(std::memory_order_acquire) == CheckedTransfer::Emission::Unknown) {
                 transfer->worker_pending.store(false, std::memory_order_release);
                 return;
             }
             try {
+                if (transfer->replica_copy) {
+                    const auto& producer = transfer->replica_parent->submission;
+                    if (last_accepted_submission.lock() != producer ||
+                        producer->queue != device.GetGraphicsQueue().Handle())
+                        throw std::runtime_error("unproved replica queue predecessor");
+                    for (const auto& resource : transfer->resources)
+                        if (!resource.pin.CopyProvenanceEligible() || !resource.physical->CapturedEpochCurrent())
+                            throw std::runtime_error("replica source/destination retired or remapped");
+                }
                 auto& journal = transfer->submission->synchronization;
                 size_t index{};
                 for (const auto& operation : transfer->content->Commands()) {
@@ -290,6 +320,13 @@ Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffe
                         cmdbuf.CopyBuffer(source.Handle(), destination.Handle(), region);
                     }
                     transfer->positions[index++] = journal.RecordAccess();
+                }
+                if (transfer->replica_copy) {
+                    const VkMemoryBarrier release{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
+                        VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT};
+                    cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, release);
+                    journal.RecordBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, release);
                 }
                 auto expected = CheckedTransfer::Emission::Pending;
                 (void)transfer->emission.compare_exchange_strong(expected, CheckedTransfer::Emission::Recorded,
@@ -346,6 +383,25 @@ const TransferContent* Scheduler::CompletedTransferContent(const Transfer& trans
                                                           transfer->positions[i], next)) return nullptr;
     }
     return transfer->content.get();
+}
+
+bool Scheduler::CompletedReplicaCopyHasRoot(const Transfer& result, const Transfer& parent,
+    u64 offset, u64 size, TransferContent::Index fill, u64 root_offset) const noexcept {
+    if (!result || !parent || !result->replica_copy || result->replica_parent != parent ||
+        result->replica_copy->ParentContent() != parent->content ||
+        PollCheckedTransfer(result) != WriteState::Complete) return false;
+    const auto& consumer = result->submission;
+    const auto& producer = parent->submission;
+    if (producer == consumer || producer->result.load(std::memory_order_acquire) != VK_SUCCESS ||
+        consumer->queue_predecessor.lock() != producer || !consumer->queue ||
+        consumer->queue != producer->queue || consumer->queue != device.GetGraphicsQueue().Handle()) return false;
+    const SyncProvenance::Access prior{VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT};
+    const SyncProvenance::Access copy{VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT};
+    const SyncProvenance::Access later{VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT};
+    if (!consumer->synchronization.ProvesEarlierSubmission(prior, result->positions[0], copy) ||
+        !consumer->synchronization.ProvesRelease(result->positions[0], copy, later)) return false;
+    return result->replica_copy->HasRoot(offset, size, fill, root_offset);
 }
 
 Scheduler::ObservedWrites Scheduler::RecordObservedWrites(std::span<const WriteFootprint> footprints,
@@ -733,6 +789,15 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
                 if (checked) checked->queue_attempted.store(true, std::memory_order_release);
                 const VkResult result = master_semaphore->SubmitQueue(
                     cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value);
+                if (result == VK_SUCCESS) {
+                    if (checked) {
+                        checked->queue = device.GetGraphicsQueue().Handle();
+                        checked->queue_predecessor = last_accepted_submission;
+                    }
+                    last_accepted_submission = checked; // Unknown ordinary submissions break the explicit adjacency proof.
+                } else {
+                    last_accepted_submission.reset();
+                }
                 if (result != VK_SUCCESS) current_content_uncertain.store(true, std::memory_order_release);
                 if (checked) {
                     checked->result.store(result, std::memory_order_release);
@@ -749,10 +814,12 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
                     break;
                 }
             } catch (const vk::Exception& error) {
+                last_accepted_submission.reset();
                 current_content_uncertain.store(true, std::memory_order_release);
                 if (checked) checked->result.store(error.GetResult(), std::memory_order_release);
                 if (ordinary_errors || !checked) throw;
             } catch (...) {
+                last_accepted_submission.reset();
                 current_content_uncertain.store(true, std::memory_order_release);
                 if (checked) checked->result.store(VK_ERROR_UNKNOWN, std::memory_order_release);
                 if (ordinary_errors || !checked) throw;

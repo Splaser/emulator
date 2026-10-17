@@ -61,7 +61,9 @@ public:
 
     /// Host mapping of a unified memory buffer, empty for staged buffers.
     [[nodiscard]] std::span<u8> Mapped() noexcept {
-        return payload ? payload->buffer.Mapped() : std::span<u8>{};
+        auto mapped = payload ? payload->buffer.Mapped() : std::span<u8>{};
+        if (!mapped.empty()) payload->host_pointer_exposed.store(true, std::memory_order_release);
+        return mapped;
     }
 
     /// Staged DMA resource ownership only, under a live renderer/device/allocator domain.
