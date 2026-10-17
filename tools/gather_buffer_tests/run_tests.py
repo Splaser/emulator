@@ -158,6 +158,10 @@ struct FakeBuffer {
     void MarkUsage(u64, u64, u64) {}
 };
 struct Runtime {
+    // This legacy fixture has no physical identity plan; retain the merge hook
+    // and count its invocation instead of silently excluding the extracted body.
+    size_t invalidated_physical_origins = 0;
+    void InvalidatePhysicalOrigin(FakeBuffer&) { ++invalidated_physical_origins; }
     bool direct_enabled = false;
     std::vector<u8> backing = std::vector<u8>(16384);
     bool TryDirectGuestBuffer(FakeBuffer& b, Common::GuestBackingRange range) {
@@ -922,6 +926,8 @@ int main() {
     joined.gpu_modified_ranges.Add(1004, 4);
     check(joined.CanJoinDirectGuest(old_id), "aligned staged dirty ranges allow direct joins");
     joined.JoinOverlap(new_id, old_id, false);
+    check(joined.runtime.invalidated_physical_origins == 1,
+          "merge invalidates unproved physical representation inheritance");
     check(joined.runtime.backing[100] == 77 && joined.runtime.backing[104] == 91 &&
           joined.runtime.writes.size() == 1 && joined.runtime.writes.back().size == 4,
           "staged to direct overlap copies only GPU-written bytes and preserves newer CPU data");
