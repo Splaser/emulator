@@ -94,7 +94,7 @@ Linux job `117368038043`:
   processes with the same 211 assertions each.
 - The 49 new replica modes passed alongside the previous 46 transfer-content
   modes. All 42 mutation controls failed by assertion as required. The 43 fixture
-  logs and all 17 extracted production input hashes were checked against the
+  logs and all 17 extracted input hashes were checked against the
   committed Git blobs.
 - Standalone content/eligibility tests passed, including 512 content and 2,048
   eligibility oracle prefixes and the replica overlay cases. Full registration,
@@ -138,7 +138,7 @@ smaller interval. C's middle retains A's original Fill root, not B's local Copy
 command. Copying B's untouched bytes can instead retain B's 10 root. No whole
 replica becomes A's content merely because one interval was copied.
 
-An overlapping B write before the second copy cancels source admission. An
+An overlapping B write before recording the second copy cancels source admission. An
 overlapping B write after the second copy leaves C's captured history/current
 bytes intact. Later C writes cancel only the corresponding current destination
 interval; Unknown recording cancels all current eligibility. Historical graph
@@ -159,5 +159,25 @@ with interval projections and roots from copied or untouched source bytes.
 The native Vulkan witness now uses three private staged allocations, reads back
 B and C, checks later intermediate/destination writes and retains an asynchronously
 retired intermediate allocation until trusted device idle. These controlled
-mechanism tests remain separate from production F3 acceptance. Linux validation
-is pending; Android remains on demand.
+mechanism tests remain separate from production F3 acceptance.
+
+Source `715d1097b9c7fdeae269be11aa2bb7163f4572c2` passed
+[Linux-only workflow 39025579635](https://github.com/Splaser/emulator/actions/runs/39025579635),
+Linux job `117375791932`:
+
+- Full CLI/shader/unit build and all five CTest processes passed. The native
+  provenance case passed 233 assertions, plus three independent repeated
+  processes with 233 assertions each.
+- All 44 multi-hop modes, the previous 49 single-hop modes and 46 local transfer
+  modes passed. All 46 mutation controls failed by assertion as required,
+  including removed ancestor dependency/storage gates and the hop bound.
+- The independent oracle passed 256 multi-hop prefixes, alongside the prior
+  512 content and 2,048 eligibility prefixes. Full registration, physical
+  coherency, HostMemory/backing-import and GPU lifecycle regressions passed.
+- All 17 extracted input hashes match committed Git blobs; all 47 fixture logs
+  are retained in `.diagnostics/ci-39025579635/`. The artifact's source SHA matches
+  the validated commit. Original F3 still fails two fixed-required alias checks
+  with exit 42; F2 still reports `expected=77 observed=10 backing=77`.
+
+Android was intentionally skipped; no device/game acceptance is claimed. The
+evidence update changes documentation only and does not repeat this source run.

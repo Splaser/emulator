@@ -385,7 +385,7 @@ Source `d783250b0d` passed
 all five CTest processes, native Vulkan provenance 211 assertions plus three
 independent repeats, 49 new replica modes alongside the existing 46 transfer
 modes, 42 expected assertion-failure mutations, byte oracles and the full
-registration/coherency/lifecycle regression suite. Seventeen extracted production
+registration/coherency/lifecycle regression suite. Seventeen extracted
 input hashes match committed blobs; all 43 fixture logs are retained under
 `.diagnostics/ci-39022879191/`. Original F3 fixed-required mode still fails two
 alias checks (exit 42); F2 remains backing 77/cache 10. Android was intentionally
@@ -400,6 +400,17 @@ projection, exact saved binding and known whole-target complements. Completed
 qualification verifies every actual submission/queue/barrier edge, not just the
 last copy. Ancestor storage/remap/host-exposure cancellation fails current
 qualification; later intermediate byte writes do not rewrite already captured
-downstream content. Linux validation is pending. Cross-queue remains Unknown;
+downstream content. Cross-queue remains Unknown;
 ordinary automatic selection, latest-writer publication, F3 and F2 closure remain
 outside this slice. Android remains on demand.
+
+Source `715d1097b9` passed
+[Linux-only workflow 39025579635](https://github.com/Splaser/emulator/actions/runs/39025579635):
+all five CTest processes, native provenance 233 assertions plus three independent
+repeats, 44 multi-hop modes, 46 expected assertion-failure mutations, 256 new
+multi-hop oracle prefixes and full existing content/registration/coherency/backing/
+lifecycle regressions. All 17 extracted input hashes match committed blobs;
+47 fixture logs and downloaded artifacts are retained in
+`.diagnostics/ci-39025579635/`. Original F3 fixed-required mode still fails two
+aliases (exit 42); F2 remains backing 77/cache 10. Android was intentionally
+skipped. This documentation-only evidence update does not repeat source CI.
