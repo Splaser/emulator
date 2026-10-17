@@ -30,6 +30,7 @@ source = r'''
 #include "common/slot_vector.h"
 #include "video_core/delayed_destruction_ring.h"
 #include "video_core/renderer_vulkan/vk_buffer_payload.h"
+#include "video_core/buffer_cache/physical_write_identity.h"
 std::unordered_map<VkBuffer,int> deaths;
 bool domain_alive=true;
 void vmaDestroyBuffer(VmaAllocator allocator, VkBuffer handle, VmaAllocation allocation) {
@@ -176,6 +177,7 @@ print('PASS real runtime seal: reject new pins, disable handle lookup, retain ol
 (out/'extraction.json').write_text(json.dumps({
     'sha256': {path:hashlib.sha256((root/path).read_bytes()).hexdigest() for path in [payload_path,
         'src/video_core/renderer_vulkan/vk_buffer_cache.h',
+        'src/video_core/buffer_cache/physical_write_identity.h',
         'src/video_core/vulkan_common/vulkan_wrapper.cpp',
         'src/video_core/vulkan_common/vulkan_wrapper.h',
         'src/common/slot_vector.h','src/video_core/delayed_destruction_ring.h']},
