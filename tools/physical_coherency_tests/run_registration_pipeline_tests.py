@@ -94,6 +94,7 @@ for marker in ['Scheduler::Submission Scheduler::FlushChecked(',
                'Scheduler::WriteState Scheduler::PollCheckedWrite(',
                'Scheduler::Transfer Scheduler::RecordTransferBatch(',
                'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
+               'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
                'const TransferContent* Scheduler::CompletedTransferContent(',
                'void Scheduler::RetireCheckedWritesAfterDeviceIdle(']:
     submission += body(scheduler_path, marker) + '\n'
@@ -152,7 +153,9 @@ for name, value in [('POLL_TIMELINE', timeline), ('CHECKED_SUBMISSION', checked)
                         'src/video_core/renderer_vulkan/vk_scheduler.h',
                         '    const TransferContent* TransferContentForMapping(') + '\ntemplate <typename Memory>\n' + body(
                         'src/video_core/renderer_vulkan/vk_scheduler.h',
-                        '    const TransferContent* CurrentTransferContent(')),
+                        '    const TransferContent* CurrentTransferContent(') + '\ntemplate <typename Memory>\n' + body(
+                        'src/video_core/renderer_vulkan/vk_scheduler.h',
+                        '    const TransferContent* CurrentTransferContentRange(')),
                     ('RAW_STORAGE_BIND', body('src/video_core/renderer_vulkan/vk_buffer_cache.h',
                         '    void BindStorageBuffer(VkBuffer buffer,')),
                     ('DEVICE_WRITE_GUARDS',
@@ -764,6 +767,7 @@ inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled
                'src/video_core/buffer_cache/physical_write_identity.h',
                'src/video_core/renderer_vulkan/vk_sync_provenance.h',
                'src/video_core/renderer_vulkan/vk_transfer_content.h',
+               'src/video_core/renderer_vulkan/vk_transfer_eligibility.h',
                'src/video_core/buffer_cache/physical_alias_copy.h'])
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sorted(inputs)},

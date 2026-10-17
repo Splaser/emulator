@@ -1316,6 +1316,24 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     auto mixed = std::vector<u8>(64, 10);
     std::fill(mixed.begin() + 16, mixed.begin() + 32, u8{99});
     REQUIRE(content_b == mixed);
+    const Content *left_content{}, *middle_content{}, *right_content{};
+    const auto immutable_history = content_transfer->PlannedContent();
+    on_gpu([&] {
+        renderer->scheduler.RecordBufferFill(content_targets[1].pin.Handle(),
+            content_targets[1].pin.Offset() + 16, 16, 0xeeeeeeee);
+        left_content = renderer->scheduler.CurrentTransferContentRange(content_transfer, device_memory, 1, 0, 16);
+        middle_content = renderer->scheduler.CurrentTransferContentRange(content_transfer, device_memory, 1, 16, 16);
+        right_content = renderer->scheduler.CurrentTransferContentRange(content_transfer, device_memory, 1, 32, 32);
+        current_content = renderer->scheduler.CurrentTransferContentRange(content_transfer, device_memory, 0, 0, 64);
+    });
+    REQUIRE(left_content == immutable_history.get());
+    REQUIRE(middle_content == nullptr);
+    REQUIRE(right_content == immutable_history.get());
+    REQUIRE(current_content == immutable_history.get()); // Different native replica, same physical bytes.
+    on_gpu([&] { content_b = Access::ReadPin(rasterizer, content_targets[1].pin); });
+    std::fill(mixed.begin() + 16, mixed.begin() + 32, u8{238});
+    REQUIRE(content_b == mixed);
+    REQUIRE(immutable_history->HasRoot(1, 16, 16, 1, 16)); // History still records the earlier 99.
     Vulkan::Scheduler::Transfer unknown_root;
     const std::array<Content::Command, 1> copy_only{{{Kind::Copy, 1, 0, 0, 0, 64}}};
     on_gpu([&] { unknown_root = renderer->scheduler.RecordTransferBatch(content_targets, copy_only); });
@@ -1336,7 +1354,7 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     REQUIRE(content_b == std::vector<u8>(64, 77));
     REQUIRE(content->HasRoot(1, 16, 16, 1, 16)); // Earlier history never becomes current content.
     on_gpu([&] { current_content = renderer->scheduler.CurrentTransferContent(unknown_root, device_memory); });
-    REQUIRE(current_content == nullptr); // Even unclassified readback conservatively cancels.
+    REQUIRE(current_content); // Typed readback changes only its staging destination.
     Vulkan::Scheduler::Transfer retirement_snapshot;
     const std::array<Content::Command, 1> retirement_fill{{{Kind::Fill, 0, 0, 0, 0, 64, 0x12121212}}};
     on_gpu([&] { retirement_snapshot = renderer->scheduler.RecordTransferBatch(
@@ -1347,8 +1365,24 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     on_gpu([&] { current_content = renderer->scheduler.CurrentTransferContent(retirement_snapshot, device_memory); });
     REQUIRE(current_content == retirement_history.get());
     on_gpu([&] {
+        const std::array<VkBufferCopy, 1> partial{{{
+            content_targets[0].pin.Offset() + 16, content_targets[1].pin.Offset() + 16, 16}}};
+        renderer->scheduler.RecordBufferCopy(content_targets[1].pin.Handle(), content_targets[0].pin.Handle(), partial, true);
+        left_content = renderer->scheduler.CurrentTransferContentRange(retirement_snapshot, device_memory, 0, 0, 16);
+        middle_content = renderer->scheduler.CurrentTransferContentRange(retirement_snapshot, device_memory, 0, 16, 16);
+        right_content = renderer->scheduler.CurrentTransferContentRange(retirement_snapshot, device_memory, 0, 32, 32);
+        content_b = Access::ReadPin(rasterizer, content_targets[1].pin);
+    });
+    REQUIRE(left_content == retirement_history.get());
+    REQUIRE(middle_content == nullptr);
+    REQUIRE(right_content == retirement_history.get());
+    auto copied_middle = std::vector<u8>(64, 18);
+    std::fill(copied_middle.begin() + 16, copied_middle.begin() + 32, u8{77});
+    REQUIRE(content_b == copied_middle);
+    REQUIRE(retirement_history->HasRoot(0, 0, 64, 0, 0));
+    on_gpu([&] {
         Access::RetireOrdinary(rasterizer, B);
-        current_content = renderer->scheduler.CurrentTransferContent(retirement_snapshot, device_memory);
+        current_content = renderer->scheduler.CurrentTransferContentRange(retirement_snapshot, device_memory, 0, 0, 16);
     });
     REQUIRE(current_content == nullptr);
     on_gpu([&] { current_content = renderer->scheduler.CompletedTransferContent(retirement_snapshot); });

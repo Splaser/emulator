@@ -148,6 +148,77 @@ Scheduler::WriteState Scheduler::PollCheckedWrite(const Write& write) const noex
     return emission == Emission::Skipped ? WriteState::Skipped : WriteState::Complete;
 }
 
+void Scheduler::RevokeBufferContent(VkBuffer destination, u64 offset, u64 size) noexcept {
+    if (!destination || !size || size > std::numeric_limits<u64>::max() - offset) {
+        RevokeTransferContentEligibility();
+        return;
+    }
+    for (const auto& transfer : checked_transfers) {
+        if (!transfer->current_eligible) continue;
+        for (size_t i = 0; i < transfer->resources.size(); ++i) {
+            const auto& pin = transfer->resources[i].pin;
+            if (pin.Handle() != destination) continue; // Same live staged allocation, not physical alias ranking.
+            const auto begin = std::max(offset, pin.Offset());
+            const auto end = std::min(offset + size, pin.Offset() + pin.Size());
+            if (begin < end) transfer->current_ranges[i].Revoke(begin - pin.Offset(), end - begin);
+        }
+    }
+}
+
+void Scheduler::RecordBufferFill(VkBuffer destination, u64 offset, u64 size, u32 value) {
+    if (!destination) return;
+    RequestOutsideRenderPassSyncedOperationContext();
+    RevokeBufferContent(destination, offset, size);
+    EnqueueCommand([destination, offset, size, value](vk::CommandBuffer cmdbuf, vk::CommandBuffer) {
+        const VkMemoryBarrier before{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
+            VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT};
+        const VkMemoryBarrier after{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT};
+        cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, before);
+        cmdbuf.FillBuffer(destination, offset, size, value);
+        cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, after);
+    });
+}
+
+void Scheduler::RecordBufferCopy(VkBuffer destination, VkBuffer source, std::span<const VkBufferCopy> copies,
+                                 bool barrier, bool upload) {
+    if (!destination || !source) return;
+    if (!upload) {
+        if (barrier) RequestOutsideRenderPassSyncedOperationContext();
+        else RequestOutsideRenderPassOperationContext();
+    }
+    // Keep the ordinary <=8-region path allocation-free, as in the runtime's small vector.
+    const auto record_regions = [&](auto regions, size_t region_count) {
+        for (const auto& region : std::span{regions}.first(region_count))
+            RevokeBufferContent(destination, region.dstOffset, region.size);
+        EnqueueCommand([destination, source, regions = std::move(regions), region_count, barrier, upload](
+                          vk::CommandBuffer main_cmdbuf, vk::CommandBuffer upload_cmdbuf) {
+            auto cmdbuf = upload ? upload_cmdbuf : main_cmdbuf;
+            const VkMemoryBarrier before{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT, upload ? VkAccessFlags{VK_ACCESS_TRANSFER_WRITE_BIT} :
+                    VkAccessFlags{VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT}};
+            const VkMemoryBarrier after{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT};
+            // Upload work must still wait for prior submissions on this queue. No ancestry is imported.
+            if (upload || barrier)
+                cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, before);
+            const auto recorded_regions = std::span{regions}.first(region_count);
+            cmdbuf.CopyBuffer(source, destination, recorded_regions);
+            if (!upload && barrier)
+                // HOST scope is required for downloads read by the CPU after the fence.
+                cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, 0, after);
+        });
+    };
+    if (copies.size() <= 8) {
+        std::array<VkBufferCopy, 8> regions{};
+        std::copy(copies.begin(), copies.end(), regions.begin());
+        record_regions(regions, copies.size());
+    } else {
+        record_regions(std::vector<VkBufferCopy>{copies.begin(), copies.end()}, copies.size());
+    }
+}
+
 Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffer> buffers,
     std::span<const TransferContent::Command> commands) {
     if (observed_submission || !device.HasTimelineSemaphore() ||
@@ -181,7 +252,11 @@ Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffe
         RequestOutsideRenderPassOperationContext();
         observed_submission = transfer->submission;
         transfer->worker_pending.store(true, std::memory_order_release);
-        Record([transfer](vk::CommandBuffer cmdbuf) {
+        for (const auto& operation : transfer->content->Commands()) {
+            const auto& destination = transfer->resources[operation.destination].pin;
+            RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);
+        }
+        EnqueueCommand([transfer](vk::CommandBuffer cmdbuf, vk::CommandBuffer) {
             if (transfer->emission.load(std::memory_order_acquire) == CheckedTransfer::Emission::Unknown) {
                 transfer->worker_pending.store(false, std::memory_order_release);
                 return;
@@ -225,6 +300,8 @@ Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffe
             transfer->worker_pending.store(false, std::memory_order_release);
         });
         transfer->current_eligible = true; // Arm once after recording; the worker never rearms.
+        for (size_t i = 0; i < transfer->resources.size(); ++i)
+            transfer->current_ranges[i].Arm(transfer->resources[i].pin.Size());
         (void)Flush(); // Adopts the checked token while preserving ordinary queue-error propagation.
     } catch (...) {
         transfer->emission.store(CheckedTransfer::Emission::Unknown, std::memory_order_release);
@@ -655,6 +732,7 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
                 if (checked) checked->queue_attempted.store(true, std::memory_order_release);
                 const VkResult result = master_semaphore->SubmitQueue(
                     cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value);
+                if (result != VK_SUCCESS) current_content_uncertain.store(true, std::memory_order_release);
                 if (checked) {
                     checked->result.store(result, std::memory_order_release);
                     if (!ordinary_errors) return; // Explicit checked callers observe Unknown.
@@ -670,9 +748,11 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
                     break;
                 }
             } catch (const vk::Exception& error) {
+                current_content_uncertain.store(true, std::memory_order_release);
                 if (checked) checked->result.store(error.GetResult(), std::memory_order_release);
                 if (ordinary_errors || !checked) throw;
             } catch (...) {
+                current_content_uncertain.store(true, std::memory_order_release);
                 if (checked) checked->result.store(VK_ERROR_UNKNOWN, std::memory_order_release);
                 if (ordinary_errors || !checked) throw;
             }
@@ -682,6 +762,7 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
         return signal_value;
     } catch (...) {
         if (checked) checked->result.store(VK_ERROR_UNKNOWN, std::memory_order_release);
+        current_content_uncertain.store(true, std::memory_order_release);
         throw; // Host-side failure before queue acceptance is not indefinitely Pending.
     }
 }

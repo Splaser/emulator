@@ -912,64 +912,11 @@ bool BufferCacheRuntime::IsRenderPassActive() const noexcept {
 void BufferCacheRuntime::CopyBuffer(VkBuffer dst_buffer, VkBuffer src_buffer,
                                     std::span<const VideoCommon::BufferCopy> copies, bool barrier,
                                     bool can_reorder_upload) {
-    if (dst_buffer == VK_NULL_HANDLE || src_buffer == VK_NULL_HANDLE) {
-        return;
-    }
-    static constexpr VkMemoryBarrier READ_BARRIER{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
-    };
-    static constexpr VkMemoryBarrier WRITE_BARRIER{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
-    };
-
-    // Measuring a popular game, this number never exceeds the specified size once data is warmed up
+    if (dst_buffer == VK_NULL_HANDLE || src_buffer == VK_NULL_HANDLE) return;
     boost::container::small_vector<VkBufferCopy, 8> vk_copies(copies.size());
     std::ranges::transform(copies, vk_copies.begin(), MakeBufferCopy);
-    if (src_buffer == staging_pool.StreamBuf() && can_reorder_upload) {
-        scheduler.RecordWithUploadBuffer([src_buffer, dst_buffer, vk_copies](
-                                             vk::CommandBuffer, vk::CommandBuffer upload_cmdbuf) {
-            // CanReorderUpload only rules out use by work recorded for this submission, which runs
-            // after this command buffer. Work of earlier submissions may still read or write the
-            // buffer on the GPU, so the copy waits for it: the barrier's first scope is everything
-            // earlier in submission order on this queue.
-            static constexpr VkMemoryBarrier PRIOR_WORK_BARRIER{
-                .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-                .pNext = nullptr,
-                .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
-                .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-            };
-            upload_cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, PRIOR_WORK_BARRIER);
-            upload_cmdbuf.CopyBuffer(src_buffer, dst_buffer, vk_copies);
-        });
-        return;
-    }
-
-    if (barrier) {
-        // The barriers below order the copy after earlier work and make it visible to later work
-        scheduler.RequestOutsideRenderPassSyncedOperationContext();
-    } else {
-        scheduler.RequestOutsideRenderPassOperationContext();
-    }
-    scheduler.Record([src_buffer, dst_buffer, vk_copies, barrier](vk::CommandBuffer cmdbuf) {
-        if (barrier) {
-            cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                   VK_PIPELINE_STAGE_TRANSFER_BIT, 0, READ_BARRIER);
-        }
-        cmdbuf.CopyBuffer(src_buffer, dst_buffer, vk_copies);
-        if (barrier) {
-            // HOST too: downloads go through here and the CPU reads them after the fence.
-            cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                   VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT,
-                                   0, WRITE_BARRIER);
-        }
-    });
+    scheduler.RecordBufferCopy(dst_buffer, src_buffer, {vk_copies.data(), vk_copies.size()}, barrier,
+        src_buffer == staging_pool.StreamBuf() && can_reorder_upload);
 }
 
 void BufferCacheRuntime::PreCopyBarrier() {
@@ -1027,9 +974,7 @@ auto MakeBufferClear(VkBuffer dest_buffer, u32 offset, size_t size, u32 value) {
 } // namespace
 
 void BufferCacheRuntime::ClearBuffer(VkBuffer dest_buffer, u32 offset, size_t size, u32 value) {
-    if (dest_buffer == VK_NULL_HANDLE) return;
-    scheduler.RequestOutsideRenderPassSyncedOperationContext();
-    scheduler.Record(MakeBufferClear(dest_buffer, offset, size, value));
+    scheduler.RecordBufferFill(dest_buffer, offset, size, value);
 }
 
 Scheduler::Write BufferCacheRuntime::ClearBufferChecked(StagedBufferPin pin, u64 intent_revision, u32 value,

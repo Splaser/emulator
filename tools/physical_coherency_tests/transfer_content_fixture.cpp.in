@@ -4,7 +4,7 @@ void TestTransferContent() {
     using Plan = Vulkan::TransferContent;
     using Kind = Plan::Kind;
     using State = Scheduler::WriteState;
-    for (int mode = 0; mode < 31; ++mode) {
+    for (int mode = 0; mode < 45; ++mode) {
         auto s = std::make_unique<Scenario>();
         Vulkan::StorageObserverHarness observation{s->scheduler, s->runtime};
         std::array<std::unique_ptr<Vulkan::Buffer>, 3> buffers;
@@ -15,7 +15,7 @@ void TestTransferContent() {
             // Distinct native allocations with the SAME physical identity.
             buffers[i] = std::make_unique<Vulkan::Buffer>(s->runtime, A, 4096);
             handles[i] = buffers[i]->Handle();
-            offsets[i] = mode == 20 ? 4 * (i + 1) : 0;
+            offsets[i] = (mode == 20 || mode == 35) ? 4 * (i + 1) : 0;
             const auto pin = buffers[i]->PinStagedRepresentation(offsets[i], 64);
             auto physical = s->runtime.PhysicalIdentityForBinding(*buffers[i], offsets[i], 64);
             assert(pin && physical);
@@ -60,6 +60,11 @@ void TestTransferContent() {
             continue;
         }
         assert(transfer && transfer->PlannedContent() && transfer->ResourcesRetained());
+        if (mode == 42) {
+            s->scheduler.RecordBufferFill(handles[1], 16, 16, 0xeeeeeeee);
+            (void)s->scheduler.Flush();
+            assert(!s->scheduler.CurrentTransferContentRange(transfer, s->runtime.test_mapping, 1, 0, 16));
+        }
         if (mode == 29) {
             // A queued later writer revokes before the snapshot worker has even run.
             s->scheduler.Record([](vk::CommandBuffer) {});
@@ -104,7 +109,7 @@ void TestTransferContent() {
             assert(!other.CompletedTransferContent(transfer));
         }
         if (completed) {
-            assert(driver->barriers == 6); // Five real per-command barriers plus submit upload barrier.
+            assert(driver->barriers == (mode == 42 ? 9 : 6)); // Pending later fill adds two barriers + submit.
             assert(content->HasRoot(1, 16, 16, 1, 16) == (mode != 21));
             assert(!content->HasRoot(1, 16, 16, 0, 16)); // Unknown source cannot preserve overwritten old B.
             assert(!content->HasRoot(1, 0, 64, 1, 0)); // Never promote copied subrange to the whole replica.
@@ -121,7 +126,7 @@ void TestTransferContent() {
             const auto b = std::span<const u8>{reinterpret_cast<Allocation*>(handles[1])->bytes}.subspan(offsets[1], 64);
             const auto c = std::span<const u8>{reinterpret_cast<Allocation*>(handles[2])->bytes}.subspan(offsets[2], 64);
             assert(std::all_of(a.begin(), a.begin() + 64, [](u8 byte) {return byte == 77;}));
-            assert(std::all_of(b.begin() + 16, b.begin() + 32, [mode](u8 byte) {return byte == (mode == 21 ? 0 : 99);}));
+            assert(std::all_of(b.begin() + 16, b.begin() + 32, [mode](u8 byte) {return byte == (mode == 42 ? 238 : (mode == 21 ? 0 : 99));}));
             assert(std::all_of(c.begin() + 16, c.begin() + 32, [mode](u8 byte) {return byte == (mode == 21 ? 0 : 99);}));
             if (mode != 8) {
                 assert(std::all_of(b.begin(), b.begin() + 16, [](u8 byte) {return byte == 10;}));
@@ -153,7 +158,78 @@ void TestTransferContent() {
             assert(unknown && unknown->WrittenBy(0, 1, 0, 64));
             assert(!unknown->HasRoot(1, 0, 64, 0, 0));
         }
-        if (mode >= 23) {
+        if (mode >= 31) {
+            const auto history = transfer->PlannedContent();
+            const auto origins = transfer->HistoricalOrigins();
+            std::vector<Scheduler::TransferBuffer> again;
+            for (size_t i = 0; i < buffers.size(); ++i) again.push_back({*buffers[i]->PinStagedRepresentation(offsets[i], 64),
+                s->runtime.PhysicalIdentityForBinding(*buffers[i], offsets[i], 64)});
+            const std::array<Plan::Command, 1> partial{{{mode == 31 ? Kind::Fill : Kind::Copy, 1, 0, 16, 16, 16, 0xeeeeeeee}}};
+            Scheduler::Transfer next;
+            if (mode == 31 || mode == 32 || mode == 39) {
+                if (mode == 39) driver->fail_copy_record = true;
+                next = s->scheduler.RecordTransferBatch(again, partial);assert(next);
+            } else if (mode == 36) {
+                s->scheduler.Record([](vk::CommandBuffer) { ++driver->draws; });
+            } else if (mode == 34 || mode == 40) {
+                const std::array<VkBufferCopy, 2> regions{{{16, 16, 8}, {24, 24, 8}}};
+                s->scheduler.RecordBufferCopy(handles[1], handles[0], regions, true, mode == 40);
+            } else if (mode == 43) {
+                std::array<VkBufferCopy, 10> regions;
+                for (size_t i = 0; i < regions.size(); ++i) regions[i] = {16 + 4 * (i % 4), 16 + 4 * (i % 4), 4};
+                s->scheduler.RecordBufferCopy(handles[1], handles[0], regions, false); // >8-region fallback.
+            } else if (mode == 44) {
+                const std::array<VkBufferCopy, 1> regions{{{0, 32, 16}}};
+                s->scheduler.RecordBufferCopy(handles[0], handles[0], regions, true); // Legal disjoint self-copy.
+            } else if (mode != 42) {
+                const auto destination = mode == 37 ? handles[2] : handles[1];
+                const auto begin = mode == 38 ? 64 : offsets[1] + 16;
+                s->scheduler.RecordBufferFill(destination, begin, 16, 0xeeeeeeee);
+            }
+            const auto range = [&](size_t buffer, u64 begin, u64 length) {
+                return s->scheduler.CurrentTransferContentRange(transfer, s->runtime.test_mapping, buffer, begin, length);
+            };
+            const bool unknown = mode == 36;
+            const bool disjoint = mode == 37 || mode == 38 || mode == 44;
+            assert(bool(range(1, 0, 16)) == !unknown); // Before execution/submit: intent cancellation already applies.
+            assert(bool(range(1, 16, 16)) == disjoint);
+            assert(bool(range(1, 32, 32)) == !unknown);
+            assert(bool(range(0, 0, 64)) == (!unknown && mode != 44));
+            if (mode == 44) assert(range(0, 0, 16) && !range(0, 32, 16)); // Source is still untouched.
+            if (!next) {
+                if (mode == 41) driver->submit_result = VK_ERROR_DEVICE_LOST;
+                (void)s->scheduler.Flush();
+            }
+            bool loss{};
+            try {s->scheduler.RunWorker();} catch (const vk::Exception&) {loss = true;}
+            assert(loss == (mode == 41));
+            if (mode == 41) {
+                assert(driver->reported_losses == 1 && !range(1, 0, 16));
+                driver->submit_result = VK_SUCCESS;
+                assert(!range(1, 0, 16)); // A later status change cannot restore failure-domain qualification.
+            }
+            s->gpu.Complete();
+            assert(bool(range(1, 0, 16)) == (!unknown && mode != 41));
+            assert(bool(range(1, 16, 16)) == disjoint);
+            assert(bool(range(1, 32, 32)) == (!unknown && mode != 41));
+            assert(!range(1, 15, 2) || disjoint); // No partial overlap acceptance.
+            assert(!range(1, 0, 0) && !range(1, 64, 1) && !range(3, 0, 1));
+            assert(!range(1, ~u64{0}, 8));
+            assert(s->scheduler.CompletedTransferContent(transfer) == history.get());
+            assert(transfer->HistoricalOrigins() == origins && history->HasRoot(1, 16, 16, 1, 16));
+            if (mode == 39) assert(s->scheduler.PollCheckedTransfer(next) == State::Unknown);
+            if (mode == 32) {
+                const auto* imported = s->scheduler.CompletedTransferContent(next);
+                assert(imported && !imported->HasRoot(1, 16, 16, 0, 0)); // Cross-submission roots still Unknown.
+            }
+            if (mode != 36 && mode != 41) {
+                const auto& bytes = reinterpret_cast<Allocation*>(handles[1])->bytes;
+                const u8 expected = disjoint ? 99 : ((mode == 32 || mode == 34 || mode == 39 || mode == 40 || mode == 43) ? 77 : 238);
+                assert(bytes[offsets[1] + 16] == expected);
+                assert(bytes[offsets[1]] == 10 && bytes[offsets[1] + 32] == 10);
+            }
+        }
+        if (mode >= 23 && mode <= 30) {
             const auto history = transfer->PlannedContent();
             const auto origins = transfer->HistoricalOrigins();
             assert(bool(s->scheduler.CurrentTransferContent(transfer, s->runtime.test_mapping)) == (mode != 29));

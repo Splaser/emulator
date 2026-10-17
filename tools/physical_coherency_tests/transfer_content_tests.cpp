@@ -3,8 +3,42 @@
 #include <iostream>
 #include <vector>
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
+#include "video_core/renderer_vulkan/vk_transfer_eligibility.h"
 
 int main() {
+    // Independent byte-validity oracle. Unknown producers use a separate whole-snapshot latch.
+    for (unsigned trial = 0; trial < 64; ++trial) {
+        Vulkan::TransferEligibility eligibility;
+        eligibility.Arm(128);
+        std::array<bool, 128> valid;
+        valid.fill(true);
+        u32 random = trial + 1;
+        for (unsigned operation = 0; operation < 32; ++operation) {
+            random = random * 1664525 + 1013904223;
+            const u64 begin = (random >> 8) % 128;
+            const u64 length = 1 + ((random >> 16) % 5);
+            eligibility.Revoke(begin, length);
+            for (u64 byte = begin; byte < std::min<u64>(128, begin + length); ++byte) valid[byte] = false;
+            for (u64 byte = 0; byte < 128; ++byte) {
+                assert(eligibility.Contains(byte, 1) == valid[byte]);
+                if (byte + 16 <= 128) {
+                    bool expected = true;
+                    for (u64 k = byte; k < byte + 16; ++k) expected &= valid[k];
+                    assert(eligibility.Contains(byte, 16) == expected);
+                }
+            }
+            assert(!eligibility.Contains(0, 0) && !eligibility.Contains(127, 2));
+            assert(!eligibility.Contains(~u64{0}, 16));
+        }
+    }
+    Vulkan::TransferEligibility exhausted;
+    exhausted.Arm(256);
+    for (unsigned i = 0; i < 63; ++i) exhausted.Revoke(2 * i + 1, 1);
+    assert(exhausted.Contains(0, 1));
+    exhausted.Revoke(127, 1); // 65 fragments exceed the bounded set: fail closed, not a valid prefix.
+    assert(!exhausted.Contains(0, 1) && !exhausted.Contains(255, 1));
+    exhausted.Revoke(200, ~u64{0});
+    assert(!exhausted.Contains(0, 1));
     using Plan = Vulkan::TransferContent;
     using Kind = Plan::Kind;
     const std::array<Plan::Offset, 3> sizes{64, 64, 64};
@@ -85,5 +119,6 @@ int main() {
         }
     }
     std::cout << "PASS exact transfer content: partial copies, untouched roots, copy-of-copy, "
-                 "source overwrite after copy, Unknown bytes, exact coverage bounds and 512 byte-oracle prefixes\n";
+                 "source overwrite after copy, Unknown bytes, 512 content/2048 eligibility byte-oracle prefixes, "
+                 "bounds and fail-closed eligibility capacity\n";
 }

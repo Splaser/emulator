@@ -53,6 +53,7 @@ methods = '\n'.join(body(cpp, marker) for marker in [
     'Scheduler::WriteState Scheduler::PollCheckedWrite(',
     'Scheduler::Transfer Scheduler::RecordTransferBatch(',
     'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
+    'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
     'const TransferContent* Scheduler::CompletedTransferContent(',
     'void Scheduler::RetireCheckedWritesAfterDeviceIdle('])
 master = 'src/video_core/renderer_vulkan/vk_master_semaphore.cpp'
@@ -71,7 +72,8 @@ for key, value in [('CHECKED_SUBMISSION', checked), ('SUBMISSION_METHODS', metho
     scaffold = scaffold.replace('// @' + key + '@', value)
 scaffold = scaffold.replace('// @TRANSFER_MAPPING_GATE@', 'template <typename Memory>\n' +
                            body(header, '    const TransferContent* TransferContentForMapping(') +
-                           '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContent('))
+                           '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContent(') +
+                           '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContentRange('))
 scaffold = scaffold.replace('// @SCHEDULER_RECORDING@', '\n'.join([
     'template <typename T>\n' + body(header, marker) for marker in [
         '    void RecordWithUploadBuffer(', '    void EnqueueCommand(', '    void Record(T&& c)']]) +
@@ -86,6 +88,7 @@ source = '''#include <algorithm>
 #include <deque>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -97,6 +100,7 @@ source = '''#include <algorithm>
 #include "video_core/buffer_cache/controlled_transfer.h"
 #include "video_core/renderer_vulkan/vk_sync_provenance.h"
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
+#include "video_core/renderer_vulkan/vk_transfer_eligibility.h"
 ''' + scaffold + bindings + '''
 struct StorageObserverHarness {
     std::shared_ptr<VideoCommon::PhysicalWriteCoverage> storage_write_coverage =
@@ -151,7 +155,13 @@ for name, guard, replacement in [
     print('PASS expected mutation failure:', name)
 if a.content:
     for name, guard, replacement in [
-        ('current-without-record-revocation', 'RevokeTransferContentEligibility();', '/* missing cancellation */'),
+        ('range-without-overlap-gate', '!transfer->current_ranges[buffer].Contains(offset, size)', 'false'),
+        ('range-without-native-allocation', 'if (pin.Handle() != destination) continue;', 'if (false) continue;'),
+        ('range-without-pin-offset', 'Revoke(begin - pin.Offset(), end - begin)', 'Revoke(begin, end - begin)'),
+        ('range-without-submit-failure-gate', 'if (current_content_uncertain.load(std::memory_order_acquire)) return nullptr;', '/* missing failure-domain gate */'),
+        ('typed-fill-without-command', 'cmdbuf.FillBuffer(destination, offset, size, value);', '(void)value;'),
+        ('typed-copy-without-command', 'cmdbuf.CopyBuffer(source, destination, recorded_regions);', '(void)recorded_regions;'),
+        ('current-without-record-revocation', 'RevokeTransferContentEligibility();\n        EnqueueCommand', '/* missing cancellation */\n        EnqueueCommand'),
         ('current-without-eligibility-gate', 'if (!transfer || !transfer->current_eligible) return nullptr;', 'if (!transfer) return nullptr;'),
         ('current-without-retirement-gate', 'return !resource.pin.ContentEligible();', 'return false;'),
         ('content-without-completion', 'if (PollCheckedTransfer(transfer) != WriteState::Complete) return nullptr;', 'if (false) return nullptr;'),
@@ -178,8 +188,19 @@ if a.content:
         if result.returncode == 0 or 'Assertion' not in result.stderr:
             raise RuntimeError(f'{name} failed incorrectly: {result.returncode} {result.stderr}')
         print('PASS expected content mutation failure:', name)
+    eligibility_header = read('src/video_core/renderer_vulkan/vk_transfer_eligibility.h').replace('#pragma once', '')
+    expanded_eligibility = source.replace('#include "video_core/renderer_vulkan/vk_transfer_eligibility.h"', eligibility_header)
+    for name, guard, replacement in [
+        ('eligibility-without-left-complement', 'if (span.begin < offset && !append({span.begin, offset}))', 'if (false)'),
+        ('eligibility-without-right-complement', 'if (end < span.end && !append({end, span.end}))', 'if (false)')]:
+        assert expanded_eligibility.count(guard) == 1, name
+        result = run(name, expanded_eligibility.replace(guard, replacement))
+        if result.returncode == 0 or 'Assertion' not in result.stderr:
+            raise RuntimeError(f'{name} failed incorrectly: {result.returncode} {result.stderr}')
+        print('PASS expected eligibility mutation failure:', name)
 inputs.add('src/video_core/renderer_vulkan/vk_sync_provenance.h')
 inputs.add('src/video_core/renderer_vulkan/vk_transfer_content.h')
+inputs.add('src/video_core/renderer_vulkan/vk_transfer_eligibility.h')
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sorted(inputs)},
     'boundary': 'Actual production dependency and submission methods, simulated Vulkan/device execution; no authority',

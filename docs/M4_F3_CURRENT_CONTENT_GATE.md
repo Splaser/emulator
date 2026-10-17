@@ -1,5 +1,9 @@
 # M4-F3 current-content qualification
 
+This records the original whole-snapshot slice. The subsequent
+[byte-range gate](M4_F3_RANGE_CURRENT_CONTENT_GATE.md) refines typed Fill/Copy
+cancellation while preserving the historical API and unknown-producer boundary.
+
 This slice separates immutable callback-end ancestry from a cancellable current
 snapshot check. It does not publish a physical latest writer, import prior
 submission roots, or synchronize replicas. F2 and F3 remain Open.

@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 #include "video_core/renderer_vulkan/vk_sync_provenance.h"
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
+#include "video_core/renderer_vulkan/vk_transfer_eligibility.h"
 #include "common/slot_vector.h"
 #include "common/scratch_buffer.h"
 #include "common/range_sets.inc"
@@ -113,7 +114,8 @@ struct Queue {
         const auto* timeline=static_cast<const VkTimelineSemaphoreSubmitInfo*>(info.pNext);
         assert(timeline && timeline->signalSemaphoreValueCount==1);
         driver->submitted_tick=timeline->pSignalSemaphoreValues[0];
-        driver->submitted=std::move(driver->recorded);driver->recorded.clear();
+        for (auto& command : driver->recorded) driver->submitted.push_back(std::move(command));
+        driver->recorded.clear(); // Multiple accepted submissions preserve queue order until Complete.
         return VK_SUCCESS;
     }
 };
@@ -152,6 +154,7 @@ public:
     u64 Flush(VkSemaphore = nullptr, VkSemaphore = nullptr);
     std::vector<Write> checked_writes;
     std::vector<Transfer> checked_transfers;
+    std::atomic_bool current_content_uncertain{};
     Submission observed_submission;
     ObservedWrites RecordObservedWrites(std::span<const WriteFootprint>,std::function<bool(vk::CommandBuffer)>,
         std::shared_ptr<VideoCommon::PhysicalWriteCoverage> = {});
@@ -159,6 +162,9 @@ public:
     Transfer RecordTransferBatch(std::span<const TransferBuffer>,std::span<const TransferContent::Command>);
     WriteState PollCheckedTransfer(const Transfer&) const noexcept;
     const TransferContent* CompletedTransferContent(const Transfer&) const noexcept;
+    void RevokeBufferContent(VkBuffer,u64,u64) noexcept;
+    void RecordBufferFill(VkBuffer,u64,u64,u32);
+    void RecordBufferCopy(VkBuffer,VkBuffer,std::span<const VkBufferCopy>,bool,bool = false);
     void ForgetTransferSyncEvidenceForTest(const Transfer& transfer) {
         transfer->submission->synchronization = {};
     }

@@ -24,6 +24,7 @@
 #include "video_core/renderer_vulkan/vk_buffer_payload.h"
 #include "video_core/renderer_vulkan/vk_sync_provenance.h"
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
+#include "video_core/renderer_vulkan/vk_transfer_eligibility.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
 namespace VideoCommon {
@@ -74,6 +75,7 @@ public:
         std::atomic<Emission> emission{Emission::Pending};
         std::atomic_bool worker_pending{};
         bool current_eligible{}; // GPU/cache-thread cancellation only, never an execution version.
+        std::array<TransferEligibility, TransferContent::MaxBuffers> current_ranges;
         bool retired{};
     public:
         // Planned metadata is inspectable before execution, never completed evidence.
@@ -105,7 +107,17 @@ public:
     // Current qualification is separate from immutable historical ancestry.
     template <typename Memory>
     const TransferContent* CurrentTransferContent(const Transfer& transfer, const Memory& memory) const noexcept {
+        if (!transfer || transfer->resources.empty()) return nullptr;
+        for (size_t i = 0; i < transfer->resources.size(); ++i)
+            if (!CurrentTransferContentRange(transfer, memory, i, 0, transfer->resources[i].pin.Size())) return nullptr;
+        return transfer->content.get();
+    }
+    template <typename Memory>
+    const TransferContent* CurrentTransferContentRange(const Transfer& transfer, const Memory& memory,
+        size_t buffer, u64 offset, u64 size) const noexcept {
         if (!transfer || !transfer->current_eligible) return nullptr;
+        if (current_content_uncertain.load(std::memory_order_acquire)) return nullptr;
+        if (buffer >= transfer->resources.size() || !transfer->current_ranges[buffer].Contains(offset, size)) return nullptr;
         // Pending is not current evidence, but must not cancel eventual completion.
         const auto transfer_state = PollCheckedTransfer(transfer);
         if (transfer_state != WriteState::Complete) return nullptr;
@@ -118,6 +130,11 @@ public:
         }
         return content; // Scheduler-local snapshot qualification only, never physical authority.
     }
+    // Typed commands bind exact destination cancellation to the actual Vulkan operation.
+    // Other recording APIs remain unclassified and revoke all current eligibility.
+    void RecordBufferFill(VkBuffer destination, u64 offset, u64 size, u32 value);
+    void RecordBufferCopy(VkBuffer destination, VkBuffer source, std::span<const VkBufferCopy> copies,
+                          bool barrier, bool upload = false);
     class CheckedWrite {
         friend class Scheduler;
     public:
@@ -266,6 +283,7 @@ public:
 
     // GPU/cache-thread only. Unclassified reads/disjoint operations also conservatively cancel.
 private:
+    void RevokeBufferContent(VkBuffer destination, u64 offset, u64 size) noexcept;
     void RevokeTransferContentEligibility() noexcept {
         for (const auto& transfer : checked_transfers) transfer->current_eligible = false;
     }
@@ -451,6 +469,7 @@ private:
     std::function<void()> on_submit;
     std::vector<Write> checked_writes;
     std::vector<Transfer> checked_transfers;
+    std::atomic_bool current_content_uncertain{}; // Sticky submission failure; no worker mutation of range sets.
     Submission observed_submission;
 
     State state;

@@ -316,3 +316,26 @@ No APK/device/game acceptance is claimed. Next work must preserve this separate
 cancellation contract: returned graph pointers are historical metadata across
 subsequent work, read/disjoint commands conservatively cancel, and no current
 query constitutes physical authority or a concurrent data-admission lease.
+
+### Staged byte-range eligibility follow-up (2026-10-17)
+
+See [M4_F3_RANGE_CURRENT_CONTENT_GATE.md](M4_F3_RANGE_CURRENT_CONTENT_GATE.md).
+The new range query checks a pin-relative nonempty byte interval. Typed actual
+Fill/Copy remove only overlapping destination ranges on the same live staged
+allocation; source ranges, untouched complements and independent allocations
+remain eligible. Ordinary runtime clear/copy/upload/readback use the typed
+emitters and preserve their prior barriers. Unknown/general recording still
+rejects the whole snapshot. Native offsets, bounded fragmentation, device-loss
+failure domains, mapping and retirement must all fail closed.
+
+Historical roots and origins remain immutable; preserved current ranges do not
+import any cross-submission content source. No latest-writer authority, replica
+reconciliation, or ordinary Memory::Write/UMA activation is added. The three
+development stages are recorded explicitly: close proven content provenance,
+then real replica reconciliation with complement preservation, then the original
+ordinary F3 witness subject to M3B producer-exclusion eligibility. Controlled M4
+acceptance and production F3 acceptance remain distinct.
+
+The old whole-snapshot behavior failed the new untouched-range control as expected
+(`.diagnostics/m4-range-gate-red.log`). Final native/Linux/Android results follow
+after source validation.
