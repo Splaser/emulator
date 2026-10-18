@@ -550,3 +550,40 @@ required still has two expected 99/observed 10 failures (exit 42); F2 remains
 backing 77/cache 10. F2/F3 stay Open, restricted eligibility blocked, cross queue
 Unknown; no ordinary automatic replica selection or latest-writer authority.
 This evidence-only follow-up does not rerun unchanged source CI.
+
+
+### Mixed-root internal holes: Copy combination stage ceiling (2026-10-18)
+
+Source `8089ed6553` adds acceptance only; production BuildBatch/HasRoot, current
+eligibility, checked submission and receipt mechanisms are unchanged from
+`d223b5ca33`. Three writes [8,16), [32,40), [56,64) leave two holes, each retaining
+two different historical roots and nonidentity projections. Both roots in both
+holes are independently qualified; every possible write byte is revoked before
+worker execution. Simulated one/two-command recording prefixes can execute on
+successful submission without qualifying the new Unknown receipt. A separate
+hole Fill revokes its intersection alone; submission-domain uncertainty refuses
+all current qualification, including holes, without rolling back possible writes.
+
+[Linux-only run 39115398414](https://github.com/Splaser/emulator/actions/runs/39115398414)
+passed all five CTest processes, actual Scheduler/BufferCache compilation,
+CLI/shader/test builds and the full registration/coherency/backing/lifecycle
+regressions. Native Vulkan has 392 assertions plus three repeats with all three
+layouts and complete four-hop readback/root/current oracle checks. New extracted
+fixtures have 31 modes / 34 trials plus three repeats; all 74 CI assertion mutants
+are detected. Standalone mixed-hole metadata accepts exactly 64 complement pieces
+and refuses 65. A separate local-only capacity relaxation mutant is detected by
+the new unit assertion; do not count it as a CI or GPU result. Exact source and
+all 22 extracted input hashes match committed blobs. All 75 fixture transcripts,
+complete artifacts/Linux output, local red/repeat witnesses and a verified index
+are retained in `.diagnostics/ci-39115398414/`.
+
+See [M4_F3_MIXED_HOLES_ACCEPTANCE.md](M4_F3_MIXED_HOLES_ACCEPTANCE.md) for changed
+files and evidence boundaries. **Controlled Copy provenance combination acceptance
+is stage-complete. Next: bounded reconciliation planner, beginning with contract,
+budgets, source/current qualification and failure invalidation rules. Do not add
+more Copy combination scenarios unless an actual defect is found.** No planner
+implementation was started in this acceptance round. F2/F3 stay Open, restricted
+eligibility blocked; original F3 still has two expected 99/observed 10 failures
+(exit 42), F2 backing 77/cache 10. Cross queue Unknown, no ordinary automatic
+replica selection, no latest-writer authority or Draw/Dispatch expansion. Android
+was skipped. Evidence-only documentation does not retrigger unchanged source CI.

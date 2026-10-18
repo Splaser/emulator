@@ -1,5 +1,9 @@
 # M4/F3: explicit-source non-contiguous same-queue Copy
 
+The final [mixed-root multi-hole acceptance](M4_F3_MIXED_HOLES_ACCEPTANCE.md)
+closes the controlled Copy combination stage and sets the next stage to bounded
+reconciliation planning. The disjoint partition contract below remains in force.
+
 Baseline: `22438fd604` (Linux acceptance of `4bb3231040`). This is a bounded
 extension of `RecordControlledReplicaCopies`, not a new content authority.
 
