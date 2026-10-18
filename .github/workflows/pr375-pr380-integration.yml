@@ -112,6 +112,11 @@ jobs:
           .diagnostics/pr375-pr380/sync-provenance \
             | tee .diagnostics/pr375-pr380/sync-provenance.txt
           python tools/physical_coherency_tests/run_sync_provenance_tests.py --content
+          for repeat in 1 2 3; do
+            .diagnostics/m4-sync-provenance/dependencies \
+              > .diagnostics/pr375-pr380/multi-region-fixture-$repeat.txt
+            cat .diagnostics/pr375-pr380/multi-region-fixture-$repeat.txt
+          done
           g++ -std=c++23 -Wall -Wextra -Werror -I src \
             tools/physical_coherency_tests/transfer_content_tests.cpp \
             -o .diagnostics/pr375-pr380/transfer-content
@@ -123,7 +128,9 @@ jobs:
             src/tests/CMakeFiles/controlled_cpu_scheduler_tests.dir/core/controlled_cpu_scheduler.cpp.o \
             src/core/CMakeFiles/core.dir/core.cpp.o \
             src/core/CMakeFiles/core.dir/memory.cpp.o \
-            src/core/CMakeFiles/core.dir/cpu_manager.cpp.o -- -k 0
+            src/core/CMakeFiles/core.dir/cpu_manager.cpp.o \
+            src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/vk_scheduler.cpp.o \
+            src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/vk_buffer_cache.cpp.o -- -k 0
       - name: Build CLI, shader tool and unit tests
         run: cmake --build build-integration --target citron-cmd shader_tool tests controlled_cpu_scheduler_tests --parallel 3 -- -k 0
       - uses: actions/cache/save@v4

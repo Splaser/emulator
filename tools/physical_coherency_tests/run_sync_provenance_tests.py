@@ -41,6 +41,8 @@ checked = body(header, '    class CheckedSubmission {') + ';\nusing Submission=s
 checked += body(header, '    struct TransferBuffer {') + ';\n'
 checked += body(header, '    class CheckedTransfer {') + ';\nusing Transfer=std::shared_ptr<CheckedTransfer>;\n'
 checked += body(header, '    struct ReplicaCopyRequest {') + ';\n'
+checked += body(header, '    struct ReplicaCopyRegion {') + ';\n'
+checked += body(header, '    struct ReplicaCopiesRequest {') + ';\n'
 checked += 'enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };\n'
 checked += body(header, '    class CheckedWrite {') + ';\nusing Write=std::shared_ptr<CheckedWrite>;\n'
 checked += body(header, '    struct WriteFootprint {') + ';\nusing ObservedWrites=std::shared_ptr<const std::vector<Write>>;\n'
@@ -77,7 +79,7 @@ scaffold = scaffold.replace('// @TRANSFER_MAPPING_GATE@', 'template <typename Me
                            '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContent(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContentRange(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    bool CurrentTransferHasRoot(') +
-                           '\ntemplate <typename Memory>\n' + body(header, '    Transfer RecordControlledReplicaCopy(') +
+                           '\ntemplate <typename Memory>\n' + body(header, '    Transfer RecordControlledReplicaCopies(') + '\ntemplate <typename Memory>\n' + body(header, '    Transfer RecordControlledReplicaCopy(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    bool CurrentReplicaCopyHasRoot('))
 scaffold = scaffold.replace('// @SCHEDULER_RECORDING@', '\n'.join([
     'template <typename T>\n' + body(header, marker) for marker in [
@@ -133,7 +135,8 @@ if a.content:
     source += read('tools/physical_coherency_tests/mixed_replica_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/destination_replica_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/combined_replica_fixture.cpp.in')
-source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();TestCombinedReplicaCopy();' if a.content else '') + '}\n'
+    source += read('tools/physical_coherency_tests/multi_region_fixture.cpp.in')
+source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();TestCombinedReplicaCopy();TestMultiRegionReplicaCopy();' if a.content else '') + '}\n'
 command = [a.cxx, '-std=c++23', '-O1', '-Wall', '-Wextra', '-Werror',
            '-Wno-unused-parameter', '-Wno-missing-field-initializers',
            '-I', str(out / 'stubs'), '-I', str(root / 'src'),
@@ -167,6 +170,9 @@ for name, guard, replacement in [
     print('PASS expected mutation failure:', name)
 if a.content:
     for name, guard, replacement, count in [
+        ('batch-without-current-qualification', 'if (!qualify()) return {};', 'if ((static_cast<void>(qualify), false)) return {};', 2),
+        ('batch-without-planned-revocation', 'RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', '(void)destination;', 1),
+        ('batch-records-only-prefix', 'transfer->positions[index++] = journal.RecordAccess();', 'transfer->positions[index++] = journal.RecordAccess(); if (transfer->replica_copy && transfer->replica_copy->IsBatch()) break;', 1),
         ('target-current-prefix-only', 'for (const auto& part : plan->DestinationRoots()) {', 'for (const auto& part : plan->DestinationRoots()) {\n                        if (&part != plan->DestinationRoots().data()) break;', 1),
         ('target-without-completed-history', '!CompletedReplicaCopy(destination_receipt, parent)', 'false', 1),
         ('target-without-history-identity', 'link->replica_copy->DestinationCopy() != (link->replica_destination ? link->replica_destination->replica_copy : nullptr)', 'false', 1),
@@ -185,7 +191,7 @@ if a.content:
         ('replica-without-copy-coupling', '!replica_copy->MatchesCopy(commands[0].source_offset, commands[0].destination_offset, commands[0].size)', 'false', 1),
         ('replica-without-buffer-coupling', '!matches(0, replica_copy->SourceBuffer()) || !matches(1, replica_copy->DestinationBuffer())', '(static_cast<void>(matches), false)', 1),
         ('replica-without-completion', 'PollCheckedTransfer(result) != WriteState::Complete', 'false', 1),
-        ('replica-without-current-interval', '!CurrentTransferContentRange(result, memory, 1, offset, size)', 'false', 1),
+        ('replica-without-current-interval', '!CurrentTransferContentRange(result, memory, result->TargetIndex(), offset, size)', 'false', 1),
         ('replica-without-exact-root', 'return result->replica_copy->HasRoot(offset, size, fill, root_offset);', 'return true;', 1),
         ('replica-without-current-source', '!current_source()', '(static_cast<void>(current_source), false)', 2),
         ('replica-without-current-target', '!current_destination()', '(static_cast<void>(current_destination), false)', 2)]:
@@ -226,6 +232,9 @@ if a.content:
     expanded = expanded.replace('#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"', replica_header)
     for name, guard, replacement in [
         ('combined-source-flattens-projection', 'source_copy->HasRoot(parent_offset, end - begin, fill, root_offset + begin - offset)', 'source_copy->HasRoot(parent_offset, end - begin, fill, parent_offset)'),
+        ('batch-without-unique-coverage', 'region.destination_offset != cursor || ', ''),
+        ('batch-without-window-tail', 'cursor != begin + size || ', ''),
+        ('batch-flattens-root-projection', 'parent->HasRoot(region.source,projection,end-begin,fill,root_offset+begin-offset)', 'parent->HasRoot(region.source,projection,end-begin,fill,projection)'),
         ('combined-complement-uses-anchor', ': !copied && destination_copy', ': false && destination_copy'),
         ('target-without-complement-tail', 'if (preserved != destination_size) return {};', '/* missing complement suffix */'),
         ('target-without-complement-order', 'part.offset != preserved || ', ''),

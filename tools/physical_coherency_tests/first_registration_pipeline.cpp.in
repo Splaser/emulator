@@ -23,6 +23,7 @@ struct Driver {
     bool corrupt=false;
     bool fail_allocation=false;
     bool fail_copy_record=false;
+    bool uncertain_submit_effects=false;
     bool host_read_barrier=false;
     VkBuffer readback_target=VK_NULL_HANDLE;
     VkBuffer draw_target=VK_NULL_HANDLE;
@@ -113,7 +114,10 @@ struct Queue {
     VkQueue Handle() const {return reinterpret_cast<VkQueue>(driver->queue_id);}
     VkResult Submit(const VkSubmitInfo& info) {
         ++driver->submissions;
-        if(driver->submit_result!=VK_SUCCESS) return driver->submit_result;
+        if(driver->submit_result!=VK_SUCCESS) {
+            if(driver->uncertain_submit_effects) {for(auto& command:driver->recorded) driver->submitted.push_back(std::move(command));driver->recorded.clear();}
+            return driver->submit_result;
+        }
         const auto* timeline=static_cast<const VkTimelineSemaphoreSubmitInfo*>(info.pNext);
         assert(timeline && timeline->signalSemaphoreValueCount==1);
         driver->submitted_tick=timeline->pSignalSemaphoreValues[0];
@@ -165,7 +169,7 @@ public:
     const VideoCommon::PhysicalWriteIdentity* CompletedPhysicalIdentity(const Write&) const noexcept;
     Transfer RecordTransferBatch(std::span<const TransferBuffer>,std::span<const TransferContent::Command>);
     Transfer RecordTransferBatchImpl(std::span<const TransferBuffer>,std::span<const TransferContent::Command>,
-        std::shared_ptr<const ReplicaCopyProvenance>,Transfer,Transfer = {},Transfer = {});
+        std::shared_ptr<const ReplicaCopyProvenance>,Transfer,Transfer = {},Transfer = {},std::span<const Transfer> = {});
     bool CompletedReplicaCopy(const Transfer&,const Transfer&) const noexcept;
     bool CompletedReplicaCopyHasRoot(const Transfer&,const Transfer&,u64,u64,TransferContent::Index,u64) const noexcept;
     WriteState PollCheckedTransfer(const Transfer&) const noexcept;

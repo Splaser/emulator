@@ -1676,6 +1676,109 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     REQUIRE(poll(delayed) == State::Unknown);
     REQUIRE_FALSE(content_transfer->ResourcesRetained());
     REQUIRE(asynchronous_payload.expired());
+    // Separate bounded batch acceptance after trusted-idle retirement frees the 16-receipt budget.
+    std::array<std::shared_ptr<Vulkan::Buffer>,4> batch_owners;
+    std::vector<Vulkan::Scheduler::TransferBuffer> batch_targets;
+    std::array<std::array<u8,64>,4> batch_values;
+    std::array<std::array<Content::Root,64>,4> batch_labels;
+    const std::array<DAddr,4> batch_addresses{{B,C,D,E}};
+    std::vector<Content::Command> batch_initialize;
+    for(u32 batch_slot=0;batch_slot<4;++batch_slot) {
+        const u8 batch_value=batch_slot ? batch_slot*10 : 99;
+        batch_values[batch_slot].fill(batch_value);
+        for(u64 batch_byte=0;batch_byte<64;++batch_byte) batch_labels[batch_slot][batch_byte]={batch_slot,batch_byte};
+        batch_initialize.push_back({Kind::Fill,batch_slot,0,0,0,64,batch_value*0x01010101u});
+    }
+    batch_initialize.push_back({Kind::Copy,0,0,16,0,16});
+    batch_initialize.push_back({Kind::Copy,2,3,48,0,8});
+    for(u64 batch_byte=16;batch_byte<32;++batch_byte) batch_labels[0][batch_byte]=batch_labels[0][batch_byte-16];
+    for(u64 batch_byte=48;batch_byte<56;++batch_byte) {
+        batch_values[2][batch_byte]=batch_values[3][batch_byte-48];batch_labels[2][batch_byte]=batch_labels[3][batch_byte-48];
+    }
+    const auto batch_oracle_copy=[&](u32 batch_source,u32 batch_destination,u64 batch_begin,u64 batch_size) {
+        for(u64 batch_byte=batch_begin;batch_byte<batch_begin+batch_size;++batch_byte) {
+            batch_values[batch_destination][batch_byte]=batch_values[batch_source][batch_byte];
+            batch_labels[batch_destination][batch_byte]=batch_labels[batch_source][batch_byte];
+        }
+    };
+    Vulkan::Scheduler::Transfer batch_anchor,batch_first,batch_second,batch_third,batch_fourth,batch_fifth;
+    on_gpu([&] {
+        if(!rasterizer.SetControlledStorageWriteObservation(true)) throw std::runtime_error("batch observation refused");
+        for(u32 batch_slot=0;batch_slot<4;++batch_slot) {
+            batch_owners[batch_slot]=Access::IsolatedContentBuffer(rasterizer,batch_addresses[batch_slot],4096);
+            batch_targets.push_back(Access::IsolatedContentTarget(rasterizer,batch_owners[batch_slot],64));
+        }
+        batch_anchor=renderer->scheduler.RecordTransferBatch(batch_targets,batch_initialize);
+    });
+    REQUIRE(batch_anchor);finish_content(batch_anchor);
+    const std::array<ReplicaRoot,2> batch_roots_a{{{8,8,0,8},{16,8,0,0}}};
+    const std::array<ReplicaRoot,1> batch_roots_b{{{24,16,1,24}}};
+    const std::array<ReplicaRoot,4> batch_complements{{{0,8,2,0},{40,8,2,40},{48,8,3,0},{56,8,2,56}}};
+    std::array<Vulkan::Scheduler::ReplicaCopyRegion,2> batch_regions{{{0,8,8,16,{},batch_roots_a},{1,24,24,16,{},batch_roots_b}}};
+    on_gpu([&] {batch_first=renderer->scheduler.RecordControlledReplicaCopies(device_memory,{batch_anchor,2,8,32,batch_regions,{},batch_complements});});
+    REQUIRE(batch_first);finish_content(batch_first);batch_oracle_copy(0,2,8,16);batch_oracle_copy(1,2,24,16);
+    REQUIRE(batch_first->PlannedReplicaCopy()->IsBatch());
+    const std::array<ReplicaRoot,3> batch_whole{{{8,8,0,8},{16,8,0,0},{24,16,1,24}}};
+    on_gpu([&] {batch_second=renderer->scheduler.RecordControlledReplicaCopy(device_memory,
+        {batch_anchor,2,3,8,8,32,0,3,8,0,batch_first,batch_whole});});
+    REQUIRE(batch_second);finish_content(batch_second);batch_oracle_copy(2,3,8,32);
+    batch_regions[1].source=3;batch_regions[1].source_receipt=batch_second;
+    on_gpu([&] {batch_third=renderer->scheduler.RecordControlledReplicaCopies(device_memory,
+        {batch_anchor,2,8,32,batch_regions,batch_first,batch_complements});});
+    REQUIRE(batch_third);finish_content(batch_third);batch_oracle_copy(0,2,8,16);batch_oracle_copy(3,2,24,16);
+    batch_regions[0].source=3;batch_regions[0].source_receipt=batch_second;
+    batch_regions[1].source=1;batch_regions[1].source_receipt.reset();
+    on_gpu([&] {batch_fourth=renderer->scheduler.RecordControlledReplicaCopies(device_memory,
+        {batch_anchor,2,8,32,batch_regions,batch_third,batch_complements});});
+    REQUIRE(batch_fourth);finish_content(batch_fourth);batch_oracle_copy(3,2,8,16);batch_oracle_copy(1,2,24,16);
+    REQUIRE(batch_fourth->PlannedReplicaCopy()->Depth()==4);
+    on_gpu([&] {batch_fifth=renderer->scheduler.RecordControlledReplicaCopies(device_memory,
+        {batch_anchor,2,8,32,batch_regions,batch_fourth,batch_complements});});
+    REQUIRE_FALSE(batch_fifth);
+    std::array<bool,64> batch_current{},batch_wrong{};
+    std::vector<u8> batch_bytes;
+    on_gpu([&] {
+        for(u64 batch_byte=0;batch_byte<64;++batch_byte) {
+            const auto batch_label=batch_labels[2][batch_byte];
+            batch_current[batch_byte]=renderer->scheduler.CurrentReplicaCopyHasRoot(batch_fourth,device_memory,batch_anchor,
+                batch_byte,1,batch_label.command,batch_label.offset);
+            batch_wrong[batch_byte]=batch_fourth->PlannedReplicaCopy()->HasRoot(batch_byte,1,batch_label.command,batch_label.offset+1);
+        }
+        batch_bytes=Access::ReadPin(rasterizer,batch_targets[2].pin);
+    });
+    REQUIRE(std::ranges::all_of(batch_current,[](bool batch_valid){return batch_valid;}));
+    REQUIRE(std::ranges::none_of(batch_wrong,[](bool batch_valid){return batch_valid;}));
+    REQUIRE(batch_bytes==std::vector<u8>(batch_values[2].begin(),batch_values[2].end()));
+    on_gpu([&] {
+        Access::FillPinRange(rasterizer,batch_targets[3].pin,8,4,0x4d4d4d4d);
+        current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(batch_fourth,device_memory,batch_anchor,8,8,0,8);
+    });
+    REQUIRE(current_root); // Completed captured source content is immutable.
+    on_gpu([&] {
+        Access::FillPinRange(rasterizer,batch_targets[2].pin,24,4,0x58585858);
+        current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(batch_fourth,device_memory,batch_anchor,24,4,1,24);
+        batch_bytes=Access::ReadPin(rasterizer,batch_targets[2].pin);
+    });
+    REQUIRE_FALSE(current_root);
+    std::fill(batch_values[2].begin()+24,batch_values[2].begin()+28,u8{88});
+    REQUIRE(batch_bytes==std::vector<u8>(batch_values[2].begin(),batch_values[2].end()));
+    on_gpu([&] {current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(batch_fourth,device_memory,batch_anchor,48,8,3,0);});
+    REQUIRE(current_root);
+    REQUIRE(batch_first->PlannedReplicaCopy()->HasRoot(24,16,1,24));
+    REQUIRE(batch_fourth->PlannedReplicaCopy()->HasRoot(24,16,1,24));
+    std::weak_ptr<const void> batch_payload=batch_targets[2].pin.RetainedOwner();
+    on_gpu([&] {
+        batch_owners[2]->RevokeContentEligibility();batch_owners[2].reset();batch_targets.clear();
+        current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(batch_fourth,device_memory,batch_anchor,48,8,3,0);
+    });
+    REQUIRE_FALSE(current_root);REQUIRE_FALSE(batch_payload.expired());
+    on_gpu([&] {
+        renderer->scheduler.Finish();std::scoped_lock lock{renderer->scheduler.submit_mutex};
+        if(renderer->device.GetLogical().WaitIdle()!=VK_SUCCESS) throw std::runtime_error("batch trusted idle failed");
+        rasterizer.RetireControlledTransfersAfterDeviceIdle();
+        if(!rasterizer.SetControlledStorageWriteObservation(false)) throw std::runtime_error("batch observation shutdown refused");
+    });
+    REQUIRE(batch_payload.expired());
     std::cout << "PASS checked write provenance: skipped intent, distinct actual submissions, "
                  "repeated dirty interval, historical completion versus current snapshot, "
                  "pending worker, independent replica, remap and retained old native allocation; "

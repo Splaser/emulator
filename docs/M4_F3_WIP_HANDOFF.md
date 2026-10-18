@@ -490,3 +490,19 @@ uses both mixed receipts. Ordinary F3 still fails two fixed-required aliases
 cross-queue Unknown, no ordinary automatic replica selection or latest-writer
 authority, F2/F3 Open. This documentation-only evidence update does not rerun
 unchanged source CI.
+
+### Explicit-source multi-region controlled Copy (2026-10-18)
+
+See [M4_F3_MULTI_REGION_COPY.md](M4_F3_MULTI_REGION_COPY.md). A bounded ordered
+region list now imports explicitly qualified roots from several staged sources
+into one fully covered target window, preserving known untouched complements.
+It reuses existing receipts, actual same-queue submission spine, checked
+completion, pins and Current Content Gate. All possible planned writes cancel
+old target qualification before recording; partial recording does not roll back
+GPU writes, and unknown submission outcomes cannot publish completion. Four-hop,
+16-receipt, eight-resource and partition budgets remain. New deterministic
+faults allow prefix execution and writes despite a failed queue result.
+The native test composes batch/single/batch/batch with byte oracle and readback.
+Linux validation is pending; early real Scheduler/BufferCache compilation was
+added to the existing Linux-only workflow. F2/F3 remain Open, cross-queue Unknown,
+no ordinary automatic selection or physical authority; Android on demand.

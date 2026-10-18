@@ -72,6 +72,8 @@ checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    struct Tra
 checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    class CheckedTransfer {')
 checked += ';\n using Transfer=std::shared_ptr<CheckedTransfer>;\n'
 checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    struct ReplicaCopyRequest {') + ';\n'
+checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    struct ReplicaCopyRegion {') + ';\n'
+checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    struct ReplicaCopiesRequest {') + ';\n'
 checked += 'enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };\n'
 checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    class CheckedWrite {')
 checked += ';\n    using Write=std::shared_ptr<CheckedWrite>;\n'
@@ -162,7 +164,7 @@ for name, value in [('POLL_TIMELINE', timeline), ('CHECKED_SUBMISSION', checked)
                         '    const TransferContent* CurrentTransferContentRange(') + '\ntemplate <typename Memory>\n' + body(
                         'src/video_core/renderer_vulkan/vk_scheduler.h',
                         '    bool CurrentTransferHasRoot(') + '\ntemplate <typename Memory>\n' + body(
-                        'src/video_core/renderer_vulkan/vk_scheduler.h', '    Transfer RecordControlledReplicaCopy(') +
+                        'src/video_core/renderer_vulkan/vk_scheduler.h', '    Transfer RecordControlledReplicaCopies(') + '\ntemplate <typename Memory>\n' + body('src/video_core/renderer_vulkan/vk_scheduler.h', '    Transfer RecordControlledReplicaCopy(') +
                         '\ntemplate <typename Memory>\n' + body('src/video_core/renderer_vulkan/vk_scheduler.h',
                         '    bool CurrentReplicaCopyHasRoot(')),
                     ('RAW_STORAGE_BIND', body('src/video_core/renderer_vulkan/vk_buffer_cache.h',
@@ -754,9 +756,10 @@ sync_fixture += '\n' + read('tools/physical_coherency_tests/replica_copy_fixture
 sync_fixture += '\n' + read('tools/physical_coherency_tests/mixed_replica_fixture.cpp.in')
 sync_fixture += '\n' + read('tools/physical_coherency_tests/destination_replica_fixture.cpp.in')
 sync_fixture += '\n' + read('tools/physical_coherency_tests/combined_replica_fixture.cpp.in')
+sync_fixture += '\n' + read('tools/physical_coherency_tests/multi_region_fixture.cpp.in')
 observer = observer.replace('int main() {', sync_fixture + '\nint main() {')
 observer = observer.replace('    std::cout<<"PASS ordinary storage observer',
-                            '    TestSyncDependencies();\n    TestTransferContent();\n    TestReplicaCopy();\n    TestReplicaChain();\n    TestMixedReplicaCopy();\n    TestDestinationReplicaCopy();\n    TestCombinedReplicaCopy();\n    std::cout<<"PASS ordinary storage observer')
+                            '    TestSyncDependencies();\n    TestTransferContent();\n    TestReplicaCopy();\n    TestReplicaChain();\n    TestMixedReplicaCopy();\n    TestDestinationReplicaCopy();\n    TestCombinedReplicaCopy();\n    TestMultiRegionReplicaCopy();\n    std::cout<<"PASS ordinary storage observer')
 observer_cpp.write_text(observer)
 observer_exe = out / ('storage_observer.exe' if os.name == 'nt' else 'storage_observer')
 subprocess.run(cmd + [str(observer_cpp), '-o', str(observer_exe)], check=True)

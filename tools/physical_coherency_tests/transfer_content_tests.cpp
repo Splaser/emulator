@@ -326,7 +326,27 @@ int main() {
                 }
         }
     }
+    {
+        using Batch=Vulkan::ReplicaCopyProvenance;
+        const std::array<Plan::Offset,2> extents{{256,256}};
+        const std::array<Plan::Command,2> fills{{{Plan::Kind::Fill,0,0,0,0,256,99},{Plan::Kind::Fill,1,0,0,0,256,10}}};
+        auto anchor=std::make_shared<const Plan>(*Plan::Build(extents,fills));
+        std::vector<Batch::Region> regions;
+        for(unsigned i=0;i<32;++i) regions.push_back({0,i*4,i*4,4,{},{{i*4,2,0,i*4},{i*4+2,2,0,i*4+2}}});
+        std::vector<Batch::RootSpan> complement;
+        for(unsigned i=128;i<256;i+=2) complement.push_back({i,2,1,i});
+        const auto full=Batch::BuildBatch(anchor,1,0,128,256,regions,{},complement);
+        assert(full && full->Regions().size()==32 && full->DestinationRoots().size()==64);
+        for(unsigned i=0;i<256;++i) assert(full->HasRoot(i,1,i<128?0:1,i));
+        regions[0].roots={{0,1,0,0},{1,1,0,1},{2,2,0,2}};
+        assert(!Batch::BuildBatch(anchor,1,0,128,256,regions,{},complement)); // 65 aggregate source pieces.
+        regions[0].roots={{0,2,0,0},{2,2,0,2}};
+        complement[0]={128,1,1,128};complement.insert(complement.begin()+1,{129,1,1,129});
+        assert(!Batch::BuildBatch(anchor,1,0,128,256,regions,{},complement)); // 65 complement pieces.
+        complement={{132,124,1,132}};regions.push_back({0,128,128,4,{},{{128,4,0,128}}});
+        assert(!Batch::BuildBatch(anchor,1,0,132,256,regions,{},complement)); // 33 commands.
+    }
     std::cout << "PASS exact transfer content: partial copies, untouched roots, copy-of-copy, "
                  "source overwrite after copy, Unknown bytes, 512 content/2048 eligibility byte-oracle prefixes, "
-                 "256 multi-hop/256 mixed-source/256 mixed-target byte-oracle prefixes, bounds and fail-closed eligibility capacity\n";
+                 "256 multi-hop/256 mixed-source/256 mixed-target byte-oracle prefixes, batch 32-command/64-piece boundaries, bounds and fail-closed eligibility capacity\n";
 }

@@ -226,10 +226,28 @@ Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffe
 
 Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferBuffer> buffers,
     std::span<const TransferContent::Command> commands,
-    std::shared_ptr<const ReplicaCopyProvenance> replica_copy, Transfer parent, Transfer predecessor, Transfer destination_history) {
+    std::shared_ptr<const ReplicaCopyProvenance> replica_copy, Transfer parent, Transfer predecessor, Transfer destination_history,
+    std::span<const Transfer> dependencies) {
     if (!predecessor) predecessor = parent;
     const auto source_history = predecessor;
-    if (replica_copy) {
+    if (replica_copy && replica_copy->IsBatch()) {
+        if (!parent || parent->replica_copy || replica_copy->ParentContent()!=parent->content || !predecessor ||
+            buffers.size()!=parent->resources.size() || commands.size()!=replica_copy->Regions().size() ||
+            dependencies.size()!=commands.size() || replica_copy->Depth()!=(predecessor->replica_copy ? predecessor->replica_copy->Depth()+1 : 1) ||
+            replica_copy->DestinationCopy()!=(destination_history ? destination_history->replica_copy : nullptr) ||
+            !predecessor->IncludesAncestor(destination_history ? destination_history : parent)) return {};
+        for (size_t i=0;i<buffers.size();++i) {
+            const auto& a=buffers[i];const auto& b=parent->resources[i];
+            if (a.pin.Identity()!=b.pin.Identity() || a.pin.Offset()!=b.pin.Offset() || a.pin.Size()!=b.pin.Size() || a.physical!=b.physical) return {};
+        }
+        for (size_t i=0;i<commands.size();++i) {
+            const auto& operation=commands[i];const auto& region=replica_copy->Regions()[i];
+            if (!dependencies[i] || !predecessor->IncludesAncestor(dependencies[i]) ||
+                region.source_copy!=dependencies[i]->replica_copy || operation.kind!=TransferContent::Kind::Copy ||
+                operation.source!=region.source || operation.destination!=replica_copy->DestinationBuffer() ||
+                operation.source_offset!=region.source_offset || operation.destination_offset!=region.destination_offset || operation.size!=region.size) return {};
+        }
+    } else if (replica_copy) {
         if (!parent || parent->replica_copy || replica_copy->ParentContent() != parent->content ||
             buffers.size() != 2 || commands.size() != 1 || commands[0].kind != TransferContent::Kind::Copy ||
             commands[0].source != 0 || commands[0].destination != 1 ||
@@ -243,19 +261,19 @@ Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferB
         if (!matches(0, replica_copy->SourceBuffer()) || !matches(1, replica_copy->DestinationBuffer())) return {};
         if (predecessor != parent) {
             if (!predecessor || predecessor->replica_anchor != parent ||
-                predecessor->replica_copy != replica_copy->SourceCopy() || predecessor->resources.size() != 2 ||
-                buffers[0].pin.Identity() != predecessor->resources[1].pin.Identity() ||
-                buffers[0].pin.Offset() != predecessor->resources[1].pin.Offset() ||
-                buffers[0].pin.Size() != predecessor->resources[1].pin.Size() ||
-                buffers[0].physical != predecessor->resources[1].physical) return {};
+                predecessor->replica_copy != replica_copy->SourceCopy() || predecessor->TargetIndex() >= predecessor->resources.size() ||
+                buffers[0].pin.Identity() != predecessor->resources[predecessor->TargetIndex()].pin.Identity() ||
+                buffers[0].pin.Offset() != predecessor->resources[predecessor->TargetIndex()].pin.Offset() ||
+                buffers[0].pin.Size() != predecessor->resources[predecessor->TargetIndex()].pin.Size() ||
+                buffers[0].physical != predecessor->resources[predecessor->TargetIndex()].physical) return {};
         } else if (replica_copy->SourceCopy()) return {};
         if (destination_history) {
             if (!destination_history->replica_copy || destination_history->replica_anchor != parent ||
-                destination_history->replica_copy != replica_copy->DestinationCopy() || destination_history->resources.size() != 2 ||
-                buffers[1].pin.Identity() != destination_history->resources[1].pin.Identity() ||
-                buffers[1].pin.Offset() != destination_history->resources[1].pin.Offset() ||
-                buffers[1].pin.Size() != destination_history->resources[1].pin.Size() ||
-                buffers[1].physical != destination_history->resources[1].physical) return {};
+                destination_history->replica_copy != replica_copy->DestinationCopy() || destination_history->TargetIndex() >= destination_history->resources.size() ||
+                buffers[1].pin.Identity() != destination_history->resources[destination_history->TargetIndex()].pin.Identity() ||
+                buffers[1].pin.Offset() != destination_history->resources[destination_history->TargetIndex()].pin.Offset() ||
+                buffers[1].pin.Size() != destination_history->resources[destination_history->TargetIndex()].pin.Size() ||
+                buffers[1].physical != destination_history->resources[destination_history->TargetIndex()].physical) return {};
             if (!predecessor->replica_copy || destination_history->replica_copy->Depth() > predecessor->replica_copy->Depth())
                 predecessor = destination_history;
             if (!predecessor->IncludesAncestor(source_history) || !predecessor->IncludesAncestor(destination_history)) return {};
@@ -289,6 +307,7 @@ Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferB
         transfer->replica_source = source_history;
         transfer->replica_destination = std::move(destination_history);
         transfer->replica_anchor = std::move(parent);
+        transfer->replica_dependencies.assign(dependencies.begin(),dependencies.end());
         transfer->submission = Submission{new CheckedSubmission{submission_owner}};
         checked_transfers.push_back(transfer); // Retain uncertain effects until trusted device idle.
     } catch (...) {
@@ -425,10 +444,18 @@ bool Scheduler::CompletedReplicaCopy(const Transfer& result, const Transfer& par
         if (!link || !remaining || !link->replica_copy || link->replica_anchor != parent ||
             link->replica_copy->Depth() != remaining-- || !link->replica_parent ||
             (link != result && PollCheckedTransfer(link) != WriteState::Complete) ||
-            !link->replica_source || link->replica_copy->SourceCopy() != link->replica_source->replica_copy ||
+            !link->replica_source || (!link->replica_copy->IsBatch() && link->replica_copy->SourceCopy() != link->replica_source->replica_copy) ||
             link->replica_copy->DestinationCopy() != (link->replica_destination ? link->replica_destination->replica_copy : nullptr) ||
             !link->replica_parent->IncludesAncestor(link->replica_source) ||
             (link->replica_destination && !link->replica_parent->IncludesAncestor(link->replica_destination))) return false;
+        if (link->replica_copy->IsBatch()) {
+            if (link->replica_dependencies.size()!=link->replica_copy->Regions().size() || !CompletedTransferContent(link)) return false;
+            for (size_t i=0;i<link->replica_dependencies.size();++i) {
+                const auto& dependency=link->replica_dependencies[i];
+                if (!dependency || !link->replica_parent->IncludesAncestor(dependency) ||
+                    link->replica_copy->Regions()[i].source_copy!=dependency->replica_copy) return false;
+            }
+        }
         const auto& consumer = link->submission;
         const auto& producer = link->replica_parent->submission;
         if (producer == consumer || producer->result.load(std::memory_order_acquire) != VK_SUCCESS ||
@@ -440,6 +467,10 @@ bool Scheduler::CompletedReplicaCopy(const Transfer& result, const Transfer& par
             VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT};
         if (!consumer->synchronization.ProvesEarlierSubmission(prior, link->positions[0], copy) ||
             !consumer->synchronization.ProvesRelease(link->positions[0], copy, later)) return false;
+        if (link->replica_copy->IsBatch()) {
+            for (size_t i=1;i<link->replica_copy->Regions().size();++i)
+                if (!consumer->synchronization.ProvesRelease(link->positions[i],copy,later)) return false;
+        }
     }
     if (remaining) return false;
     return true;

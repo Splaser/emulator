@@ -6,6 +6,7 @@
 #include <limits>
 #include <memory>
 #include <span>
+#include <vector>
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
 
 namespace Vulkan {
@@ -24,6 +25,58 @@ public:
     };
     static constexpr Index MaxHops = 4;
     static constexpr Index MaxRootSpans = TransferContent::MaxSpans;
+    struct Region {
+        Index source{};
+        Offset source_offset{}, destination_offset{}, size{};
+        std::shared_ptr<const ReplicaCopyProvenance> source_copy;
+        std::vector<RootSpan> roots;
+    };
+    static std::optional<ReplicaCopyProvenance> BuildBatch(std::shared_ptr<const TransferContent> parent,
+        Index destination, Offset begin, Offset size, Offset extent, std::span<const Region> regions,
+        std::shared_ptr<const ReplicaCopyProvenance> destination_copy, std::span<const RootSpan> complements) {
+        if (!parent || regions.empty() || regions.size() > TransferContent::MaxCommands || !size ||
+            begin >= extent || size > extent - begin || (begin | size) % 4 ||
+            (destination_copy && (destination_copy->ParentContent() != parent ||
+                destination_copy->DestinationBuffer() != destination || destination_copy->Depth() >= MaxHops))) return {};
+        Offset cursor=begin;size_t root_budget{};
+        Index ancestry=destination_copy ? destination_copy->Depth() : 0;
+        for (const auto& region : regions) {
+            if (region.source == destination || region.destination_offset != cursor || !region.size ||
+                (region.source_offset | region.destination_offset | region.size) % 4 ||
+                region.size > begin + size - cursor || region.size > std::numeric_limits<Offset>::max() - region.source_offset ||
+                region.roots.empty() || (root_budget += region.roots.size()) > MaxRootSpans ||
+                (region.source_copy && (region.source_copy->ParentContent() != parent ||
+                    region.source_copy->DestinationBuffer() != region.source || region.source_copy->Depth() >= MaxHops))) return {};
+            Offset source_cursor=region.source_offset;
+            for (const auto& part : region.roots) {
+                if (part.offset != source_cursor || !part.size || part.size > region.source_offset + region.size - source_cursor ||
+                    !(region.source_copy ? region.source_copy->HasRoot(part.offset,part.size,part.fill,part.root_offset)
+                        : parent->HasRoot(region.source,part.offset,part.size,part.fill,part.root_offset))) return {};
+                source_cursor += part.size;
+            }
+            if (source_cursor != region.source_offset + region.size) return {};
+            ancestry=std::max(ancestry,region.source_copy ? region.source_copy->Depth() : 0u);
+            cursor += region.size;
+        }
+        if (cursor != begin + size || complements.size() > MaxRootSpans) return {};
+        Offset retained{};
+        for (const auto& part : complements) {
+            if (retained == begin) retained += size;
+            if (part.offset != retained || !part.size || part.size > extent - retained ||
+                (part.offset < begin + size && begin < part.offset + part.size) ||
+                !(destination_copy ? destination_copy->HasRoot(part.offset,part.size,part.fill,part.root_offset)
+                    : parent->HasRoot(destination,part.offset,part.size,part.fill,part.root_offset))) return {};
+            retained += part.size;
+        }
+        if (retained == begin) retained += size;
+        if (retained != extent) return {};
+        ReplicaCopyProvenance plan{std::move(parent),0,destination,0,begin,size,extent,{}, {},std::move(destination_copy),complements};
+        plan.regions.assign(regions.begin(),regions.end()); // Own every source partition before recording.
+        plan.depth=ancestry+1;
+        return plan;
+    }
+    bool IsBatch() const noexcept { return !regions.empty(); }
+    std::span<const Region> Regions() const noexcept { return regions; }
     static std::optional<ReplicaCopyProvenance> Build(std::shared_ptr<const TransferContent> parent,
         Index source, Index destination, Offset source_offset, Offset destination_offset, Offset size,
         Offset destination_size, Index source_fill, Offset source_root, Index destination_fill, Offset destination_root,
@@ -75,6 +128,26 @@ public:
     bool HasRoot(Offset offset, Offset size, Index fill, Offset root_offset) const noexcept {
         if (!size || offset >= destination_size || size > destination_size - offset ||
             size > std::numeric_limits<Offset>::max() - root_offset) return false;
+        if (IsBatch()) {
+            Offset covered{};
+            for (const auto& region : regions) {
+                const auto begin=std::max(offset,region.destination_offset);
+                const auto end=std::min(offset+size,region.destination_offset+region.size);
+                if (begin>=end) continue;
+                const auto projection=region.source_offset+begin-region.destination_offset;
+                if (!(region.source_copy ? region.source_copy->HasRoot(projection,end-begin,fill,root_offset+begin-offset)
+                    : parent->HasRoot(region.source,projection,end-begin,fill,root_offset+begin-offset))) return false;
+                covered+=end-begin;
+            }
+            for (const auto& part : DestinationRoots()) {
+                const auto begin=std::max(offset,part.offset),end=std::min(offset+size,part.offset+part.size);
+                if (begin>=end) continue;
+                if (!(destination_copy ? destination_copy->HasRoot(begin,end-begin,fill,root_offset+begin-offset)
+                    : parent->HasRoot(destination,begin,end-begin,fill,root_offset+begin-offset))) return false;
+                covered+=end-begin;
+            }
+            return covered==size;
+        }
         Offset covered{};
         const auto check = [&](Offset begin, Offset end, bool copied) {
             begin = std::max(begin, offset);
@@ -128,5 +201,6 @@ private:
     Index root_count{};
     std::array<RootSpan, MaxRootSpans> destination_roots{};
     Index complement_count{};
+    std::vector<Region> regions;
 };
 } // namespace Vulkan

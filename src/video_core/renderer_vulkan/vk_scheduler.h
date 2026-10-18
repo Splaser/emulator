@@ -78,6 +78,10 @@ public:
         std::shared_ptr<CheckedTransfer> replica_source;
         std::shared_ptr<CheckedTransfer> replica_destination;
         std::shared_ptr<CheckedTransfer> replica_anchor;
+        std::vector<std::shared_ptr<CheckedTransfer>> replica_dependencies;
+        size_t TargetIndex() const noexcept {
+            return replica_copy && replica_copy->IsBatch() ? replica_copy->DestinationBuffer() : 1;
+        }
         bool IncludesAncestor(const std::shared_ptr<CheckedTransfer>& dependency) const noexcept {
             const CheckedTransfer* link = this;
             for (size_t count = 0; link && count <= ReplicaCopyProvenance::MaxHops; ++count) {
@@ -112,6 +116,93 @@ public:
         Transfer destination_receipt{};
         std::span<const ReplicaCopyProvenance::RootSpan> destination_roots{}; // Exact untouched complement only.
     };
+    struct ReplicaCopyRegion {
+        TransferContent::Index source{};
+        u64 source_offset{}, destination_offset{}, size{};
+        Transfer source_receipt{};
+        std::span<const ReplicaCopyProvenance::RootSpan> roots{};
+    };
+    struct ReplicaCopiesRequest {
+        Transfer parent;
+        TransferContent::Index destination{};
+        u64 destination_offset{}, size{};
+        std::span<const ReplicaCopyRegion> regions;
+        Transfer destination_receipt{};
+        std::span<const ReplicaCopyProvenance::RootSpan> complements;
+    };
+    template <typename Memory>
+    Transfer RecordControlledReplicaCopies(const Memory& memory, const ReplicaCopiesRequest& request) {
+        try {
+            const auto& parent=request.parent;
+            if (!parent || parent->replica_copy || request.destination>=parent->resources.size() ||
+                request.regions.empty() || request.regions.size()>TransferContent::MaxCommands) return {};
+            std::vector<ReplicaCopyProvenance::Region> regions;
+            std::vector<Transfer> dependencies;
+            std::vector<TransferContent::Command> commands;
+            Transfer predecessor=parent;
+            size_t budget{};
+            const auto binding=[&](const Transfer& receipt, size_t slot) {
+                if (!receipt) return true;
+                if (!receipt->replica_copy || receipt->replica_anchor!=parent ||
+                    receipt->replica_copy->DestinationBuffer()!=slot || receipt->TargetIndex()>=receipt->resources.size()) return false;
+                const auto& saved=receipt->resources[receipt->TargetIndex()];
+                const auto& original=parent->resources[slot];
+                return saved.pin.Identity()==original.pin.Identity() && saved.pin.Offset()==original.pin.Offset() &&
+                    saved.pin.Size()==original.pin.Size() && saved.physical==original.physical;
+            };
+            const auto include=[&](const Transfer& dependency) {
+                if (dependency && dependency->replica_copy &&
+                    (!predecessor->replica_copy || dependency->replica_copy->Depth()>predecessor->replica_copy->Depth())) predecessor=dependency;
+            };
+            if (!binding(request.destination_receipt,request.destination)) return {};
+            include(request.destination_receipt);
+            for (const auto& region : request.regions) {
+                if (region.source>=parent->resources.size() || region.roots.size()>ReplicaCopyProvenance::MaxRootSpans-budget ||
+                    !binding(region.source_receipt,region.source)) return {};
+                budget+=region.roots.size();
+                regions.push_back({region.source,region.source_offset,region.destination_offset,region.size,
+                    region.source_receipt ? region.source_receipt->replica_copy : nullptr,
+                    {region.roots.begin(),region.roots.end()}});
+                dependencies.push_back(region.source_receipt ? region.source_receipt : parent);
+                commands.push_back({TransferContent::Kind::Copy,request.destination,region.source,
+                    region.destination_offset,region.source_offset,region.size});
+                include(region.source_receipt);
+            }
+            auto plan=ReplicaCopyProvenance::BuildBatch(parent->content,request.destination,request.destination_offset,
+                request.size,parent->resources[request.destination].pin.Size(),regions,
+                request.destination_receipt ? request.destination_receipt->replica_copy : nullptr,request.complements);
+            if (!plan) return {};
+            if (!predecessor->IncludesAncestor(request.destination_receipt ? request.destination_receipt : parent)) return {};
+            for (const auto& dependency : dependencies) if (!predecessor->IncludesAncestor(dependency)) return {};
+            const auto qualify=[&] {
+                const auto& destination=parent->resources[request.destination];
+                if (!destination.pin.CopyProvenanceEligible() || !destination.physical->MatchesCurrent(memory)) return false;
+                if (request.destination_receipt && !CompletedReplicaCopy(request.destination_receipt,parent)) return false;
+                for (const auto& part : plan->DestinationRoots())
+                    if (!(request.destination_receipt ? CurrentReplicaCopyHasRoot(request.destination_receipt,memory,parent,
+                        part.offset,part.size,part.fill,part.root_offset) : CurrentTransferHasRoot(parent,memory,request.destination,
+                        part.offset,part.size,part.fill,part.root_offset))) return false;
+                for (size_t i=0;i<plan->Regions().size();++i) {
+                    const auto& region=plan->Regions()[i];const auto& source=parent->resources[region.source];
+                    if (!source.pin.CopyProvenanceEligible() || source.pin.Identity()==destination.pin.Identity()) return false;
+                    for (const auto& part : region.roots)
+                        if (!(dependencies[i]!=parent ? CurrentReplicaCopyHasRoot(dependencies[i],memory,parent,
+                            part.offset,part.size,part.fill,part.root_offset) : CurrentTransferHasRoot(parent,memory,region.source,
+                            part.offset,part.size,part.fill,part.root_offset))) return false;
+                    const auto a=source.physical->Slice(region.source_offset,region.size);
+                    const auto b=destination.physical->Slice(region.destination_offset,region.size);
+                    if (!a || !b || a->Backing()!=b->Backing() || a->DeviceEpoch()!=b->DeviceEpoch() ||
+                        a->DeviceAddress()==b->DeviceAddress() || !std::ranges::equal(a->Segments(),b->Segments())) return false;
+                }
+                return true;
+            };
+            if (!qualify()) return {};
+            RequestOutsideRenderPassOperationContext();
+            if (!qualify()) return {};
+            return RecordTransferBatchImpl(parent->resources,commands,std::make_shared<const ReplicaCopyProvenance>(std::move(*plan)),
+                parent,predecessor,request.destination_receipt,dependencies);
+        } catch (...) { return {}; } // Only pre-record admission/allocation is handled here.
+    }
     template <typename Memory>
     Transfer RecordControlledReplicaCopy(const Memory& memory, const ReplicaCopyRequest& request) {
         const auto& parent = request.parent;
@@ -122,15 +213,15 @@ public:
         const auto& receipt = request.source_receipt;
         const auto& destination_receipt = request.destination_receipt;
         if (receipt && (!receipt->replica_copy || receipt->replica_anchor != parent ||
-            receipt->replica_copy->DestinationBuffer() != request.source || receipt->resources.size() != 2 ||
-            receipt->resources[1].pin.Identity() != source.pin.Identity() ||
-            receipt->resources[1].physical != source.physical)) return {};
+            receipt->replica_copy->DestinationBuffer() != request.source || receipt->TargetIndex() >= receipt->resources.size() ||
+            receipt->resources[receipt->TargetIndex()].pin.Identity() != source.pin.Identity() ||
+            receipt->resources[receipt->TargetIndex()].physical != source.physical)) return {};
         if (destination_receipt && (!destination_receipt->replica_copy || destination_receipt->replica_anchor != parent ||
-            destination_receipt->replica_copy->DestinationBuffer() != request.destination || destination_receipt->resources.size() != 2 ||
-            destination_receipt->resources[1].pin.Identity() != destination.pin.Identity() ||
-            destination_receipt->resources[1].pin.Offset() != destination.pin.Offset() ||
-            destination_receipt->resources[1].pin.Size() != destination.pin.Size() ||
-            destination_receipt->resources[1].physical != destination.physical)) return {};
+            destination_receipt->replica_copy->DestinationBuffer() != request.destination || destination_receipt->TargetIndex() >= destination_receipt->resources.size() ||
+            destination_receipt->resources[destination_receipt->TargetIndex()].pin.Identity() != destination.pin.Identity() ||
+            destination_receipt->resources[destination_receipt->TargetIndex()].pin.Offset() != destination.pin.Offset() ||
+            destination_receipt->resources[destination_receipt->TargetIndex()].pin.Size() != destination.pin.Size() ||
+            destination_receipt->resources[destination_receipt->TargetIndex()].physical != destination.physical)) return {};
         auto plan = ReplicaCopyProvenance::Build(parent->content, request.source, request.destination,
             request.source_offset, request.destination_offset, request.size, destination.pin.Size(),
             request.source_fill, request.source_root_offset, request.destination_fill, request.destination_root_offset,
@@ -186,13 +277,13 @@ public:
     template <typename Memory>
     bool CurrentReplicaCopyHasRoot(const Transfer& result, const Memory& memory, const Transfer& parent,
         u64 offset, u64 size, TransferContent::Index fill, u64 root_offset) const noexcept {
-        if (!result || !CurrentTransferContentRange(result, memory, 1, offset, size) ||
+        if (!result || !CurrentTransferContentRange(result, memory, result->TargetIndex(), offset, size) ||
             !CompletedReplicaCopyHasRoot(result, parent, offset, size, fill, root_offset)) return false;
         // Storage/mapping cancellation spans ancestors, but later byte writes must not rebase copied history.
         size_t hops{};
         try {
             for (auto link = result; link != parent; link = link->replica_parent) {
-                if (!link || ++hops > ReplicaCopyProvenance::MaxHops || link->resources.size() != 2) return false;
+                if (!link || ++hops > ReplicaCopyProvenance::MaxHops || link->TargetIndex()>=link->resources.size()) return false;
                 for (const auto& resource : link->resources)
                     if (!resource.pin.CopyProvenanceEligible() || !resource.physical->MatchesCurrent(memory)) return false;
             }
@@ -415,7 +506,7 @@ private:
     Transfer RecordTransferBatchImpl(std::span<const TransferBuffer> buffers,
         std::span<const TransferContent::Command> commands,
         std::shared_ptr<const ReplicaCopyProvenance> replica_copy, Transfer parent, Transfer predecessor = {},
-        Transfer destination_history = {});
+        Transfer destination_history = {}, std::span<const Transfer> dependencies = {});
     void RevokeTransferContentEligibility() noexcept {
         for (const auto& transfer : checked_transfers) transfer->current_eligible = false;
     }
