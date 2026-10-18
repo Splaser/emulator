@@ -11,8 +11,9 @@ producer discovery, new Copy form or ordinary BufferCache selection.
 A request names one live `GuestBackingEpoch`, one aligned contiguous physical
 interval, a single immutable transfer anchor, a designated target and 2-3 staged
 replicas including that target. All selected saved physical views must describe
-that whole interval contiguously; logical offsets start at zero. Partial-resource
-views / scattered physical geometry are refused in this minimal implementation.
+that whole interval contiguously; logical offsets start at zero. The planner does not slice an already checked view or accept scattered physical
+geometry. Such a checked view can itself be a subrange of a larger allocation
+(the native acceptance uses 64-byte views of 4096-byte staged allocations).
 Native allocations must be distinct. An offered source must also have a distinct
 DAddr from the target, preserving existing controlled admission restrictions.
 
@@ -134,12 +135,72 @@ latest-writer authority or new Draw/Dispatch producer is enabled. F2/F3 stay Ope
 
 ## Verification record
 
-Pending final source commit and Linux acceptance. Local missing-generator red
-witness `.diagnostics/reconciliation-baseline-red.txt` is an expected Candidate
-assertion with the new API initially returning refusal, not a claimed prior F3
-production defect. Local logic and extracted-body transcripts are
-`.diagnostics/reconciliation-logic-local.log` and
-`.diagnostics/reconciliation-integration-local.log`.
+Implementation `374977121d`, receipt-input/mutant fix `6a652ed561` and naming/
+fail-fast fix `4b856d0921522233bd361e2505bae5ba779b83c1` passed
+[Linux-only run 39123951599](https://github.com/Splaser/emulator/actions/runs/39123951599),
+Linux job `117665075606`. Android was intentionally skipped. Verified acceptance:
+
+- Real Scheduler/BufferCache/native test translation units compile before the
+  slow mutation loop. CLI/shader/test builds, all five CTest processes and the
+  full registration/coherency/backing/lifecycle suites pass.
+- Native Vulkan: **398 assertions**, plus three independent repeats. The existing
+  mixed-hole layout consumes planner candidates on the first and fourth actual
+  hops; the latter verifies real legacy source and batch target receipt inputs.
+  Existing admission, barriers, checked completion, full byte readback and all
+  original root/current/retirement oracle assertions remain mandatory.
+- Pure planner: 128 independent byte oracles, boundary/reason/ancestry tests and
+  three repeats. All **12 pure mutations** fail by assertion. These test injected
+  evidence semantics, not actual hardware synchronization or failure.
+- Extracted production bodies: all **24 planner query/admission modes**, positive
+  target-receipt reuse without new commands, prior fixture modes and three full
+  repeats pass. All **78 mutations** fail by assertion, including four new adapter
+  faults. Query command counts remain unchanged. Failure/prefix/uncertain-effect
+  cases are simulated dispatch, strictly separate from native Copy/readback.
+- Exact source file equals the accepted SHA. All **24 extracted-body input hashes**
+  and **6 pure-planner input hashes** match committed Git blobs.
+- Original F3 fixed-required aliases remain expected 99 / observed 10, two failed
+  assertions, exit 42. F2 remains expected 77 / observed 10 / backing 77. Neither
+  production defect is closed by this controlled candidate acceptance.
+
+Complete Linux job output, all CI artifacts (including generated mutation source/
+executables), 78 extracted-body and 12 pure assertion transcripts, positive/repeat
+logs, extraction manifests and CTest output are archived under
+`.diagnostics/ci-39123951599/`. Independent checks are in `verified-acceptance.json`
+and its retained verification script. The local API-stub red assertion is retained
+as `reconciliation-baseline-red.txt`; it documents a missing new generator, not a
+prior production F3 defect. Local pure/focused/full-mutation logs and repeats are
+also retained; `local-evidence.json` identifies pre-naming-fix versus final-source
+scope. Final-source Linux evidence is the acceptance record.
+
+Changed implementation and validation files:
+
+- `src/video_core/renderer_vulkan/vk_reconciliation_planner.h`: stateless bounded
+  spatial candidate builder, existing immutable Copy metadata output and reasons.
+- `src/video_core/renderer_vulkan/vk_scheduler.h`: typed explicit replica request
+  and actual pin/mapping/current/submission/synchronization evidence query.
+- `src/tests/core/controlled_cpu_scheduler.cpp`: existing first/fourth Copy hops
+  consume generated candidates through original admission and native readback.
+- `tools/physical_coherency_tests/reconciliation_planner_tests.cpp` and
+  `run_reconciliation_planner_tests.py`: pure oracle, reasons/budgets and 12 mutants.
+- `tools/physical_coherency_tests/reconciliation_planner_fixture.cpp.in`: query,
+  receipt-input and failure/no-lease tests with extracted production methods.
+- `first_registration_pipeline.cpp.in`, `run_registration_pipeline_tests.py` and
+  `run_sync_provenance_tests.py` in the same directory: extract the real adapter,
+  reuse the fixture and add four assertion mutants. The explicit `--positive-only`
+  option is an iterative check, not acceptance; CI always runs the full default.
+- `.github/workflows/pr375-pr380-integration.yml`: pure planner execution/artifacts,
+  plus real compilation before slow mutants, preserving complete Linux scope.
+- This document and WIP handoff describe the contract and evidence boundaries.
+
+Residual boundaries: Candidate uniqueness is among explicitly offered source
+intervals only, not an enumeration/exclusion of all physical producers. A caller
+must retain original request/receipt context and re-enter existing admission;
+Candidate metadata is not a resource or execution lease. Whole checked views,
+one anchor and 2-3 selected replicas remain the minimal scope. General view slicing,
+cross queue, ordinary automatic selection, physical latest-writer authority,
+hardware device-loss recovery and ordinary F2/F3 correctness are not proved here.
+No further Copy expression combinations were added; that acceptance stage remains
+closed. This evidence-only documentation does not retrigger unchanged source CI.
 
 
 The first Linux run

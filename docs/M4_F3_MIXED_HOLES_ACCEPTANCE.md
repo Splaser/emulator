@@ -1,5 +1,9 @@
 # M4/F3: mixed-root internal holes and Copy provenance ceiling
 
+The next [bounded reconciliation candidate planner](M4_F3_BOUNDED_RECONCILIATION_PLANNER.md)
+now has its first accepted implementation. The Copy expression ceiling and
+production-authority boundaries recorded here remain unchanged.
+
 Baseline: `71ed2ddbed` (accepted implementation `d223b5ca33`). This round closes
 the controlled Copy combination acceptance stage. Production `BuildBatch`,
 `HasRoot`, Current Content Gate, checked submission, queue synchronization,

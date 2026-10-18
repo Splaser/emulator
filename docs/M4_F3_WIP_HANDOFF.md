@@ -587,3 +587,47 @@ eligibility blocked; original F3 still has two expected 99/observed 10 failures
 (exit 42), F2 backing 77/cache 10. Cross queue Unknown, no ordinary automatic
 replica selection, no latest-writer authority or Draw/Dispatch expansion. Android
 was skipped. Evidence-only documentation does not retrigger unchanged source CI.
+
+
+### Bounded Reconciliation Planner: minimal candidate generation (2026-10-18)
+
+Runtime implementation `374977121d`, receipt/mutant acceptance fix `6a652ed561`
+and naming/fail-fast fix `4b856d0921` add a stateless spatial candidate generator
+and read-only actual-evidence Scheduler adapter. One known GuestBackingEpoch,
+one contiguous complete checked view and 2-3 explicit staged replicas are allowed.
+Source RootSpans are explicitly offered patch intervals, not a physical producer
+registry. A unique verified offer emits a Copy region; differing overlapping
+roots/projections refuse, equivalent overlapping offers remain Unknown/ambiguous,
+and unverifiable sources or target complements remain Unknown. No root/revision/
+tick/completion-order election or physical content authority is inferred. Output
+is owned existing BuildBatch metadata; query success is not an admission lease.
+
+[Linux-only run 39123951599](https://github.com/Splaser/emulator/actions/runs/39123951599)
+passed actual production/native compilation, CLI/shader/tests, all five CTest
+processes and the complete registration/coherency/backing/lifecycle regressions.
+The existing Vulkan layout uses generated first/fourth-hop candidates through
+original admission, including actual legacy source / batch target receipt inputs:
+398 assertions plus three repeats with full readback and root/current oracles.
+Pure logic has 128 byte oracles, three repeats and 12 expected assertion mutants;
+24 extracted-body query/admission modes plus three full fixture repeats and all
+78 mutations pass. Failure/prefix/uncertainty injection remains simulated evidence.
+All 24+6 input hashes and exact source match Git blobs. Complete job/artifact,
+generated-source/mutation/repeat logs and an independently verified index are in
+`.diagnostics/ci-39123951599/`.
+
+The first run `39122121531` failed because a budget mutant left a counter unused
+under Linux GCC; its explicit discard now preserves assertion-based mutation
+sensitivity without weakening warnings. Run `39122571156` passed all 90 mutants
+then found Scheduler State/state name shadowing; only names changed. Both failed
+artifacts/job logs are retained in their respective `.diagnostics/ci-.../` folders.
+Real translation units now compile before the slow mutation loop for faster failure.
+See [M4_F3_BOUNDED_RECONCILIATION_PLANNER.md](M4_F3_BOUNDED_RECONCILIATION_PLANNER.md)
+for the API, deterministic reasons, changed files, scope and full acceptance.
+
+Copy combination expression remains stage-capped; no new Copy forms were added.
+This is the first bounded candidate-planner step, not full replica reconciliation.
+It does not auto-select ordinary BufferCache replicas, publish latest-writer
+authority, enable cross queue or add Draw/Dispatch producers. Cross queue remains
+Unknown, restricted production eligibility blocked and F2/F3 Open. Original F3
+fixed-required still fails two aliases (99 versus 10, exit 42); F2 backing77/cache10.
+Android was skipped. Evidence-only documentation does not rerun unchanged source CI.
