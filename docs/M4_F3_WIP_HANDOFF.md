@@ -706,3 +706,36 @@ artifacts and an independently verified index are in `.diagnostics/ci-3913459051
 Android skipped; original F2 cache10/backing77 and F3 aliases99/10/exit42 retained.
 Only controlled invalidation is proved; ordinary producer enrollment and an owned
 exclusion provider remain unimplemented, so production closure stays Unknown.
+
+## 2026-10-19: bounded private allocation provider accepted
+
+Source `3d271fc313322403a451cf6e4fd2409504530ff9` implements the first real
+exclusion provider only for fresh private Linux allocations: one unexported CPU
+mapping and 2-3 fresh staged replicas, no existing guest/native-resource adoption.
+Actual OS read-only protection precedes admission, existing physical alias fan-out
+precedes recording, and the existing checked transfer retains the guard through
+real completion. Unknown/epoch loss/retirement/early drop seals the domain and
+keeps CPU protection and native retention through trusted-idle retirement. Old
+receipt polling cannot release a newer guard. Weak domain references cannot keep
+VMA pins alive past renderer lifetime. Private CPU writes only invalidate; no
+reconciliation or content authority is published.
+
+[Linux run 39140867733](https://github.com/Splaser/emulator/actions/runs/39140867733)
+passed: real kernel store exclusion with six assertion mutants and three repeats;
+twelve extracted-body provider modes, four new mutants within 91 total, and three
+fixture repeats; actual native Vulkan 430 assertions in each of three runs; existing
+12 Planner/20 coverage mutants, all five CTest processes and complete backing,
+coherency/lifecycle regressions. Kernel-unit completion and fixture GPU failures
+are injected; native checked completion/readback is real. 28+6+4+4 hash entries
+match the exact source. Full logs and an independent acceptance verifier/index
+are archived in `.diagnostics/ci-39140867733/`. Android skipped. This completed
+run was recovered after workstation shutdown without duplicate CI dispatch.
+
+Original F2 cache10/backing77 and F3 aliases99/10/fixed-required exit42 remain.
+Ordinary guest/NCE/fastmem/raw-pointer exclusion and cross queue stay Unknown;
+restricted production admission is blocked, F2/F3 Open. No ordinary automatic
+replica selection, Draw/Dispatch expansion or physical latest-writer authority.
+Do not relabel private Linux native-store protection as an ARM NCE runtime hook.
+Planner/Copy expression stays frozen. Future guest adoption requires enforcement
+of all writable aliases across asynchronous effects, not a coverage-query result.
+See [provider contract and acceptance](M4_F3_PRIVATE_PRODUCER_PROVIDER.md).

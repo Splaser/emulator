@@ -114,5 +114,53 @@ inspection helpers are not production capability exports.
 
 All previous Copy/Planner/coverage mutants and original F2/F3 negative witnesses
 remain in Linux CI. The real Rasterizer translation unit is now included in the
-early compile step. Android is not requested. Exact acceptance is recorded after
-the Linux run completes.
+early compile step. Android is not requested.
+
+## Accepted source and archived evidence
+
+Source `3d271fc313322403a451cf6e4fd2409504530ff9` passed
+[Linux run 39140867733](https://github.com/Splaser/emulator/actions/runs/39140867733)
+on 2026-10-19 Asia/Taipei. The Linux job completed successfully; Android was
+skipped. Recovery after workstation shutdown read this completed run rather than
+dispatching a duplicate validation.
+
+- Real Linux kernel probes passed, including three repeats: native instruction
+  faults and competing-thread kernel stores were denied while protected. The
+  deliberately unprotected baseline and all six kernel mutants failed assertions.
+  Completion certificates in this kernel-only unit are injected, not GPU proof.
+- The extracted-production-body suite passed all twelve private-domain modes and
+  three repeats. All 91 assertion mutants, including the four new provider checks,
+  failed as expected. GPU failure/completion here is simulated; Linux protection
+  is real. Existing 12 Planner and 20 coverage-contract mutants also failed their
+  assertions as expected; these do not prove ordinary producer exclusion.
+- Real native Vulkan passed **430 assertions** in each of three provenance runs,
+  including private-domain creation, checked completion/release, physical alias
+  fan-out, blocked post-admission CPU entry and actual readback. Existing controlled
+  Copy/Planner, four-hop receipt and untouched-complement checks remain covered.
+- All five CTest processes and complete Linux coherency, lifecycle, registration
+  and backing regressions passed. Scheduler, BufferCache, Rasterizer and the
+  native test entry point were compiled before the runtime checks.
+- Original F2 still reports expected 77 / cache 10 / backing 77. Original F3 still
+  reports expected 99 / observed 10 for full and partial aliases; fixed-required
+  mode retains two failed assertions and exit 42. Neither defect is closed.
+
+Full job log and downloaded artifact are archived under
+`.diagnostics/ci-39140867733/`. Its independent
+`verify-private-provider-acceptance.py` and `verified-acceptance.json` check all
+28+6+4+4 manifest entries against the exact Git source, assertion-failing mutation
+logs, three-repeat markers, native results, CTest and original negative witnesses.
+The downloaded artifact retains the complete model, kernel and Vulkan logs.
+
+Implementation files are the new `vk_private_producer_guard.h`, Scheduler guard
+retention/completion/quarantine, private Runtime factory and GPU-owner Rasterizer
+facade. Tests add kernel probes/runner, privileged inspection helpers, twelve-mode
+fixture and native Vulkan coverage; existing extraction runners and Linux workflow
+were extended. No ordinary BufferCache automatic-selection path was changed.
+
+The accepted positive domain remains fresh, unexported private Linux allocations.
+Existing guest/NCE backing, raw-pointer enrollment, cross queue and ordinary
+Draw/Dispatch remain Unknown. CPU/staged reconciliation and physical latest-writer
+authority are absent. Planner expression is frozen; F2/F3 and restricted production
+admission remain Open/blocked respectively. Any future guest-backed provider needs
+real exclusion over every writable alias for its entire asynchronous lifetime;
+neither this private domain nor a successful coverage query supplies that lease.
