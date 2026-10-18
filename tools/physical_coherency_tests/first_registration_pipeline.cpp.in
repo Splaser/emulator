@@ -16,6 +16,7 @@
 // @ALIAS_CONTAINER@
 struct Allocation { std::vector<u8> bytes; explicit Allocation(size_t size):bytes(size) {} };
 struct Driver {
+    std::function<void()> on_enqueue;
     VkResult submit_result=VK_SUCCESS,counter_result=VK_SUCCESS,wait_result=VK_SUCCESS,flush_result=VK_SUCCESS,invalidate_result=VK_SUCCESS;
     u64 counter=0,submitted_tick=0;
     size_t submissions=0,barriers=0,reported_losses=0;
@@ -155,7 +156,7 @@ public:
     std::deque<std::function<void(vk::CommandBuffer,vk::CommandBuffer)>> commands;
     struct Chunk {
         decltype(commands)* queue;
-        template<class T> bool Record(T& command) {queue->emplace_back(std::move(command));return true;}
+        template<class T> bool Record(T& command) {if(driver->on_enqueue) driver->on_enqueue();queue->emplace_back(std::move(command));return true;}
         void MarkSubmit() {}
     } chunk_storage{&commands};Chunk* chunk=&chunk_storage;
     explicit Scheduler(Device& device_):device{device_},master_semaphore{std::make_unique<MasterSemaphore>(device_)} {}
@@ -177,6 +178,11 @@ public:
     WriteState PollCheckedTransfer(const Transfer&) const noexcept;
     const TransferContent* CompletedTransferContent(const Transfer&) const noexcept;
     void RevokeBufferContent(VkBuffer,u64,u64) noexcept;
+    bool InvalidatePhysicalWrite(const VideoCommon::PhysicalWriteIdentity&,u64,u64) noexcept;
+    bool FanoutRangeForTest(const Transfer& transfer,u32 slot,u64 offset,u64 size) const {
+        return transfer->current_ranges[slot].Contains(offset,size);
+    }
+    bool FanoutDomainForTest(const Transfer& transfer) const {return transfer->current_eligible;}
     void RecordBufferFill(VkBuffer,u64,u64,u32);
     void RecordBufferCopy(VkBuffer,VkBuffer,std::span<const VkBufferCopy>,bool,bool = false);
     void ForgetTransferSyncEvidenceForTest(const Transfer& transfer) {

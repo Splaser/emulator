@@ -148,6 +148,41 @@ Scheduler::WriteState Scheduler::PollCheckedWrite(const Write& write) const noex
     return emission == Emission::Skipped ? WriteState::Skipped : WriteState::Complete;
 }
 
+bool Scheduler::InvalidatePhysicalWrite(const VideoCommon::PhysicalWriteIdentity& writer,
+                                       u64 offset, u64 size) noexcept {
+    const auto written = writer.Slice(offset, size);
+    if (!written || !writer.CapturedEpochCurrent()) {
+        RevokeTransferContentEligibility();
+        return false;
+    }
+    for (const auto& transfer : checked_transfers) {
+        if (!transfer->current_eligible) continue;
+        for (size_t i = 0; i < transfer->resources.size(); ++i) {
+            const auto& resource = transfer->resources[i];
+            const auto& physical = resource.physical;
+            const auto& pin = resource.pin;
+            if (!physical || !physical->CapturedEpochCurrent() || !pin.IsUsable() ||
+                !pin.ContentEligible() || physical->Representation() != pin.Identity() ||
+                physical->NativeOffset() != pin.Offset() || physical->Size() != pin.Size()) {
+                transfer->current_eligible = false;
+                break;
+            }
+            if (physical->Backing() != written->Backing()) continue;
+            for (const auto& target : physical->Segments()) {
+                for (const auto& source : written->Segments()) {
+                    const auto begin = std::max(target.physical_offset, source.physical_offset);
+                    const auto end = std::min(target.physical_offset + target.length,
+                                              source.physical_offset + source.length);
+                    if (begin < end)
+                        transfer->current_ranges[i].Revoke(
+                            target.logical_offset + begin - target.physical_offset, end - begin);
+                }
+            }
+        }
+    }
+    return true;
+}
+
 void Scheduler::RevokeBufferContent(VkBuffer destination, u64 offset, u64 size) noexcept {
     if (!destination || !size || size > std::numeric_limits<u64>::max() - offset) {
         RevokeTransferContentEligibility();

@@ -60,7 +60,7 @@ methods = '\n'.join(body(cpp, marker) for marker in [
     'Scheduler::Transfer Scheduler::RecordTransferBatch(',
     'Scheduler::Transfer Scheduler::RecordTransferBatchImpl(', 'bool Scheduler::CompletedReplicaCopyHasRoot(', 'bool Scheduler::CompletedReplicaCopy(',
     'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
-    'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
+    'bool Scheduler::InvalidatePhysicalWrite(', 'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
     'const TransferContent* Scheduler::CompletedTransferContent(',
     'void Scheduler::RetireCheckedWritesAfterDeviceIdle('])
 master = 'src/video_core/renderer_vulkan/vk_master_semaphore.cpp'
@@ -77,7 +77,7 @@ for key, value in [('CHECKED_SUBMISSION', checked), ('SUBMISSION_METHODS', metho
                                           '    [[nodiscard]] VkResult PollTimeline(')),
                    ('RAW_STORAGE_BIND', '')]:
     scaffold = scaffold.replace('// @' + key + '@', value)
-scaffold = scaffold.replace('// @TRANSFER_MAPPING_GATE@', 'template <typename Memory>\n' +
+scaffold = scaffold.replace('// @TRANSFER_MAPPING_GATE@', 'template <typename Memory>\n' + body(header, '    Transfer RecordControlledPhysicalFill(') + '\ntemplate <typename Memory>\n' +
                            body(header, '    const TransferContent* TransferContentForMapping(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContent(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContentRange(') +
@@ -142,7 +142,8 @@ if a.content:
     source += read('tools/physical_coherency_tests/multi_region_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/mixed_holes_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/reconciliation_planner_fixture.cpp.in')
-source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();TestCombinedReplicaCopy();TestMultiRegionReplicaCopy();TestMixedInternalHoles();TestReconciliationPlanner();' if a.content else '') + '}\n'
+    source += read('tools/physical_coherency_tests/physical_alias_invalidation_fixture.cpp.in')
+source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();TestCombinedReplicaCopy();TestMultiRegionReplicaCopy();TestMixedInternalHoles();TestReconciliationPlanner();TestPhysicalAliasInvalidation();' if a.content else '') + '}\n'
 command = [a.cxx, '-std=c++23', '-O1', '-Wall', '-Wextra', '-Werror',
            '-Wno-unused-parameter', '-Wno-missing-field-initializers',
            '-I', str(out / 'stubs'), '-I', str(root / 'src'),
@@ -165,6 +166,30 @@ if result.returncode:
     raise RuntimeError(result.stderr)
 if a.positive_only:
     raise SystemExit(0)
+if a.content:
+    for name, guard, replacement in [
+        ('fanout-without-physical-revocation', 'if (!InvalidatePhysicalWrite(*physical, offset, size)) return {};', ''),
+        ('fanout-after-recording', 'if (!InvalidatePhysicalWrite(*physical, offset, size)) return {};', ''),
+        ('fanout-native-only', 'if (physical->Backing() != written->Backing()) continue;',
+         'if (pin.Identity() != writer.Representation() || physical->Backing() != written->Backing()) continue;'),
+        ('fanout-without-backing-identity', 'if (physical->Backing() != written->Backing()) continue;', ''),
+        ('fanout-wrong-local-projection', 'target.logical_offset + begin - target.physical_offset, end - begin',
+         'begin - source.physical_offset, end - begin'),
+        ('fanout-missing-page-projection', 'target.logical_offset + begin - target.physical_offset, end - begin',
+         'begin - target.physical_offset, end - begin'),
+        ('fanout-whole-pin', 'target.logical_offset + begin - target.physical_offset, end - begin', '0, pin.Size()'),
+        ('fanout-whole-writer', 'const auto written = writer.Slice(offset, size);',
+         'const auto written = writer.Slice(0, writer.Size()); (void)offset; (void)size;'),
+        ('fanout-stale-writer', 'if (!written || !writer.CapturedEpochCurrent())', 'if (!written)')]:
+        assert source.count(guard)==1,name
+        changed=source.replace(guard,replacement)
+        if name=='fanout-after-recording':
+            changed=changed.replace('return RecordTransferBatch(buffers, commands);',
+                'const auto result = RecordTransferBatch(buffers, commands);\n        (void)InvalidatePhysicalWrite(*physical, offset, size); return result;')
+        result=run(name,changed)
+        if result.returncode==0 or 'Assertion' not in result.stderr:
+            raise RuntimeError(f'{name} failed incorrectly: {result.returncode} {result.stderr}')
+        print('PASS expected physical fan-out mutation assertion:',name)
 for name, guard, replacement in [
     ('missing-native-identity', 'a->Representation() != b->Representation()', 'false'),
     ('missing-range-coverage', 'if (!advance) return false;', 'if (!advance) break;'),

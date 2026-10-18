@@ -1264,25 +1264,31 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     using Kind = Content::Kind;
     std::vector<Vulkan::Scheduler::TransferBuffer> content_targets;
     Vulkan::Scheduler::Transfer content_transfer;
-    const std::array<Content::Command, 4> content_commands{{
+    const std::array<Content::Command, 5> content_commands{{
         {Kind::Fill, 1, 0, 0, 0, 64, 0x0a0a0a0a},
         {Kind::Fill, 0, 0, 0, 0, 64, 0x63636363},
         {Kind::Copy, 1, 0, 16, 16, 16},
         {Kind::Fill, 0, 0, 0, 0, 64, 0x4d4d4d4d},
+        {Kind::Fill, 2, 0, 0, 0, 64, 0x37373737},
     }};
     on_gpu([&] {
         enabled = rasterizer.SetControlledStorageWriteObservation(true);
         Access::RetireOrdinary(rasterizer, A);
         Access::RetireOrdinary(rasterizer, B);
+        Access::RetireOrdinary(rasterizer, C);
         content_targets.push_back(Access::ContentTransferTarget(rasterizer, A, 64));
         content_targets.push_back(Access::ContentTransferTarget(rasterizer, B, 64));
+        content_targets.push_back(Access::ContentTransferTarget(rasterizer, C, 64));
         renderer->scheduler.Finish();
         content_transfer = renderer->scheduler.RecordTransferBatch(content_targets, content_commands);
     });
     REQUIRE(enabled);
     REQUIRE(content_transfer);
     REQUIRE(content_targets[0].pin.Identity() != content_targets[1].pin.Identity());
+    REQUIRE(content_targets[0].pin.Identity() != content_targets[2].pin.Identity());
+    REQUIRE(content_targets[1].pin.Identity() != content_targets[2].pin.Identity());
     REQUIRE(content_targets[0].physical->OverlapsPhysical(*content_targets[1].physical));
+    REQUIRE(content_targets[0].physical->OverlapsPhysical(*content_targets[2].physical));
     const auto finish_content = [&](const Vulkan::Scheduler::Transfer& transfer) {
         REQUIRE(Until([&] {
             State state{};
@@ -1323,8 +1329,22 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     REQUIRE(content_b == mixed);
     const Content *left_content{}, *middle_content{}, *right_content{};
     const auto immutable_history = content_transfer->PlannedContent();
+    bool physical_fill_recorded{};
+    Vulkan::Scheduler::Transfer physical_fill_effect;
+    std::array<bool, 3> physical_alias_oracle{};
     on_gpu([&] {
-        Access::FillPinRange(rasterizer, content_targets[1].pin, 16, 16, 0xeeeeeeee);
+        physical_fill_effect = renderer->scheduler.RecordControlledPhysicalFill(
+            content_transfer, device_memory, 1, 16, 16, 0xeeeeeeee);
+        physical_fill_recorded = bool(physical_fill_effect);
+        for (u32 slot = 0; slot < 3; ++slot) {
+            bool valid = true;
+            for (u64 byte = 0; byte < 64; ++byte) {
+                const bool eligible = renderer->scheduler.CurrentTransferContentRange(
+                    content_transfer, device_memory, slot, byte, 1) != nullptr;
+                valid = valid && eligible == (byte < 16 || byte >= 32);
+            }
+            physical_alias_oracle[slot] = valid;
+        }
         left_content = renderer->scheduler.CurrentTransferContentRange(content_transfer, device_memory, 1, 0, 16);
         middle_content = renderer->scheduler.CurrentTransferContentRange(content_transfer, device_memory, 1, 16, 16);
         right_content = renderer->scheduler.CurrentTransferContentRange(content_transfer, device_memory, 1, 32, 32);
@@ -1333,7 +1353,9 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     REQUIRE(left_content == immutable_history.get());
     REQUIRE(middle_content == nullptr);
     REQUIRE(right_content == immutable_history.get());
-    REQUIRE(current_content == immutable_history.get()); // Different native replica, same physical bytes.
+    REQUIRE(physical_fill_recorded);
+    REQUIRE(std::ranges::all_of(physical_alias_oracle, [](bool valid) { return valid; }));
+    REQUIRE(current_content == nullptr); // All physical aliases lose only the intersecting old qualification.
     on_gpu([&] { current_root = renderer->scheduler.CurrentTransferHasRoot(content_transfer, device_memory, 1, 0, 16, 0, 0); });
     REQUIRE(current_root);
     on_gpu([&] { current_root = renderer->scheduler.CurrentTransferHasRoot(content_transfer, device_memory, 1, 16, 16, 1, 16); });
@@ -1341,6 +1363,16 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     on_gpu([&] { content_b = Access::ReadPin(rasterizer, content_targets[1].pin); });
     std::fill(mixed.begin() + 16, mixed.begin() + 32, u8{238});
     REQUIRE(content_b == mixed);
+    std::vector<u8> physical_alias_a, physical_alias_c;
+    on_gpu([&] {
+        physical_alias_a = Access::ReadPin(rasterizer, content_targets[0].pin);
+        physical_alias_c = Access::ReadPin(rasterizer, content_targets[2].pin);
+    });
+    REQUIRE(physical_alias_a == std::vector<u8>(64, 77));
+    REQUIRE(physical_alias_c == std::vector<u8>(64, 55));
+    REQUIRE(immutable_history->HasRoot(0, 16, 16, 3, 16));
+    REQUIRE(immutable_history->HasRoot(2, 16, 16, 4, 16));
+    std::cout << "PASS native physical-alias fan-out before Fill: three allocations, 192-byte gate oracle, unchanged peers and history\n";
     REQUIRE(immutable_history->HasRoot(1, 16, 16, 1, 16)); // History still records the earlier 99.
     Vulkan::Scheduler::Transfer unknown_root;
     const std::array<Content::Command, 1> copy_only{{{Kind::Copy, 1, 0, 0, 0, 64}}};

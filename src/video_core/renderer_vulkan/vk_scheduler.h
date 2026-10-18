@@ -567,6 +567,43 @@ public:
         EnqueueCommand(std::forward<T>(command));
     }
 
+    // GPU/cache-thread only, before possible effects. Invalidates all retained
+    // current gates intersecting the saved physical write. No authority/lease.
+    [[nodiscard]] bool InvalidatePhysicalWrite(
+        const VideoCommon::PhysicalWriteIdentity& writer, u64 offset, u64 size) noexcept;
+
+    // Explicit isolated harness endpoint. Retained resource ownership is required;
+    // the caller must independently exclude other producers through completion.
+    // Returned transfer owns this new effect through existing retirement rules;
+    // it is NOT completed or admitted for ordinary production.
+    template <typename Memory>
+    Transfer RecordControlledPhysicalFill(const Transfer& transfer, const Memory& memory,
+                                         u32 buffer, u64 offset, u64 size, u32 value) {
+        if (!transfer || transfer->owner != submission_owner || transfer->retired ||
+            buffer >= transfer->resources.size()) return {};
+        if (PollCheckedTransfer(transfer) != WriteState::Complete ||
+            current_content_uncertain.load(std::memory_order_acquire)) {
+            RevokeTransferContentEligibility();
+            return {};
+        }
+        const auto& resource = transfer->resources[buffer];
+        const auto& pin = resource.pin;
+        const auto& physical = resource.physical;
+        if (!pin.IsUsable() || !pin.CopyProvenanceEligible() || !physical ||
+            physical->Representation() != pin.Identity() || physical->NativeOffset() != pin.Offset() ||
+            physical->Size() != pin.Size() || !physical->MatchesCurrent(memory) ||
+            !size || offset >= pin.Size() || size > pin.Size() - offset ||
+            ((pin.Offset() + offset) | size) % 4) {
+            RevokeTransferContentEligibility();
+            return {};
+        }
+        if (!InvalidatePhysicalWrite(*physical, offset, size)) return {};
+        const std::array<TransferBuffer, 1> buffers{{resource}};
+        const std::array<TransferContent::Command, 1> commands{{
+            {TransferContent::Kind::Fill, 0, 0, offset, 0, size, value}}};
+        return RecordTransferBatch(buffers, commands);
+    }
+
     // GPU/cache-thread only. Unclassified reads/disjoint operations also conservatively cancel.
 private:
     void RevokeBufferContent(VkBuffer destination, u64 offset, u64 size) noexcept;

@@ -100,7 +100,7 @@ for marker in ['Scheduler::Submission Scheduler::FlushChecked(',
                'Scheduler::Transfer Scheduler::RecordTransferBatch(',
                'Scheduler::Transfer Scheduler::RecordTransferBatchImpl(', 'bool Scheduler::CompletedReplicaCopyHasRoot(', 'bool Scheduler::CompletedReplicaCopy(',
                'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
-               'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
+               'bool Scheduler::InvalidatePhysicalWrite(', 'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
                'const TransferContent* Scheduler::CompletedTransferContent(',
                'void Scheduler::RetireCheckedWritesAfterDeviceIdle(']:
     submission += body(scheduler_path, marker) + '\n'
@@ -157,7 +157,7 @@ template = template.replace('// @BUFFER_MAPPED@', body('src/video_core/renderer_
 template = template.replace('using DAddr=u64;',
     'using VideoCommon::ControlledBufferTransfer;\nusing VideoCommon::ControlledTransferPoll;\nusing DAddr=u64;')
 for name, value in [('POLL_TIMELINE', timeline), ('CHECKED_SUBMISSION', checked),
-                    ('TRANSFER_MAPPING_GATE', 'template <typename Memory>\n' + body(
+                    ('TRANSFER_MAPPING_GATE', 'template <typename Memory>\n' + body('src/video_core/renderer_vulkan/vk_scheduler.h', '    Transfer RecordControlledPhysicalFill(') + '\ntemplate <typename Memory>\n' + body(
                         'src/video_core/renderer_vulkan/vk_scheduler.h',
                         '    const TransferContent* TransferContentForMapping(') + '\ntemplate <typename Memory>\n' + body(
                         'src/video_core/renderer_vulkan/vk_scheduler.h',
