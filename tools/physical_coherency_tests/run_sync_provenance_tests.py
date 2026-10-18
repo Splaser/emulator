@@ -53,7 +53,7 @@ methods = '\n'.join(body(cpp, marker) for marker in [
     'bool Scheduler::HasConfirmedMemoryDependency(', 'void Scheduler::RecordProvenanceBarrier(',
     'Scheduler::WriteState Scheduler::PollCheckedWrite(',
     'Scheduler::Transfer Scheduler::RecordTransferBatch(',
-    'Scheduler::Transfer Scheduler::RecordTransferBatchImpl(', 'bool Scheduler::CompletedReplicaCopyHasRoot(',
+    'Scheduler::Transfer Scheduler::RecordTransferBatchImpl(', 'bool Scheduler::CompletedReplicaCopyHasRoot(', 'bool Scheduler::CompletedReplicaCopy(',
     'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
     'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
     'const TransferContent* Scheduler::CompletedTransferContent(',
@@ -131,7 +131,8 @@ if a.content:
     source += read('tools/physical_coherency_tests/transfer_content_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/replica_copy_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/mixed_replica_fixture.cpp.in')
-source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();' if a.content else '') + '}\n'
+    source += read('tools/physical_coherency_tests/destination_replica_fixture.cpp.in')
+source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();' if a.content else '') + '}\n'
 command = [a.cxx, '-std=c++23', '-O1', '-Wall', '-Wextra', '-Werror',
            '-Wno-unused-parameter', '-Wno-missing-field-initializers',
            '-I', str(out / 'stubs'), '-I', str(root / 'src'),
@@ -165,6 +166,9 @@ for name, guard, replacement in [
     print('PASS expected mutation failure:', name)
 if a.content:
     for name, guard, replacement, count in [
+        ('target-current-prefix-only', 'for (const auto& part : plan->DestinationRoots()) {', 'for (const auto& part : plan->DestinationRoots()) {\n                        if (&part != plan->DestinationRoots().data()) break;', 1),
+        ('target-without-completed-history', '!CompletedReplicaCopy(destination_receipt, parent)', 'false', 1),
+        ('target-without-history-identity', 'link->replica_copy->DestinationCopy() != (link->replica_destination ? link->replica_destination->replica_copy : nullptr)', 'false', 1),
         ('chain-without-ancestor-evidence', 'const auto& consumer = link->submission;', 'if (link != result) continue;\n    const auto& consumer = link->submission;', 1),
         ('chain-without-ancestor-storage', 'for (const auto& resource : link->resources)', 'if (link != result) continue;\n            for (const auto& resource : link->resources)', 1),
         ('chain-source-uses-history', 'CurrentReplicaCopyHasRoot(receipt, memory, parent, part.offset, part.size,\n                                                          part.fill, part.root_offset)', 'receipt->replica_copy->HasRoot(part.offset, part.size, part.fill, part.root_offset)', 1),
@@ -183,7 +187,7 @@ if a.content:
         ('replica-without-current-interval', '!CurrentTransferContentRange(result, memory, 1, offset, size)', 'false', 1),
         ('replica-without-exact-root', 'return result->replica_copy->HasRoot(offset, size, fill, root_offset);', 'return true;', 1),
         ('replica-without-current-source', '!current_source()', '(static_cast<void>(current_source), false)', 2),
-        ('replica-without-current-target', '!CurrentTransferHasRoot(parent, memory, request.destination, 0, destination.pin.Size(),\n                                    request.destination_fill, request.destination_root_offset)', 'false', 2)]:
+        ('replica-without-current-target', '!current_destination()', '(static_cast<void>(current_destination), false)', 2)]:
         assert source.count(guard) == count, name
         result = run(name, source.replace(guard, replacement))
         if result.returncode == 0 or 'Assertion' not in result.stderr:
@@ -220,6 +224,11 @@ if a.content:
         '#include "video_core/renderer_vulkan/vk_transfer_content.h"', '')
     expanded = expanded.replace('#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"', replica_header)
     for name, guard, replacement in [
+        ('target-without-complement-tail', 'if (preserved != destination_size) return {};', '/* missing complement suffix */'),
+        ('target-without-complement-order', 'part.offset != preserved || ', ''),
+        ('target-with-covered-complement', '(part.offset < destination_offset + size && destination_offset < part.offset + part.size) ||', ''),
+        ('target-without-owned-complements', 'std::copy(complements_.begin(), complements_.end(), destination_roots.begin());', '(void)complements_;'),
+        ('target-without-hop-limit', 'destination_copy->Depth() >= MaxHops || ', ''),
         ('mixed-without-tail-coverage', 'if (cursor != source_offset + size) return {};', '/* unchecked suffix */'),
         ('mixed-without-ordered-partition', 'part.offset != cursor || ', ''),
         ('mixed-without-historical-roots', '!(source_copy ? source_copy->HasRoot(part.offset, part.size, part.fill, part.root_offset)\n                              : parent->HasRoot(source, part.offset, part.size, part.fill, part.root_offset))', 'false'),

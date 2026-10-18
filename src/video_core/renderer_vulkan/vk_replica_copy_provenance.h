@@ -27,13 +27,15 @@ public:
     static std::optional<ReplicaCopyProvenance> Build(std::shared_ptr<const TransferContent> parent,
         Index source, Index destination, Offset source_offset, Offset destination_offset, Offset size,
         Offset destination_size, Index source_fill, Offset source_root, Index destination_fill, Offset destination_root,
-        std::shared_ptr<const ReplicaCopyProvenance> source_copy = {}, std::span<const RootSpan> roots = {}) {
+        std::shared_ptr<const ReplicaCopyProvenance> source_copy = {}, std::span<const RootSpan> roots = {},
+        std::shared_ptr<const ReplicaCopyProvenance> destination_copy = {}, std::span<const RootSpan> complements = {}) {
         if (!parent || source == destination || !size || (source_offset | destination_offset | size) % 4 ||
             size > std::numeric_limits<Offset>::max() - source_offset ||
             destination_offset >= destination_size || size > destination_size - destination_offset ||
             (source_copy && (source_copy->Depth() >= MaxHops || source_copy->ParentContent() != parent ||
                              source_copy->DestinationBuffer() != source)) ||
-            !parent->HasRoot(destination, 0, destination_size, destination_fill, destination_root)) return {};
+            (destination_copy && (destination_copy->Depth() >= MaxHops || destination_copy->ParentContent() != parent ||
+                                  destination_copy->DestinationBuffer() != destination))) return {};
         const RootSpan single{source_offset, size, source_fill, source_root};
         if (roots.empty()) roots = {&single, 1};
         if (roots.size() > MaxRootSpans) return {};
@@ -45,8 +47,30 @@ public:
             cursor += part.size;
         }
         if (cursor != source_offset + size) return {};
+        std::array<RootSpan, 2> legacy_complements{};
+        Index legacy_count{};
+        if (!destination_copy && complements.empty()) {
+            if (!parent->HasRoot(destination, 0, destination_size, destination_fill, destination_root)) return {};
+            if (destination_offset) legacy_complements[legacy_count++] = {0, destination_offset, destination_fill, destination_root};
+            if (destination_offset + size < destination_size) legacy_complements[legacy_count++] = {
+                destination_offset + size, destination_size - destination_offset - size,
+                destination_fill, destination_root + destination_offset + size};
+            complements = {legacy_complements.data(), legacy_count};
+        }
+        if (complements.size() > MaxRootSpans) return {};
+        Offset preserved{};
+        for (const auto& part : complements) {
+            if (preserved == destination_offset) preserved += size;
+            if (part.offset != preserved || !part.size || part.size > destination_size - preserved ||
+                (part.offset < destination_offset + size && destination_offset < part.offset + part.size) ||
+                !(destination_copy ? destination_copy->HasRoot(part.offset, part.size, part.fill, part.root_offset)
+                                   : parent->HasRoot(destination, part.offset, part.size, part.fill, part.root_offset))) return {};
+            preserved += part.size;
+        }
+        if (preserved == destination_offset) preserved += size;
+        if (preserved != destination_size) return {};
         return ReplicaCopyProvenance{std::move(parent), source, destination, source_offset,
-            destination_offset, size, destination_size, std::move(source_copy), roots};
+            destination_offset, size, destination_size, std::move(source_copy), roots, std::move(destination_copy), complements};
     }
     bool HasRoot(Offset offset, Offset size, Index fill, Offset root_offset) const noexcept {
         if (!size || offset >= destination_size || size > destination_size - offset ||
@@ -59,6 +83,8 @@ public:
             const auto parent_offset = copied ? source_offset + begin - destination_offset : begin;
             if (!(copied && source_copy
                     ? source_copy->HasRoot(parent_offset, end - begin, fill, root_offset + begin - offset)
+                    : !copied && destination_copy
+                    ? destination_copy->HasRoot(parent_offset, end - begin, fill, root_offset + begin - offset)
                     : parent->HasRoot(copied ? source : destination, parent_offset, end - begin,
                                       fill, root_offset + begin - offset))) return false;
             covered += end - begin;
@@ -70,7 +96,9 @@ public:
     }
     const std::shared_ptr<const TransferContent>& ParentContent() const noexcept { return parent; }
     const std::shared_ptr<const ReplicaCopyProvenance>& SourceCopy() const noexcept { return source_copy; }
+    const std::shared_ptr<const ReplicaCopyProvenance>& DestinationCopy() const noexcept { return destination_copy; }
     std::span<const RootSpan> SourceRoots() const noexcept { return {source_roots.data(), root_count}; }
+    std::span<const RootSpan> DestinationRoots() const noexcept { return {destination_roots.data(), complement_count}; }
     Index Depth() const noexcept { return depth; }
     Index SourceBuffer() const noexcept { return source; }
     Index DestinationBuffer() const noexcept { return destination; }
@@ -80,19 +108,25 @@ public:
 private:
     ReplicaCopyProvenance(std::shared_ptr<const TransferContent> parent_, Index source_, Index destination_,
         Offset source_offset_, Offset destination_offset_, Offset length_, Offset destination_size_,
-        std::shared_ptr<const ReplicaCopyProvenance> source_copy_, std::span<const RootSpan> roots_)
+        std::shared_ptr<const ReplicaCopyProvenance> source_copy_, std::span<const RootSpan> roots_,
+        std::shared_ptr<const ReplicaCopyProvenance> destination_copy_, std::span<const RootSpan> complements_)
         : parent{std::move(parent_)}, source{source_}, destination{destination_}, source_offset{source_offset_},
           destination_offset{destination_offset_}, length{length_}, destination_size{destination_size_},
-          source_copy{std::move(source_copy_)}, depth{source_copy ? source_copy->Depth() + 1 : 1},
-          root_count{static_cast<Index>(roots_.size())} {
+          source_copy{std::move(source_copy_)}, destination_copy{std::move(destination_copy_)},
+          depth{std::max(source_copy ? source_copy->Depth() : 0u, destination_copy ? destination_copy->Depth() : 0u) + 1},
+          root_count{static_cast<Index>(roots_.size())}, complement_count{static_cast<Index>(complements_.size())} {
         std::copy(roots_.begin(), roots_.end(), source_roots.begin());
+        std::copy(complements_.begin(), complements_.end(), destination_roots.begin());
     }
     std::shared_ptr<const TransferContent> parent;
     Index source, destination;
     Offset source_offset, destination_offset, length, destination_size;
     std::shared_ptr<const ReplicaCopyProvenance> source_copy;
+    std::shared_ptr<const ReplicaCopyProvenance> destination_copy;
     Index depth;
     std::array<RootSpan, MaxRootSpans> source_roots{};
     Index root_count{};
+    std::array<RootSpan, MaxRootSpans> destination_roots{};
+    Index complement_count{};
 };
 } // namespace Vulkan

@@ -94,7 +94,7 @@ for marker in ['Scheduler::Submission Scheduler::FlushChecked(',
                'void Scheduler::RecordProvenanceBarrier(',
                'Scheduler::WriteState Scheduler::PollCheckedWrite(',
                'Scheduler::Transfer Scheduler::RecordTransferBatch(',
-               'Scheduler::Transfer Scheduler::RecordTransferBatchImpl(', 'bool Scheduler::CompletedReplicaCopyHasRoot(',
+               'Scheduler::Transfer Scheduler::RecordTransferBatchImpl(', 'bool Scheduler::CompletedReplicaCopyHasRoot(', 'bool Scheduler::CompletedReplicaCopy(',
                'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
                'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
                'const TransferContent* Scheduler::CompletedTransferContent(',
@@ -752,9 +752,10 @@ sync_fixture = read('tools/physical_coherency_tests/sync_dependency_fixture.cpp.
 sync_fixture += '\n' + read('tools/physical_coherency_tests/transfer_content_fixture.cpp.in')
 sync_fixture += '\n' + read('tools/physical_coherency_tests/replica_copy_fixture.cpp.in')
 sync_fixture += '\n' + read('tools/physical_coherency_tests/mixed_replica_fixture.cpp.in')
+sync_fixture += '\n' + read('tools/physical_coherency_tests/destination_replica_fixture.cpp.in')
 observer = observer.replace('int main() {', sync_fixture + '\nint main() {')
 observer = observer.replace('    std::cout<<"PASS ordinary storage observer',
-                            '    TestSyncDependencies();\n    TestTransferContent();\n    TestReplicaCopy();\n    TestReplicaChain();\n    TestMixedReplicaCopy();\n    std::cout<<"PASS ordinary storage observer')
+                            '    TestSyncDependencies();\n    TestTransferContent();\n    TestReplicaCopy();\n    TestReplicaChain();\n    TestMixedReplicaCopy();\n    TestDestinationReplicaCopy();\n    std::cout<<"PASS ordinary storage observer')
 observer_cpp.write_text(observer)
 observer_exe = out / ('storage_observer.exe' if os.name == 'nt' else 'storage_observer')
 subprocess.run(cmd + [str(observer_cpp), '-o', str(observer_exe)], check=True)

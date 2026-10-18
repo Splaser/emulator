@@ -44,6 +44,81 @@ int main() {
     using Kind = Plan::Kind;
     using Provenance = Vulkan::ReplicaCopyProvenance;
     using RootSpan = Provenance::RootSpan;
+    // An independent byte array is the only overlay implementation used by this oracle.
+    const std::array<Plan::Offset,5> target_sizes{64,64,64,64,64};
+    std::vector<Plan::Command> target_fills;
+    for(u32 slot=0;slot<5;++slot) target_fills.push_back({Kind::Fill,slot,0,0,0,64,slot});
+    const auto target_seed=std::make_shared<const Plan>(*Plan::Build(target_sizes,target_fills));
+    for(u32 trial=0;trial<64;++trial) {
+        std::array<std::array<Plan::Root,64>,5> labels;
+        for(u32 slot=0;slot<5;++slot) for(u64 byte=0;byte<64;++byte) labels[slot][byte]={slot,byte};
+        const auto parts=[&](u32 slot,u64 begin,u64 end) {
+            std::vector<RootSpan> result;
+            for(u64 byte=begin;byte<end;++byte) {
+                const auto label=labels[slot][byte];
+                if(result.empty() || result.back().fill!=label.command || result.back().root_offset+result.back().size!=label.offset)
+                    result.push_back({byte,1,label.command,label.offset});
+                else ++result.back().size;
+            }
+            return result;
+        };
+        const auto complement=[&](u64 begin,u64 size) {
+            auto result=parts(2,0,begin);const auto right=parts(2,begin+size,64);
+            result.insert(result.end(),right.begin(),right.end());return result;
+        };
+        const auto overlay=[&](u32 source,u32 destination,u64 source_offset,u64 destination_offset,u64 size) {
+            for(u64 byte=0;byte<size;++byte) labels[destination][destination_offset+byte]=labels[source][source_offset+byte];
+        };
+        const auto check=[&](const Provenance& plan,u32 slot) {
+            for(u64 byte=0;byte<64;++byte) {
+                const auto label=labels[slot][byte];
+                assert(plan.HasRoot(byte,1,label.command,label.offset));
+                assert(!plan.HasRoot(byte,1,(label.command+1)%5,label.offset));
+            }
+        };
+        const u64 first_source=(trial/16%4)*4, first_target=16+(trial%4)*4;
+        const auto first=std::make_shared<const Provenance>(*Provenance::Build(target_seed,0,1,first_source,first_target,16,64,0,first_source,1,0));
+        overlay(0,1,first_source,first_target,16);check(*first,1);
+        const u64 second_source=first_target-8,second_target=8+(trial%4)*4;
+        const auto second_parts=parts(1,second_source,second_source+32);
+        const auto second=std::make_shared<const Provenance>(*Provenance::Build(target_seed,1,2,second_source,second_target,32,64,
+            Plan::Unknown,0,2,0,first,second_parts));
+        overlay(1,2,second_source,second_target,32);check(*second,2);
+        const auto old_target=labels[2];
+        const u64 third_source=(trial/4%8)*4,third_target=second_target+4;
+        auto third_complements=complement(third_target,16);const auto saved=third_complements;
+        const auto third=std::make_shared<const Provenance>(*Provenance::Build(target_seed,3,2,third_source,third_target,16,64,
+            3,third_source,Plan::Unknown,0,{}, {},second,third_complements));
+        assert(third->Depth()==3 && third->DestinationCopy()==second);
+        third_complements[0].fill=Plan::Unknown;third_complements.clear();
+        assert(std::ranges::equal(third->DestinationRoots(),saved));
+        overlay(3,2,third_source,third_target,16);check(*third,2);
+        const auto before_fourth=labels[2];
+        const auto fourth_source=first_target-4,fourth_target=second_target+8;
+        const auto fourth_parts=parts(1,fourth_source,fourth_source+24);
+        const auto fourth_complements=complement(fourth_target,24);
+        const auto fourth=Provenance::Build(target_seed,1,2,fourth_source,fourth_target,24,64,Plan::Unknown,0,Plan::Unknown,0,
+            first,fourth_parts,third,fourth_complements);
+        assert(fourth && fourth->Depth()==4);overlay(1,2,fourth_source,fourth_target,24);check(*fourth,2);
+        for(u64 byte=0;byte<64;++byte) {
+            assert(second->HasRoot(byte,1,old_target[byte].command,old_target[byte].offset));
+            assert(third->HasRoot(byte,1,before_fourth[byte].command,before_fourth[byte].offset));
+        }
+        assert(!Provenance::Build(target_seed,3,2,third_source,third_target,16,64,3,third_source,Plan::Unknown,0,{}, {},
+            std::make_shared<const Provenance>(*fourth),complement(third_target,16)));
+    }
+    const std::array<Plan::Offset,2> unknown_target_sizes{64,64};
+    const std::array<Plan::Command,3> known_sides{{{Kind::Fill,0,0,0,0,64,99},{Kind::Fill,1,0,0,0,8,10},{Kind::Fill,1,0,40,0,24,20}}};
+    const auto unknown_center=std::make_shared<const Plan>(*Plan::Build(unknown_target_sizes,known_sides));
+    const std::array<RootSpan,2> known_complements{{{0,8,1,0},{40,24,2,0}}};
+    const auto replaced=Provenance::Build(unknown_center,0,1,8,8,32,64,0,8,Plan::Unknown,0,{}, {},{},known_complements);
+    assert(replaced && replaced->HasRoot(0,8,1,0) && replaced->HasRoot(8,32,0,8) && replaced->HasRoot(40,24,2,0));
+    auto unknown_sides=known_sides;unknown_sides[1].destination_offset=4;unknown_sides[1].size=4;
+    const auto unknown_left=std::make_shared<const Plan>(*Plan::Build(unknown_target_sizes,unknown_sides));
+    assert(!Provenance::Build(unknown_left,0,1,8,8,32,64,0,8,0,0,{}, {},{},known_complements));
+    unknown_sides=known_sides;unknown_sides[2].size=20;
+    const auto unknown_right=std::make_shared<const Plan>(*Plan::Build(unknown_target_sizes,unknown_sides));
+    assert(!Provenance::Build(unknown_right,0,1,8,8,32,64,0,8,0,0,{}, {},{},known_complements));
     // Per-byte oracle derives the declarations independently, including shifted root projections.
     const std::array<Plan::Offset, 5> mixed_sizes{64, 64, 64, 64, 64};
     std::vector<Plan::Command> mixed_fills;
@@ -92,6 +167,12 @@ int main() {
     const std::array<Plan::Offset, 2> large_sizes{256, 256};
     const std::array<Plan::Command, 2> large_fills{{{Kind::Fill, 0, 0, 0, 0, 256, 99}, {Kind::Fill, 1, 0, 0, 0, 256, 10}}};
     const auto large_seed = std::make_shared<const Plan>(*Plan::Build(large_sizes, large_fills));
+    std::vector<RootSpan> target_capacity{{0,64,1,0}};
+    for(u64 byte=128;byte<190;++byte) target_capacity.push_back({byte,1,1,byte});
+    target_capacity.push_back({190,66,1,190});
+    assert(Provenance::Build(large_seed,0,1,64,64,64,256,0,64,1,0,{}, {},{},target_capacity));
+    target_capacity.back().size=65;target_capacity.push_back({255,1,1,255});
+    assert(!Provenance::Build(large_seed,0,1,64,64,64,256,0,64,1,0,{}, {},{},target_capacity));
     std::vector<RootSpan> capacity_parts;
     for (u64 byte = 0; byte < Provenance::MaxRootSpans - 1; ++byte) capacity_parts.push_back({byte, 1, 0, byte});
     capacity_parts.push_back({63, 65, 0, 63});
@@ -247,5 +328,5 @@ int main() {
     }
     std::cout << "PASS exact transfer content: partial copies, untouched roots, copy-of-copy, "
                  "source overwrite after copy, Unknown bytes, 512 content/2048 eligibility byte-oracle prefixes, "
-                 "256 multi-hop/256 mixed-source byte-oracle prefixes, bounds and fail-closed eligibility capacity\n";
+                 "256 multi-hop/256 mixed-source/256 mixed-target byte-oracle prefixes, bounds and fail-closed eligibility capacity\n";
 }

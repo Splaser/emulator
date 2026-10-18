@@ -440,3 +440,18 @@ input hashes match committed blobs; all 52 fixture logs and downloaded artifacts
 are retained in `.diagnostics/ci-39093574539/`. F3 still fails two fixed-required
 aliases (exit 42); F2 remains backing 77/cache 10. Android was intentionally
 skipped. This documentation-only evidence update does not rerun source CI.
+
+### Mixed-target partial-copy follow-up (2026-10-18)
+
+See [M4_F3_MIXED_TARGET_COPY.md](M4_F3_MIXED_TARGET_COPY.md). New receipts compose
+the exact source interval with an explicit complete untouched-target partition.
+Current root checks, saved native/pin/physical binding and mapping qualification
+apply to each retained piece; only covered bytes are replaced. Old ancestry stays
+immutable, and later writes revoke only overlap in current target qualification.
+Both dependency histories must be on one verified bounded submission spine, with
+actual queue adjacency, barriers and checked completion; four hops remain the
+limit. No cross-queue proof, ordinary automatic selection or latest-writer system
+is added. The new native test compares mixed-target C and fourth-hop E readback
+with an independent byte oracle, plus later writes and async target retirement.
+Linux validation is pending; Android remains on demand. F2/F3 remain Open and
+their fixed-required negative witnesses must still fail.

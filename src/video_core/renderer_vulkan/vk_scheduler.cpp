@@ -226,8 +226,9 @@ Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffe
 
 Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferBuffer> buffers,
     std::span<const TransferContent::Command> commands,
-    std::shared_ptr<const ReplicaCopyProvenance> replica_copy, Transfer parent, Transfer predecessor) {
+    std::shared_ptr<const ReplicaCopyProvenance> replica_copy, Transfer parent, Transfer predecessor, Transfer destination_history) {
     if (!predecessor) predecessor = parent;
+    const auto source_history = predecessor;
     if (replica_copy) {
         if (!parent || parent->replica_copy || replica_copy->ParentContent() != parent->content ||
             buffers.size() != 2 || commands.size() != 1 || commands[0].kind != TransferContent::Kind::Copy ||
@@ -248,6 +249,18 @@ Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferB
                 buffers[0].pin.Size() != predecessor->resources[1].pin.Size() ||
                 buffers[0].physical != predecessor->resources[1].physical) return {};
         } else if (replica_copy->SourceCopy()) return {};
+        if (destination_history) {
+            if (!destination_history->replica_copy || destination_history->replica_anchor != parent ||
+                destination_history->replica_copy != replica_copy->DestinationCopy() || destination_history->resources.size() != 2 ||
+                buffers[1].pin.Identity() != destination_history->resources[1].pin.Identity() ||
+                buffers[1].pin.Offset() != destination_history->resources[1].pin.Offset() ||
+                buffers[1].pin.Size() != destination_history->resources[1].pin.Size() ||
+                buffers[1].physical != destination_history->resources[1].physical) return {};
+            if (!predecessor->replica_copy || destination_history->replica_copy->Depth() > predecessor->replica_copy->Depth())
+                predecessor = destination_history;
+            if (!predecessor->IncludesAncestor(source_history) || !predecessor->IncludesAncestor(destination_history)) return {};
+        } else if (replica_copy->DestinationCopy()) return {};
+        if (replica_copy->Depth() != (predecessor->replica_copy ? predecessor->replica_copy->Depth() + 1 : 1)) return {};
     }
     if (observed_submission || !device.HasTimelineSemaphore() ||
         !submission_owner->load(std::memory_order_acquire) || checked_transfers.size() >= 16 ||
@@ -273,6 +286,8 @@ Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferB
         transfer->content = std::make_shared<const TransferContent>(std::move(*content));
         transfer->replica_copy = std::move(replica_copy);
         transfer->replica_parent = std::move(predecessor);
+        transfer->replica_source = source_history;
+        transfer->replica_destination = std::move(destination_history);
         transfer->replica_anchor = std::move(parent);
         transfer->submission = Submission{new CheckedSubmission{submission_owner}};
         checked_transfers.push_back(transfer); // Retain uncertain effects until trusted device idle.
@@ -397,6 +412,11 @@ const TransferContent* Scheduler::CompletedTransferContent(const Transfer& trans
 
 bool Scheduler::CompletedReplicaCopyHasRoot(const Transfer& result, const Transfer& parent,
     u64 offset, u64 size, TransferContent::Index fill, u64 root_offset) const noexcept {
+    if (!CompletedReplicaCopy(result, parent)) return false;
+    return result->replica_copy->HasRoot(offset, size, fill, root_offset);
+}
+
+bool Scheduler::CompletedReplicaCopy(const Transfer& result, const Transfer& parent) const noexcept {
     if (!result || !parent || !result->replica_copy || result->replica_anchor != parent ||
         result->replica_copy->ParentContent() != parent->content ||
         PollCheckedTransfer(result) != WriteState::Complete || PollCheckedTransfer(parent) != WriteState::Complete) return false;
@@ -405,7 +425,10 @@ bool Scheduler::CompletedReplicaCopyHasRoot(const Transfer& result, const Transf
         if (!link || !remaining || !link->replica_copy || link->replica_anchor != parent ||
             link->replica_copy->Depth() != remaining-- || !link->replica_parent ||
             (link != result && PollCheckedTransfer(link) != WriteState::Complete) ||
-            link->replica_copy->SourceCopy() != link->replica_parent->replica_copy) return false;
+            !link->replica_source || link->replica_copy->SourceCopy() != link->replica_source->replica_copy ||
+            link->replica_copy->DestinationCopy() != (link->replica_destination ? link->replica_destination->replica_copy : nullptr) ||
+            !link->replica_parent->IncludesAncestor(link->replica_source) ||
+            (link->replica_destination && !link->replica_parent->IncludesAncestor(link->replica_destination))) return false;
         const auto& consumer = link->submission;
         const auto& producer = link->replica_parent->submission;
         if (producer == consumer || producer->result.load(std::memory_order_acquire) != VK_SUCCESS ||
@@ -419,7 +442,7 @@ bool Scheduler::CompletedReplicaCopyHasRoot(const Transfer& result, const Transf
             !consumer->synchronization.ProvesRelease(link->positions[0], copy, later)) return false;
     }
     if (remaining) return false;
-    return result->replica_copy->HasRoot(offset, size, fill, root_offset);
+    return true;
 }
 
 Scheduler::ObservedWrites Scheduler::RecordObservedWrites(std::span<const WriteFootprint> footprints,

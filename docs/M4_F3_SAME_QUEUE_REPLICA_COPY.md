@@ -1,5 +1,9 @@
 # M4/F3: controlled same-queue replica copy
 
+For the later mixed-target partial-copy extension, see
+[M4_F3_MIXED_TARGET_COPY.md](M4_F3_MIXED_TARGET_COPY.md). The sections below retain
+the scope and validation of the earlier increments.
+
 This slice transfers exact content ancestry across two actual checked Vulkan
 submissions. The original one-hop slice is recorded below; the bounded multi-hop
 extension follows its validation record. It does not publish physical latest-writer authority, reconcile

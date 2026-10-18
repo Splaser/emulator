@@ -165,7 +165,8 @@ public:
     const VideoCommon::PhysicalWriteIdentity* CompletedPhysicalIdentity(const Write&) const noexcept;
     Transfer RecordTransferBatch(std::span<const TransferBuffer>,std::span<const TransferContent::Command>);
     Transfer RecordTransferBatchImpl(std::span<const TransferBuffer>,std::span<const TransferContent::Command>,
-        std::shared_ptr<const ReplicaCopyProvenance>,Transfer,Transfer = {});
+        std::shared_ptr<const ReplicaCopyProvenance>,Transfer,Transfer = {},Transfer = {});
+    bool CompletedReplicaCopy(const Transfer&,const Transfer&) const noexcept;
     bool CompletedReplicaCopyHasRoot(const Transfer&,const Transfer&,u64,u64,TransferContent::Index,u64) const noexcept;
     WriteState PollCheckedTransfer(const Transfer&) const noexcept;
     const TransferContent* CompletedTransferContent(const Transfer&) const noexcept;
@@ -176,6 +177,7 @@ public:
         transfer->submission->synchronization = {};
     }
     void BreakReplicaQueueLinkForTest(const Transfer& transfer) {transfer->submission->queue_predecessor.reset();}
+    void BreakDestinationDependencyForTest(const Transfer& transfer, const Transfer& wrong) {transfer->replica_destination=wrong;}
     void BreakReplicaQueueIdentityForTest(const Transfer& transfer) {transfer->submission->queue=reinterpret_cast<VkQueue>(uintptr_t{99});}
     Transfer ForgeReplicaForTest(const Transfer& parent, bool wrong_geometry) {
         auto plan = ReplicaCopyProvenance::Build(parent->content, 0, 1, 16, 16, 16, 64, 0, 16, 1, 0);
