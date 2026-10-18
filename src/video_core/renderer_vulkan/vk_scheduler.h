@@ -146,38 +146,38 @@ public:
     template <typename Memory>
     BoundedReconciliationPlanner::Result PlanControlledReconciliation(const Memory& memory,
                                                                     const ReconciliationRequest& request) {
-        using Planner=BoundedReconciliationPlanner;using Reason=Planner::Reason;using State=Planner::State;
-        const auto reject=[](State state,Reason reason) {return Planner::Result{state,reason,{}};};
+        using Planner=BoundedReconciliationPlanner;using Reason=Planner::Reason;using DecisionState=Planner::State;
+        const auto reject=[](DecisionState decision,Reason reason) {return Planner::Result{decision,reason,{}};};
         try {
             const auto& parent=request.anchor;
-            if (!parent || parent->replica_copy || request.replicas.size()<2) return reject(State::Refused,Reason::InvalidRequest);
-            if (request.replicas.size()>3) return reject(State::Refused,Reason::Budget);
-            if (parent->retired || parent->resources.empty()) return reject(State::Unknown,Reason::Retired);
+            if (!parent || parent->replica_copy || request.replicas.size()<2) return reject(DecisionState::Refused,Reason::InvalidRequest);
+            if (request.replicas.size()>3) return reject(DecisionState::Refused,Reason::Budget);
+            if (parent->retired || parent->resources.empty()) return reject(DecisionState::Unknown,Reason::Retired);
             std::vector<Planner::Replica> replicas;
             Transfer predecessor=parent;
             for (const auto& replica:request.replicas) {
-                if (replica.slot>=parent->resources.size()) return reject(State::Refused,Reason::InvalidRequest);
+                if (replica.slot>=parent->resources.size()) return reject(DecisionState::Refused,Reason::InvalidRequest);
                 const auto& resource=parent->resources[replica.slot];const auto& receipt=replica.receipt;
-                if (!resource.pin.IsUsable() || !resource.pin.ContentEligible()) return reject(State::Unknown,Reason::Retired);
-                if (!resource.pin.CopyProvenanceEligible()) return reject(State::Unknown,Reason::CurrentUnavailable);
+                if (!resource.pin.IsUsable() || !resource.pin.ContentEligible()) return reject(DecisionState::Unknown,Reason::Retired);
+                if (!resource.pin.CopyProvenanceEligible()) return reject(DecisionState::Unknown,Reason::CurrentUnavailable);
                 if (!resource.physical || resource.physical->Representation()!=resource.pin.Identity() ||
                     resource.physical->NativeOffset()!=resource.pin.Offset() || resource.physical->Size()!=resource.pin.Size())
-                    return reject(State::Refused,Reason::PhysicalGeometry);
+                    return reject(DecisionState::Refused,Reason::PhysicalGeometry);
                 if (receipt) {
                     if (!receipt->replica_copy || receipt->replica_anchor!=parent ||
                         receipt->replica_copy->DestinationBuffer()!=replica.slot || receipt->TargetIndex()>=receipt->resources.size())
-                        return reject(State::Refused,Reason::Ancestry);
+                        return reject(DecisionState::Refused,Reason::Ancestry);
                     const auto& original=receipt->resources[receipt->TargetIndex()];
                     if (original.pin.Identity()!=resource.pin.Identity() || original.pin.Offset()!=resource.pin.Offset() ||
                         original.pin.Size()!=resource.pin.Size() || original.physical!=resource.physical)
-                        return reject(State::Refused,Reason::Ancestry);
+                        return reject(DecisionState::Refused,Reason::Ancestry);
                     if (!predecessor->replica_copy || receipt->replica_copy->Depth()>predecessor->replica_copy->Depth()) predecessor=receipt;
                 }
                 replicas.push_back({replica.slot,resource.physical,receipt ? receipt->replica_copy : nullptr,replica.roots});
             }
             for (const auto& replica:request.replicas)
                 if (!predecessor->IncludesAncestor(replica.receipt ? replica.receipt : parent))
-                    return reject(State::Unknown,Reason::SynchronizationUnknown);
+                    return reject(DecisionState::Unknown,Reason::SynchronizationUnknown);
             const auto evidence=[&](const Planner::Replica& replica,const Planner::RootSpan& part) {
                 const auto& resource=parent->resources[replica.slot];
                 const Transfer* receipt=&parent;
@@ -195,7 +195,7 @@ public:
                 return current ? Reason::None : Reason::CurrentUnavailable;
             };
             return Planner::Build({parent->content,request.scope,request.destination,replicas},evidence);
-        } catch (...) {return reject(State::Unknown,Reason::EvidenceUnavailable);}
+        } catch (...) {return reject(DecisionState::Unknown,Reason::EvidenceUnavailable);}
     }
     template <typename Memory>
     Transfer RecordControlledReplicaCopies(const Memory& memory, const ReplicaCopiesRequest& request) {

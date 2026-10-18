@@ -150,3 +150,14 @@ a mutation assertion. The mutant now reads the counter explicitly while bypassin
 the condition; `-Werror` remains intact. The failed job/artifacts are retained in
 `.diagnostics/ci-39122121531/`. Receipt-input acceptance was also strengthened
 before the corrected source validation; production planner semantics are unchanged.
+
+
+[Run 39122571156](https://github.com/Splaser/emulator/actions/runs/39122571156)
+completed all 12 pure and 78 extracted-body assertion mutants, then production
+compilation rejected adapter-local `State` and `state` names shadowing Scheduler
+members. They were renamed to `DecisionState` / `decision` without semantic
+changes or warning suppression. The extracted fixture does not contain the whole
+private Scheduler layout, so this error needed real production translation-unit
+compilation. The workflow now compiles those units **before** the slow mutation
+loop; pure tests still precede any actual GPU execution. Complete failed evidence
+is retained in `.diagnostics/ci-39122571156/`.
