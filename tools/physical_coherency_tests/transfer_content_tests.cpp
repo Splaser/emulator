@@ -42,6 +42,67 @@ int main() {
     assert(!exhausted.Contains(0, 1));
     using Plan = Vulkan::TransferContent;
     using Kind = Plan::Kind;
+    using Provenance = Vulkan::ReplicaCopyProvenance;
+    using RootSpan = Provenance::RootSpan;
+    // Per-byte oracle derives the declarations independently, including shifted root projections.
+    const std::array<Plan::Offset, 5> mixed_sizes{64, 64, 64, 64, 64};
+    std::vector<Plan::Command> mixed_fills;
+    for (u32 i = 0; i < 5; ++i) mixed_fills.push_back({Kind::Fill, i, 0, 0, 0, 64, i});
+    const auto mixed_seed = std::make_shared<const Plan>(*Plan::Build(mixed_sizes, mixed_fills));
+    for (u32 trial = 0; trial < 64; ++trial) {
+        std::array<std::array<Plan::Root, 64>, 5> labels;
+        for (u32 buffer = 0; buffer < 5; ++buffer)
+            for (u64 byte = 0; byte < 64; ++byte) labels[buffer][byte] = {buffer, byte};
+        std::shared_ptr<const Provenance> prior;
+        u64 previous_begin{};
+        for (u32 hop = 1; hop <= 4; ++hop) {
+            const u64 source_begin = hop == 1 ? (trial / 16 % 4) * 4 : hop == 2 ? previous_begin - 4 : hop == 3 ? 0 : 4;
+            const u64 destination_begin = hop == 1 ? 16 + (trial % 4) * 4 : hop == 2 ? (trial / 4 % 8) * 4 : hop == 3 ? 0 : (trial / 8 % 3) * 4;
+            const u64 length = hop == 1 ? 16 : hop == 2 ? 24 : hop == 3 ? 64 : 56;
+            std::vector<RootSpan> parts;
+            for (u64 byte = source_begin; byte < source_begin + length; ++byte) {
+                const auto root = labels[hop - 1][byte];
+                if (parts.empty() || parts.back().fill != root.command ||
+                    parts.back().root_offset + parts.back().size != root.offset)
+                    parts.push_back({byte, 1, root.command, root.offset});
+                else ++parts.back().size;
+            }
+            const auto plan = Provenance::Build(mixed_seed, hop - 1, hop, source_begin, destination_begin,
+                length, 64, Plan::Unknown, 0, hop, 0, prior, parts);
+            assert(plan && std::ranges::equal(plan->SourceRoots(), parts));
+            const auto saved_parts = parts;
+            parts[0].fill = Plan::Unknown;parts.clear(); // Borrowed declarations never back immutable evidence.
+            assert(std::ranges::equal(plan->SourceRoots(), saved_parts));
+            for (u64 byte = 0; byte < length; ++byte)
+                labels[hop][destination_begin + byte] = labels[hop - 1][source_begin + byte];
+            for (u64 byte = 0; byte < 64; ++byte) {
+                const auto root = labels[hop][byte];
+                assert(plan->HasRoot(byte, 1, root.command, root.offset));
+                assert(!plan->HasRoot(byte, 1, (root.command + 1) % 5, root.offset));
+            }
+            if (hop == 2) {
+                assert(saved_parts.size() == 3);
+                assert(!plan->HasRoot(destination_begin, length, 0, saved_parts[1].root_offset));
+                assert(!plan->HasRoot(destination_begin, length, 1, source_begin));
+            }
+            prior = std::make_shared<const Provenance>(*plan);
+            previous_begin = destination_begin;
+        }
+    }
+    const std::array<Plan::Offset, 2> large_sizes{256, 256};
+    const std::array<Plan::Command, 2> large_fills{{{Kind::Fill, 0, 0, 0, 0, 256, 99}, {Kind::Fill, 1, 0, 0, 0, 256, 10}}};
+    const auto large_seed = std::make_shared<const Plan>(*Plan::Build(large_sizes, large_fills));
+    std::vector<RootSpan> capacity_parts;
+    for (u64 byte = 0; byte < Provenance::MaxRootSpans - 1; ++byte) capacity_parts.push_back({byte, 1, 0, byte});
+    capacity_parts.push_back({63, 65, 0, 63});
+    assert(Provenance::Build(large_seed, 0, 1, 0, 0, 128, 256, 0, 0, 1, 0, {}, capacity_parts));
+    capacity_parts.back().size = 64;capacity_parts.push_back({127, 1, 0, 127});
+    assert(!Provenance::Build(large_seed, 0, 1, 0, 0, 128, 256, 0, 0, 1, 0, {}, capacity_parts));
+    // Unknown bytes cannot be filled by a declaration, even if its adjacent pieces are known.
+    const std::array<Plan::Command, 2> partial_fills{{{Kind::Fill, 0, 0, 16, 0, 16, 99}, {Kind::Fill, 1, 0, 0, 0, 256, 10}}};
+    const auto partial_seed = std::make_shared<const Plan>(*Plan::Build(large_sizes, partial_fills));
+    const std::array<RootSpan, 3> unknown_parts{{{8, 8, 0, 0}, {16, 16, 0, 0}, {32, 8, 0, 16}}};
+    assert(!Provenance::Build(partial_seed, 0, 1, 8, 8, 32, 256, 0, 0, 1, 0, {}, unknown_parts));
     // Independent per-byte labels over four imported copies. Root IDs never become hop-local IDs.
     const std::array<Plan::Offset, 6> chain_sizes{64, 64, 64, 64, 64, 64};
     std::vector<Plan::Command> chain_fills;
@@ -186,5 +247,5 @@ int main() {
     }
     std::cout << "PASS exact transfer content: partial copies, untouched roots, copy-of-copy, "
                  "source overwrite after copy, Unknown bytes, 512 content/2048 eligibility byte-oracle prefixes, "
-                 "256 multi-hop byte-oracle prefixes, bounds and fail-closed eligibility capacity\n";
+                 "256 multi-hop/256 mixed-source byte-oracle prefixes, bounds and fail-closed eligibility capacity\n";
 }

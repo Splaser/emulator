@@ -1423,28 +1423,43 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     on_gpu([&] { replica_copy = renderer->scheduler.RecordControlledReplicaCopy(device_memory, replica_request); });
     REQUIRE(replica_copy);
     finish_content(replica_copy);
+    using ReplicaRoot = Vulkan::ReplicaCopyProvenance::RootSpan;
+    const std::array<ReplicaRoot, 3> mixed_source_roots{{{8, 8, 1, 8}, {16, 16, 0, 16}, {32, 8, 1, 32}}};
     // Readback would add an unchecked submission; record the next hop first.
     on_gpu([&] {
         replica_second = renderer->scheduler.RecordControlledReplicaCopy(device_memory,
-            {replica_parent, 1, 2, 20, 20, 8, 0, 2, 20, 0, replica_copy});
+            {replica_parent, 1, 2, 8, 8, 32, 0, 2, 8, 0, replica_copy, mixed_source_roots});
     });
     REQUIRE(replica_second);
     finish_content(replica_second);
     REQUIRE(replica_second->PlannedReplicaCopy()->Depth() == 2);
     REQUIRE(replica_second->PlannedReplicaCopy()->SourceCopy() == replica_copy->PlannedReplicaCopy());
-    std::array<bool, 4> second_roots{};
+    REQUIRE(std::ranges::equal(replica_second->PlannedReplicaCopy()->SourceRoots(), mixed_source_roots));
+    std::array<bool, 6> second_roots{};
     const auto query_second = [&] {
-        second_roots[0] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, 0, 20, 2, 0);
-        second_roots[1] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, 20, 8, 0, 20);
-        second_roots[2] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, 28, 36, 2, 28);
-        second_roots[3] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, 0, 64, 0, 0);
+        second_roots[0] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, 0, 8, 2, 0);
+        second_roots[1] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, 8, 8, 1, 8);
+        second_roots[2] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, 16, 16, 0, 16);
+        second_roots[3] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, 32, 8, 1, 32);
+        second_roots[4] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, 40, 24, 2, 40);
+        second_roots[5] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, 8, 32, 0, 8);
     };
     std::vector<u8> content_c;
     auto second_expected = std::vector<u8>(64, 20);
-    std::fill(second_expected.begin() + 20, second_expected.begin() + 28, u8{99});
+    std::fill(second_expected.begin() + 8, second_expected.begin() + 40, u8{10});
+    std::fill(second_expected.begin() + 16, second_expected.begin() + 32, u8{99});
     on_gpu([&] { query_second();content_c = Access::ReadPin(rasterizer, isolated_targets[2].pin); });
-    REQUIRE(second_roots[0]); REQUIRE(second_roots[1]); REQUIRE(second_roots[2]); REQUIRE_FALSE(second_roots[3]);
+    REQUIRE(second_roots[0]); REQUIRE(second_roots[1]); REQUIRE(second_roots[2]);
+    REQUIRE(second_roots[3]); REQUIRE(second_roots[4]); REQUIRE_FALSE(second_roots[5]);
     REQUIRE(content_c == second_expected);
+    std::array<bool, 64> second_byte_roots{};
+    on_gpu([&] {
+        for (u64 byte = 0; byte < second_byte_roots.size(); ++byte) {
+            const u32 root_fill = byte < 8 || byte >= 40 ? 2 : (byte < 16 || byte >= 32 ? 1 : 0);
+            second_byte_roots[byte] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, byte, 1, root_fill, byte);
+        }
+    });
+    REQUIRE(std::ranges::all_of(second_byte_roots, [](bool valid) {return valid;}));
     std::array<bool, 4> replica_roots{};
     const auto query_replica = [&] {
         replica_roots[0] = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_copy, device_memory, replica_parent, 0, 16, 1, 0);
@@ -1475,15 +1490,24 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     std::fill(replica_expected.begin() + 20, replica_expected.begin() + 24, u8{77});
     REQUIRE(content_b == replica_expected);
     on_gpu([&] { query_second();content_c = Access::ReadPin(rasterizer, isolated_targets[2].pin); });
-    REQUIRE(second_roots[1]); // The intermediate B overwrite cannot rewrite already copied C history.
+    REQUIRE(second_roots[2]); // The intermediate B overwrite cannot rewrite already copied C history.
     REQUIRE(content_c == second_expected);
+    on_gpu([&] {
+        Access::FillPinRange(rasterizer, isolated_targets[1].pin, 8, 4, 0x4d4d4d4d);
+        content_b = Access::ReadPin(rasterizer, isolated_targets[1].pin);
+        query_second();
+    });
+    std::fill(replica_expected.begin() + 8, replica_expected.begin() + 12, u8{77});
+    REQUIRE(content_b == replica_expected);
+    REQUIRE(second_roots[1]); // C retains B's earlier untouched 10 root despite a later B write.
     on_gpu([&] {
         Access::FillPinRange(rasterizer, isolated_targets[2].pin, 24, 4, 0x4d4d4d4d);
         content_c = Access::ReadPin(rasterizer, isolated_targets[2].pin);
         query_second();
         current_root = renderer->scheduler.CurrentReplicaCopyHasRoot(replica_second, device_memory, replica_parent, 20, 4, 0, 20);
     });
-    REQUIRE_FALSE(second_roots[1]); REQUIRE(second_roots[0]); REQUIRE(second_roots[2]); REQUIRE(current_root);
+    REQUIRE_FALSE(second_roots[2]); REQUIRE(second_roots[0]); REQUIRE(second_roots[1]);
+    REQUIRE(second_roots[3]); REQUIRE(second_roots[4]); REQUIRE(current_root);
     std::fill(second_expected.begin() + 24, second_expected.begin() + 28, u8{77});
     REQUIRE(content_c == second_expected);
     on_gpu([&] { current_root = renderer->scheduler.CompletedReplicaCopyHasRoot(replica_copy, replica_parent, 16, 16, 0, 16); });
@@ -1500,7 +1524,7 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     std::weak_ptr<const void> asynchronous_payload = isolated_targets[1].pin.RetainedOwner();
     on_gpu([&] {
         asynchronous_copy = renderer->scheduler.RecordControlledReplicaCopy(device_memory,
-            {asynchronous_parent, 1, 2, 20, 20, 8, 0, 2, 20, 0, asynchronous_first});
+            {asynchronous_parent, 1, 2, 8, 8, 32, 0, 2, 8, 0, asynchronous_first, mixed_source_roots});
         if (!asynchronous_copy) throw std::runtime_error("asynchronous copy refused");
         isolated_owners[1]->RevokeContentEligibility();
         isolated_owners[1].reset();

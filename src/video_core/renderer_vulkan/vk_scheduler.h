@@ -98,6 +98,7 @@ public:
         TransferContent::Index source_fill{}, destination_fill{};
         u64 source_root_offset{}, destination_root_offset{};
         Transfer source_receipt{}; // Optional prior copy; root IDs remain in parent, the original anchor.
+        std::span<const ReplicaCopyProvenance::RootSpan> source_roots{}; // Optional complete mixed-source partition.
     };
     template <typename Memory>
     Transfer RecordControlledReplicaCopy(const Memory& memory, const ReplicaCopyRequest& request) {
@@ -111,11 +112,19 @@ public:
             receipt->replica_copy->DestinationBuffer() != request.source || receipt->resources.size() != 2 ||
             receipt->resources[1].pin.Identity() != source.pin.Identity() ||
             receipt->resources[1].physical != source.physical)) return {};
+        auto plan = ReplicaCopyProvenance::Build(parent->content, request.source, request.destination,
+            request.source_offset, request.destination_offset, request.size, destination.pin.Size(),
+            request.source_fill, request.source_root_offset, request.destination_fill, request.destination_root_offset,
+            receipt ? receipt->replica_copy : nullptr, request.source_roots);
+        if (!plan) return {};
         const auto current_source = [&] {
-            return receipt ? CurrentReplicaCopyHasRoot(receipt, memory, parent, request.source_offset, request.size,
-                                                       request.source_fill, request.source_root_offset)
-                           : CurrentTransferHasRoot(parent, memory, request.source, request.source_offset, request.size,
-                                                    request.source_fill, request.source_root_offset);
+            for (const auto& part : plan->SourceRoots()) {
+                if (!(receipt ? CurrentReplicaCopyHasRoot(receipt, memory, parent, part.offset, part.size,
+                                                          part.fill, part.root_offset)
+                              : CurrentTransferHasRoot(parent, memory, request.source, part.offset, part.size,
+                                                       part.fill, part.root_offset))) return false;
+            }
+            return true;
         };
         if (!source.pin.CopyProvenanceEligible() || !destination.pin.CopyProvenanceEligible() ||
             source.pin.Identity() == destination.pin.Identity() ||
@@ -129,11 +138,6 @@ public:
             source_physical->DeviceEpoch() != destination_physical->DeviceEpoch() ||
             source_physical->DeviceAddress() == destination_physical->DeviceAddress() ||
             !std::ranges::equal(source_physical->Segments(), destination_physical->Segments())) return {};
-        auto plan = ReplicaCopyProvenance::Build(parent->content, request.source, request.destination,
-            request.source_offset, request.destination_offset, request.size, destination.pin.Size(),
-            request.source_fill, request.source_root_offset, request.destination_fill, request.destination_root_offset,
-            receipt ? receipt->replica_copy : nullptr);
-        if (!plan) return {};
         RequestOutsideRenderPassOperationContext();
         if (!current_source() ||
             !CurrentTransferHasRoot(parent, memory, request.destination, 0, destination.pin.Size(),

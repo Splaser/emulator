@@ -119,8 +119,8 @@ Every hop must copy from the preceding receipt's destination allocation and
 exact saved physical binding. That receipt must prove the requested current
 source bytes and original root projection. Each new target must still have a
 whole-pin exact current root in the original anchor, including its untouched
-complements. Mixed-root source intervals and previously modified whole targets
-remain unsupported. Model construction also rejects different anchor graphs,
+complements. At `715d1097b9`, mixed-root source intervals and previously modified
+whole targets remained unsupported. Model construction also rejects different anchor graphs,
 incorrect source slots and a fifth hop. Four hops bound ancestry/storage walks;
 the existing 16-receipt retention limit remains unchanged.
 
@@ -181,3 +181,53 @@ Linux job `117375791932`:
 
 Android was intentionally skipped; no device/game acceptance is claimed. The
 evidence update changes documentation only and does not repeat this source run.
+
+## Mixed-source interval follow-up
+
+A copy may now carry an explicit ordered partition of its source interval. Every
+`RootSpan` names source-pin-relative bytes, an original anchor Fill ID and that
+Fill's byte projection. The partition must cover the whole requested source
+exactly: no holes, overlaps, empty pieces or outside suffixes. The bound is 64
+pieces; absent declarations preserve the original single-root request semantics.
+Unknown bytes cannot become known by supplying a declaration.
+
+`ReplicaCopyProvenance::Build` validates every piece against the immutable local
+graph or preceding copy's ancestry, then copies declarations into its own fixed
+array. Admission checks the current qualification of every saved piece, both
+before and after leaving the render-pass context. It cannot accept a valid prefix
+while ignoring an overwritten suffix. Later caller mutation cannot change saved
+declarations. The actual command remains one exact `vkCmdCopyBuffer`, tied to the
+same geometry/native bindings; every previous queue/barrier/completion edge must
+still qualify. The four-hop limit and ancestor storage/mapping cancellation stay.
+
+For A = 99, B = 10 and C = 20, A→B copies `[16,32)`. B→C then copies `[8,40)`,
+whose declared roots are B's 10 on `[8,16)`, A's 99 on `[16,32)`, and B's 10 on
+`[32,40)`. C keeps its own 20 on `[0,8)` and `[40,64)`. Queries retain all five
+intervals and cannot call the entire mixed range A's or B's single projected
+root. Copying the resulting mixed C into further fresh targets preserves these
+roots and the next target's untouched bytes.
+
+Any source piece overwritten before admission rejects the whole copy. Known
+source writes recorded after it capture later source state without rebasing the
+earlier destination receipt. Later target writes revoke only overlap; Unknown,
+failed/unconfirmed submissions, remap, retired storage and escaped host pointers
+remain conservative exclusions. History remains metadata, not current/authority
+publication. A target still requires one exact whole-pin current anchor root;
+mixed/modified target complements and automatic reconciliation are not enabled.
+
+The initial old-code refusal is retained in `.diagnostics/m4-mixed-red.log`.
+The actual-body simulated fixture adds 46 modes, including overwrites in each
+copied/untouched source part, overwritten undeclared tails and gaps, overlapping
+declarations, incorrect root projections, pending/failed submissions, earlier/final
+missing barriers, remap, retirement, escaped host pointers, borrowed declaration
+mutation and mixed overlays through four hops. Mutation controls remove partition
+and per-piece guards, and must fail by assertion. The independent byte-label
+oracle adds 256 mixed-source prefixes with shifted interval/root projections,
+Unknown-source and 64-piece capacity controls.
+
+The native Vulkan witness copies the mixed interval into a third private staged
+allocation, checks all 64 byte roots and the full readback, then overwrites copied
+and untouched portions of B and a partial region of C. It also retains the mixed
+copy's intermediate allocation across asynchronous retirement until trusted idle.
+Linux validation is pending. Cross-queue remains Unknown; ordinary automatic
+selection, latest-writer publication and production F3/F2 closure remain excluded.

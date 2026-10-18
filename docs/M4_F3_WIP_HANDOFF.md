@@ -414,3 +414,18 @@ lifecycle regressions. All 17 extracted input hashes match committed blobs;
 `.diagnostics/ci-39025579635/`. Original F3 fixed-required mode still fails two
 aliases (exit 42); F2 remains backing 77/cache 10. Android was intentionally
 skipped. This documentation-only evidence update does not repeat source CI.
+
+### Mixed-source copy intervals (2026-10-17)
+
+The follow-up in [M4_F3_SAME_QUEUE_REPLICA_COPY.md](M4_F3_SAME_QUEUE_REPLICA_COPY.md)
+accepts a complete explicit source partition with at most 64 root spans. Every
+piece must prove its historical root/projection and current byte qualification;
+holes, overlaps, Unknown and a merely valid prefix cannot qualify a copy. The
+receipt owns immutable declarations and preserves anchor root IDs through up to
+four hops. A target still needs a known whole-pin anchor root for its complements.
+Actual same-queue submission/barrier/completion and storage/remap gates are
+unchanged. The new native case copies B's 10/99/10 source into C while preserving
+C's outer 20 intervals; unit controls cover partial cancellation, failure, remap,
+retirement and mixed four-hop ancestry. Linux validation is pending. Cross-queue
+Unknown, ordinary selection disabled, no latest-writer authority; F3/F2 stay Open.
+Android remains on demand.

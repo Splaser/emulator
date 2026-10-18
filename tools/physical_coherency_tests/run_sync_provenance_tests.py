@@ -130,7 +130,8 @@ struct Scenario {
 if a.content:
     source += read('tools/physical_coherency_tests/transfer_content_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/replica_copy_fixture.cpp.in')
-source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();' if a.content else '') + '}\n'
+    source += read('tools/physical_coherency_tests/mixed_replica_fixture.cpp.in')
+source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();' if a.content else '') + '}\n'
 command = [a.cxx, '-std=c++23', '-O1', '-Wall', '-Wextra', '-Werror',
            '-Wno-unused-parameter', '-Wno-missing-field-initializers',
            '-I', str(out / 'stubs'), '-I', str(root / 'src'),
@@ -166,7 +167,8 @@ if a.content:
     for name, guard, replacement, count in [
         ('chain-without-ancestor-evidence', 'const auto& consumer = link->submission;', 'if (link != result) continue;\n    const auto& consumer = link->submission;', 1),
         ('chain-without-ancestor-storage', 'for (const auto& resource : link->resources)', 'if (link != result) continue;\n            for (const auto& resource : link->resources)', 1),
-        ('chain-source-uses-history', 'CurrentReplicaCopyHasRoot(receipt, memory, parent, request.source_offset, request.size,\n                                                       request.source_fill, request.source_root_offset)', 'receipt->replica_copy->HasRoot(request.source_offset, request.size, request.source_fill, request.source_root_offset)', 1),
+        ('chain-source-uses-history', 'CurrentReplicaCopyHasRoot(receipt, memory, parent, part.offset, part.size,\n                                                          part.fill, part.root_offset)', 'receipt->replica_copy->HasRoot(part.offset, part.size, part.fill, part.root_offset)', 1),
+        ('mixed-current-prefix-only', 'for (const auto& part : plan->SourceRoots()) {', 'for (const auto& part : plan->SourceRoots()) {\n                if (&part != plan->SourceRoots().data()) break;', 1),
         ('replica-without-entry-sync', '!consumer->synchronization.ProvesEarlierSubmission(prior, link->positions[0], copy)', '(static_cast<void>(prior), false)', 1),
         ('replica-without-release-sync', '!consumer->synchronization.ProvesRelease(link->positions[0], copy, later)', '(static_cast<void>(later), false)', 1),
         ('replica-without-queue-link', 'consumer->queue_predecessor.lock() != producer', 'false', 1),
@@ -218,6 +220,10 @@ if a.content:
         '#include "video_core/renderer_vulkan/vk_transfer_content.h"', '')
     expanded = expanded.replace('#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"', replica_header)
     for name, guard, replacement in [
+        ('mixed-without-tail-coverage', 'if (cursor != source_offset + size) return {};', '/* unchecked suffix */'),
+        ('mixed-without-ordered-partition', 'part.offset != cursor || ', ''),
+        ('mixed-without-historical-roots', '!(source_copy ? source_copy->HasRoot(part.offset, part.size, part.fill, part.root_offset)\n                              : parent->HasRoot(source, part.offset, part.size, part.fill, part.root_offset))', 'false'),
+        ('mixed-without-owned-declarations', 'std::copy(roots_.begin(), roots_.end(), source_roots.begin());', '(void)roots_;'),
         ('chain-without-hop-limit', 'source_copy->Depth() >= MaxHops || ', ''),
         ('stale-whole-replica-promotion', 'if (!root || root->command != fill || root->offset != root_offset + begin - offset) return false;', 'if (!root) return false;'),
         ('missing-left-complement', 'if (part.offset < offset) {', 'if (false) {'),
