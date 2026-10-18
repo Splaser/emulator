@@ -106,6 +106,30 @@ readback after a fourth-hop copy are compared with it. Later D/C writes test
 partial current revocation and unchanged downstream bytes/history. Async target
 retirement tests retained native lifetime through trusted idle.
 
-Linux validation is pending. Android remains on demand. The original F2/F3
-fixed-required negative witnesses must remain failing; controlled success cannot
-close those production defects.
+Source `0777f7f3273d02555dd1e91d6ed149c653dd7efd` passed
+[Linux-only workflow 39095898124](https://github.com/Splaser/emulator/actions/runs/39095898124)
+on 2026-10-18. CLI, shader tool and production test targets built, and all five
+CTest processes passed. Native Vulkan provenance passed 280 assertions in CTest
+and three additional independent runs, including the real mixed-target/fourth-hop
+readbacks and asynchronous target-retirement case above.
+
+The Linux extracted-production-body suite passed all 51 new mixed-target modes
+alongside the 49 one-hop, 44 multi-hop and 46 mixed-source modes. All 59 mutation
+controls failed by assertion as required; their logs plus the positive fixture
+log total 60 files. The 19 extracted input SHA-256 hashes match the committed Git
+blobs. The standalone independent oracle passed 512 content, 2048 eligibility,
+256 multi-hop, 256 mixed-source and 256 new mixed-target prefixes. The full
+registration/coherency/backing/lifecycle suite also passed. The deterministic
+failure/synchronization/remap mutations simulate dispatch/device execution; they
+are distinct from the successful real Linux Vulkan readback evidence.
+
+Downloaded workflow artifacts, exact-source manifest, mutation logs, native
+repeat logs and complete Linux job output are retained under
+`.diagnostics/ci-39095898124/`. Local red and positive/mutation logs remain under
+`.diagnostics/m4-destination-*.log`.
+
+The original ordinary F3 fixed-required witness still fails both aliases
+(`expected=99 observed=10`, exit 42); F2 still reports
+`expected=77 observed=10 backing=77`. Android was intentionally skipped. F2/F3
+remain Open; controlled success does not close those production defects. The
+following evidence-only documentation commit does not repeat source CI.

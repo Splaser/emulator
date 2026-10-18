@@ -453,5 +453,14 @@ actual queue adjacency, barriers and checked completion; four hops remain the
 limit. No cross-queue proof, ordinary automatic selection or latest-writer system
 is added. The new native test compares mixed-target C and fourth-hop E readback
 with an independent byte oracle, plus later writes and async target retirement.
-Linux validation is pending; Android remains on demand. F2/F3 remain Open and
-their fixed-required negative witnesses must still fail.
+Source `0777f7f327` passed
+[Linux-only workflow 39095898124](https://github.com/Splaser/emulator/actions/runs/39095898124):
+all five CTest processes, native Vulkan provenance 280 assertions plus three
+independent repeats, 51 new deterministic mixed-target modes, all 59 expected
+assertion mutations and 256 new mixed-target byte-oracle prefixes. All 19
+extracted input hashes match committed blobs; all 60 fixture logs, native
+readback/repeat evidence and the full registration/coherency/backing/lifecycle
+regressions are retained in `.diagnostics/ci-39095898124/`. Original ordinary F3
+still fails two fixed-required aliases (exit 42); F2 remains backing 77/cache 10.
+Android was intentionally skipped. F2/F3 remain Open. This evidence-only
+documentation update does not repeat source CI.
