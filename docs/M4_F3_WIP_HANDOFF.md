@@ -631,3 +631,40 @@ authority, enable cross queue or add Draw/Dispatch producers. Cross queue remain
 Unknown, restricted production eligibility blocked and F2/F3 Open. Original F3
 fixed-required still fails two aliases (99 versus 10, exit 42); F2 backing77/cache10.
 Android was skipped. Evidence-only documentation does not rerun unchanged source CI.
+
+### Producer Coverage / Exclusion Contract (2026-10-18)
+
+Source `3f7a3440e9` freezes the existing Planner/Copy/Scheduler implementation and
+adds `ProducerCoverageContract`, a bounded synchronous **assertion verifier** and
+physical pre-effect invalidation policy. Transfer is the only managed producer;
+Shader, CPU, NCE and External require independently enforced exclusion/drainage.
+Unknown/missing entry paths, notification gaps, active writers, overflow,
+insufficient sync, stale admission, remap and retirement reject closure.
+
+This is not an exclusion provider, certificate issuer, new history registry or
+authority. There is no production call site. Its `Eligible` result means supplied
+assertions are consistent, not that guest producer exclusion is true or retained.
+The existing restricted-eligibility blockers remain unchanged: booleans, fixture
+locks, notification counts and retained pins cannot replace owned enforcement.
+Actual physical alias invalidation fan-out and exclusion through async completion
+or quarantine remain required future work. Ordinary production closure is Unknown.
+
+New pure tests use 400 per-byte oracle cases, three repeats, a toy two-thread
+exclusion provider, a weakened-contract red control and 20 assertion mutants.
+The failure/partial-recording policy checks are simulations, not hardware fault
+injection or real CPU/NCE execution proof. Original native tests and F2/F3 witnesses
+continue unchanged. See [contract and audit](M4_F3_PRODUCER_COVERAGE_CONTRACT.md)
+for trust boundaries, producer inventory links, admission and invalidation rules.
+
+Cross queue remains Unknown; no ordinary automatic selection, Draw/Dispatch
+expansion, content authority or F2/F3 repair is claimed. Android is skipped.
+
+Accepted exact source `3f7a3440e9a35afaf8fc9f22df201f7953133ee9` in
+[Linux run 39127457695](https://github.com/Splaser/emulator/actions/runs/39127457695):
+new 20 assertion mutants and 400 byte cases plus three repeats; existing 78+12
+mutants and full repeat groups; real native provenance 398 assertions plus three
+repeats; all five CTest processes and complete coherency/lifecycle suites. All
+24+6+4 input hashes match Git. Full artifacts, job output and independently checked
+acceptance index are in `.diagnostics/ci-39127457695/`. Native Copy evidence does
+not establish real guest producer exclusion. Original F2 cache10/backing77 and
+F3 two expected alias failures/exit42 remain; restricted eligibility stays blocked.

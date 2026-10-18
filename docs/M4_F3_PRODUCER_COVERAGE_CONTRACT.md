@@ -102,6 +102,12 @@ of the selected physical bytes, prove utility isolation, and enforce participati
 or exclusion of every path that can reach them. An unclassified path invalidates
 closure even if no write was observed in a particular test run.
 
+The broader existing [producer inventory](M3B_F2_PRODUCER_INVENTORY.md) and
+[restricted eligibility blockers](M3B_F2_RESTRICTED_ELIGIBILITY.md) remain in
+force. In particular, the latter's prohibition on caller-supplied exclusion
+booleans or fixture locks as production certificates is unchanged. This value
+verifier is a schema/policy test facility, not an issuer of such certificates.
+
 ## Admission and ordering
 
 Admission is the conjunction of closure and the original Copy qualification:
@@ -161,4 +167,41 @@ this stage proves rejection rules and policy consistency, not production closure
 Ordinary automatic selection, physical authority, cross queue, Draw/Dispatch
 extension and F2/F3 repair remain out of scope and unproved.
 
-Acceptance run and immutable source hashes are recorded after Linux completion.
+## Linux acceptance
+
+Accepted source: `3f7a3440e9a35afaf8fc9f22df201f7953133ee9`.
+[Linux run 39127457695](https://github.com/Splaser/emulator/actions/runs/39127457695)
+passed (job `117675489089`, 18m44s). Android job `117675490297` was skipped.
+
+- New contract: 400 independent byte-oracle cases, successful initial execution
+  plus three repeats, all 20 targeted mutants failing by assertion, and the
+  separately retained weakened-contract red control.
+- Existing verification: all 78 extracted-body and 12 pure Planner assertion
+  mutants still fail as expected; all pure/fixture repeat groups pass. This adds
+  no Planner or Copy expression forms.
+- Actual production translation units, CLI/shader/test build, all five CTest
+  processes, coherency/lifecycle/backing suites and native Vulkan pass. The
+  unchanged native provenance case retains 398 assertions and three repeats,
+  including actual planner-admitted four-hop Copy/readback. These native results
+  validate regression safety, **not real producer exclusion by the new verifier**.
+- All 24 existing extracted-body, 6 Planner and 4 new contract input SHA256 values
+  match exact Git blobs at the accepted source (34 total inputs).
+- Original F2 remains expected 77 / observed 10 / backing 77. Original F3 full and
+  partial aliases remain expected 99 / observed 10; fixed-required has two failed
+  assertions and exits 42. Restricted eligibility remains blocked; F2/F3 Open.
+
+Complete artifact contents (generated source, executables, assertions, repeats,
+manifests and CTest logs), complete Linux job output, local final contract log and
+an independent verification script/index are retained under
+`.diagnostics/ci-39127457695/`. The verifier checks exact inputs, 20+78+12 mutant
+assertions, all repeat groups, CTest and both original negative witnesses.
+
+Changed files are the new
+`src/video_core/buffer_cache/producer_coverage_contract.h`,
+`tools/physical_coherency_tests/producer_coverage_tests.cpp`,
+`tools/physical_coherency_tests/run_producer_coverage_tests.py`,
+the existing `.github/workflows/pr375-pr380-integration.yml`, this document and
+`docs/M4_F3_WIP_HANDOFF.md`. The workflow only adds the pure runner and artifact
+path; existing production/test scopes remain intact. Scheduler, Planner, receipts
+and ordinary CPU/GPU execution files have no changes. Subsequent acceptance-only
+documentation does not require rerunning unchanged source CI.
