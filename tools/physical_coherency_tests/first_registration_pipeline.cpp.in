@@ -99,6 +99,7 @@ struct CommandBuffer {
 #include "video_core/renderer_vulkan/vk_buffer_payload.h"
 #include "video_core/buffer_cache/gpu_write_revision.h"
 #include "video_core/buffer_cache/physical_write_identity.h"
+#include "video_core/renderer_vulkan/vk_reconciliation_planner.h"
 namespace VideoCommon {struct BufferCopy {u64 src_offset,dst_offset,size;};}
 namespace Vulkan {
 struct Semaphore {

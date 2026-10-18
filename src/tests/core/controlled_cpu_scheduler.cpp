@@ -1740,7 +1740,31 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         const std::array<ReplicaRoot,1> region_batch_roots_c{{{56,8,0,32}}};
         std::vector<Vulkan::Scheduler::ReplicaCopyRegion> region_batch_regions{{0,8,8,region_batch_piece,{},region_batch_roots_a},{1,region_batch_right,region_batch_right,region_batch_piece,{},region_batch_roots_b}};
         if(region_batch_mixed_holes) region_batch_regions.push_back({0,56,56,8,{},region_batch_roots_c});
-        on_gpu([&] {region_batch_first=renderer->scheduler.RecordControlledReplicaCopies(device_memory,{region_batch_anchor,2,8,region_batch_window,region_batch_regions,{},region_batch_complements});});
+        Vulkan::BoundedReconciliationPlanner::Result region_batch_candidate;
+        std::vector<Vulkan::Scheduler::ReplicaCopyRegion> region_batch_planned_regions;
+        if(region_batch_mixed_holes) {
+            const std::array<ReplicaRoot,2> region_batch_offers_a{{{8,8,0,0},{56,8,0,32}}};
+            const std::array<ReplicaRoot,5> region_batch_target_roots{{{0,24,2,0},{24,8,3,4},{32,16,2,32},{48,8,1,12},{56,8,2,56}}};
+            const std::array<Vulkan::Scheduler::ReconciliationReplica,3> region_batch_inputs{{
+                {0,{},region_batch_offers_a},{1,{},region_batch_roots_b},{2,{},region_batch_target_roots}}};
+            on_gpu([&] {
+                const auto& region_batch_physical=region_batch_targets[2].physical;
+                region_batch_candidate=renderer->scheduler.PlanControlledReconciliation(device_memory,
+                    {region_batch_anchor,{region_batch_physical->Backing(),region_batch_physical->Segments().front().physical_offset,64},2,region_batch_inputs});
+            });
+            REQUIRE(region_batch_candidate.state==Vulkan::BoundedReconciliationPlanner::State::Candidate);
+            REQUIRE(region_batch_candidate.reason==Vulkan::BoundedReconciliationPlanner::Reason::None);
+            REQUIRE(region_batch_candidate.content);
+            for(const auto& region_batch_region:region_batch_candidate.content->Regions())
+                region_batch_planned_regions.push_back({region_batch_region.source,region_batch_region.source_offset,
+                    region_batch_region.destination_offset,region_batch_region.size,{},region_batch_region.roots});
+        }
+        on_gpu([&] {
+            if(region_batch_mixed_holes) region_batch_first=renderer->scheduler.RecordControlledReplicaCopies(device_memory,
+                {region_batch_anchor,2,8,region_batch_window,region_batch_planned_regions,{},region_batch_candidate.content->DestinationRoots()});
+            else region_batch_first=renderer->scheduler.RecordControlledReplicaCopies(device_memory,
+                {region_batch_anchor,2,8,region_batch_window,region_batch_regions,{},region_batch_complements});
+        });
         REQUIRE(region_batch_first);finish_content(region_batch_first);region_batch_oracle_copy(0,2,8,region_batch_piece);region_batch_oracle_copy(1,2,region_batch_right,region_batch_piece);
         if(region_batch_mixed_holes) region_batch_oracle_copy(0,2,56,8);
         REQUIRE(region_batch_first->PlannedReplicaCopy()->IsBatch());
@@ -1849,6 +1873,7 @@ TEST_CASE("Checked write provenance separates emission completion and current re
             if(!rasterizer.SetControlledStorageWriteObservation(false)) throw std::runtime_error("batch observation shutdown refused");
         });
         REQUIRE(region_batch_payload.expired());
+        if(region_batch_mixed_holes) std::cout<<"PASS bounded planner candidate through existing admission and native Vulkan four-hop readback\n";
         std::cout<<"PASS native Copy layout="<<region_batch_layout<<" four-hop byte oracle/readback and retained complements\n";
     } // contiguous, disjoint and multiple mixed-root holes
     std::cout << "PASS checked write provenance: skipped intent, distinct actual submissions, "

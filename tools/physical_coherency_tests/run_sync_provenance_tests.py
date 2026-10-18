@@ -9,6 +9,7 @@ import subprocess
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--vulkan-include', type=Path)
+p.add_argument('--positive-only', action='store_true', help='Iterative fixture check only; excludes mutation acceptance')
 p.add_argument('--content', action='store_true', help='Also validate exact transfer content and copy provenance')
 a = p.parse_args()
 root = Path(__file__).resolve().parents[2]
@@ -43,6 +44,8 @@ checked += body(header, '    class CheckedTransfer {') + ';\nusing Transfer=std:
 checked += body(header, '    struct ReplicaCopyRequest {') + ';\n'
 checked += body(header, '    struct ReplicaCopyRegion {') + ';\n'
 checked += body(header, '    struct ReplicaCopiesRequest {') + ';\n'
+checked += body(header, '    struct ReconciliationReplica {') + ';\n'
+checked += body(header, '    struct ReconciliationRequest {') + ';\n'
 checked += 'enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };\n'
 checked += body(header, '    class CheckedWrite {') + ';\nusing Write=std::shared_ptr<CheckedWrite>;\n'
 checked += body(header, '    struct WriteFootprint {') + ';\nusing ObservedWrites=std::shared_ptr<const std::vector<Write>>;\n'
@@ -79,6 +82,7 @@ scaffold = scaffold.replace('// @TRANSFER_MAPPING_GATE@', 'template <typename Me
                            '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContent(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    const TransferContent* CurrentTransferContentRange(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    bool CurrentTransferHasRoot(') +
+                           '\ntemplate <typename Memory>\n' + body(header, '    BoundedReconciliationPlanner::Result PlanControlledReconciliation(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    Transfer RecordControlledReplicaCopies(') + '\ntemplate <typename Memory>\n' + body(header, '    Transfer RecordControlledReplicaCopy(') +
                            '\ntemplate <typename Memory>\n' + body(header, '    bool CurrentReplicaCopyHasRoot('))
 scaffold = scaffold.replace('// @SCHEDULER_RECORDING@', '\n'.join([
@@ -137,7 +141,8 @@ if a.content:
     source += read('tools/physical_coherency_tests/combined_replica_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/multi_region_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/mixed_holes_fixture.cpp.in')
-source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();TestCombinedReplicaCopy();TestMultiRegionReplicaCopy();TestMixedInternalHoles();' if a.content else '') + '}\n'
+    source += read('tools/physical_coherency_tests/reconciliation_planner_fixture.cpp.in')
+source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();TestCombinedReplicaCopy();TestMultiRegionReplicaCopy();TestMixedInternalHoles();TestReconciliationPlanner();' if a.content else '') + '}\n'
 command = [a.cxx, '-std=c++23', '-O1', '-Wall', '-Wextra', '-Werror',
            '-Wno-unused-parameter', '-Wno-missing-field-initializers',
            '-I', str(out / 'stubs'), '-I', str(root / 'src'),
@@ -158,6 +163,8 @@ result = run('dependencies', source)
 print(result.stdout, end='')
 if result.returncode:
     raise RuntimeError(result.stderr)
+if a.positive_only:
+    raise SystemExit(0)
 for name, guard, replacement in [
     ('missing-native-identity', 'a->Representation() != b->Representation()', 'false'),
     ('missing-range-coverage', 'if (!advance) return false;', 'if (!advance) break;'),
@@ -171,6 +178,10 @@ for name, guard, replacement in [
     print('PASS expected mutation failure:', name)
 if a.content:
     for name, guard, replacement, count in [
+        ('planner-without-current-evidence', 'return current ? Reason::None : Reason::CurrentUnavailable;', 'return (static_cast<void>(current), Reason::None);', 1),
+        ('planner-without-mapping-reason', 'if (!resource.physical->MatchesCurrent(memory)) return Reason::Remapped;', '(void)resource;', 1),
+        ('planner-without-sync-evidence', 'if (replica.receipt ? !CompletedReplicaCopy(*receipt,parent) : !CompletedTransferContent(parent))', 'if (false)', 1),
+        ('planner-query-submits', 'return Planner::Build({parent->content,request.scope,request.destination,replicas},evidence);', '(void)Flush(); return Planner::Build({parent->content,request.scope,request.destination,replicas},evidence);', 1),
         ('batch-without-current-qualification', 'if (!qualify()) return {};', 'if ((static_cast<void>(qualify), false)) return {};', 2),
         ('batch-without-planned-revocation', 'RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', '(void)destination;', 1),
         ('batch-revokes-internal-holes', 'RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 'if (transfer->replica_copy && transfer->replica_copy->IsBatch()) { const auto r=transfer->replica_copy->Regions(); RevokeBufferContent(destination.Handle(), destination.Offset()+r.front().destination_offset,r.back().destination_offset+r.back().size-r.front().destination_offset); } else RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 1),
@@ -237,6 +248,9 @@ if a.content:
     replica_header = read('src/video_core/renderer_vulkan/vk_replica_copy_provenance.h').replace('#pragma once', '').replace(
         '#include "video_core/renderer_vulkan/vk_transfer_content.h"', '')
     expanded = expanded.replace('#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"', replica_header)
+    planner_header = read('src/video_core/renderer_vulkan/vk_reconciliation_planner.h').replace('#pragma once', '').replace(
+        '#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"', '')
+    expanded = expanded.replace('#include "video_core/renderer_vulkan/vk_reconciliation_planner.h"', planner_header)
     for name, guard, replacement in [
         ('combined-source-flattens-projection', 'source_copy->HasRoot(parent_offset, end - begin, fill, root_offset + begin - offset)', 'source_copy->HasRoot(parent_offset, end - begin, fill, parent_offset)'),
         ('batch-without-complement-coverage', 'if (retained != extent) return {};', ''),
@@ -272,6 +286,7 @@ if a.content:
         if result.returncode == 0 or 'Assertion' not in result.stderr:
             raise RuntimeError(f'{name} failed incorrectly: {result.returncode} {result.stderr}')
         print('PASS expected eligibility mutation failure:', name)
+inputs.add('src/video_core/renderer_vulkan/vk_reconciliation_planner.h')
 inputs.add('src/video_core/renderer_vulkan/vk_sync_provenance.h')
 inputs.add('src/video_core/renderer_vulkan/vk_transfer_content.h')
 inputs.add('src/video_core/renderer_vulkan/vk_transfer_eligibility.h')

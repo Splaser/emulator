@@ -111,6 +111,7 @@ jobs:
             -o .diagnostics/pr375-pr380/sync-provenance
           .diagnostics/pr375-pr380/sync-provenance \
             | tee .diagnostics/pr375-pr380/sync-provenance.txt
+          python tools/physical_coherency_tests/run_reconciliation_planner_tests.py
           python tools/physical_coherency_tests/run_sync_provenance_tests.py --content
           for repeat in 1 2 3; do
             .diagnostics/m4-sync-provenance/dependencies \
@@ -230,6 +231,7 @@ jobs:
             .diagnostics/m3b-registration-pipeline/*.cpp
             .diagnostics/m3b-registration-pipeline/*.txt
             .diagnostics/m4-sync-provenance/*
+            .diagnostics/m4-reconciliation-planner/*
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn
