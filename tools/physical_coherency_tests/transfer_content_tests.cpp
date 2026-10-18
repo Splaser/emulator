@@ -391,7 +391,48 @@ int main() {
         }
         assert(previous->Depth()==4);
     }
+    {
+        // Both internal holes contain multiple roots, at the exact 64-piece complement budget.
+        using Batch=Vulkan::ReplicaCopyProvenance;
+        const std::array<Plan::Offset,4> extents{{128,128,128,128}};
+        const std::array<Plan::Command,6> initialize{{{Kind::Fill,0,0,0,0,128,99},
+            {Kind::Fill,1,0,0,0,128,10},{Kind::Fill,2,0,0,0,128,20},{Kind::Fill,3,0,0,0,128,30},
+            {Kind::Copy,2,3,24,4,8},{Kind::Copy,2,1,80,12,8}}};
+        auto anchor=std::make_shared<const Plan>(*Plan::Build(extents,initialize));
+        std::array<Plan::Root,128> oracle;
+        for(unsigned b=0;b<128;++b) oracle[b]={2,b};
+        for(unsigned b=24;b<32;++b) oracle[b]={3,b-20};
+        for(unsigned b=80;b<88;++b) oracle[b]={1,b-68};
+        const std::vector<Batch::Region> writes{{0,8,8,8,{},{{8,8,0,8}}},
+            {1,48,48,8,{},{{48,8,1,48}}},{0,104,104,8,{},{{104,8,0,104}}}};
+        std::vector<Batch::RootSpan> complement;
+        for(unsigned b=0;b<128;++b) {
+            const bool written=(b>=8&&b<16)||(b>=48&&b<56)||(b>=104&&b<112);
+            if(written) continue;
+            const auto label=oracle[b];
+            if(!complement.empty() && complement.back().offset+complement.back().size==b &&
+                complement.back().fill==label.command && complement.back().root_offset+complement.back().size==label.offset)
+                ++complement.back().size;
+            else complement.push_back({b,1,label.command,label.offset});
+        }
+        const auto split=[&] {
+            for(size_t j=0;j<complement.size();++j) if(complement[j].size>1) {
+                const auto before=complement[j];complement[j].size=1;
+                complement.insert(complement.begin()+j+1,{before.offset+1,before.size-1,before.fill,before.root_offset+1});
+                return;
+            }
+            assert(false);
+        };
+        while(complement.size()<64) split();
+        const auto boundary=Batch::BuildBatch(anchor,2,8,104,128,writes,{},complement);
+        assert(boundary && boundary->DestinationRoots().size()==64);
+        for(const auto& region:writes) for(unsigned b=region.destination_offset;b<region.destination_offset+region.size;++b)
+            oracle[b]={region.source,b};
+        for(unsigned b=0;b<128;++b) assert(boundary->HasRoot(b,1,oracle[b].command,oracle[b].offset));
+        split();assert(complement.size()==65);
+        assert(!Batch::BuildBatch(anchor,2,8,104,128,writes,{},complement));
+    }
     std::cout << "PASS exact transfer content: partial copies, untouched roots, copy-of-copy, "
                  "source overwrite after copy, Unknown bytes, 512 content/2048 eligibility byte-oracle prefixes, "
-                 "256 multi-hop/256 mixed-source/256 mixed-target byte-oracle prefixes, 512 disjoint mixed-target byte-oracle prefixes, batch 32-command/64-piece boundaries, bounds and fail-closed eligibility capacity\n";
+                 "256 multi-hop/256 mixed-source/256 mixed-target byte-oracle prefixes, 512 disjoint mixed-target byte-oracle prefixes, mixed internal-hole 64/65-piece boundary, batch 32-command/64-piece boundaries, bounds and fail-closed eligibility capacity\n";
 }

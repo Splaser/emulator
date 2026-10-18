@@ -136,7 +136,8 @@ if a.content:
     source += read('tools/physical_coherency_tests/destination_replica_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/combined_replica_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/multi_region_fixture.cpp.in')
-source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();TestCombinedReplicaCopy();TestMultiRegionReplicaCopy();' if a.content else '') + '}\n'
+    source += read('tools/physical_coherency_tests/mixed_holes_fixture.cpp.in')
+source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();TestCombinedReplicaCopy();TestMultiRegionReplicaCopy();TestMixedInternalHoles();' if a.content else '') + '}\n'
 command = [a.cxx, '-std=c++23', '-O1', '-Wall', '-Wextra', '-Werror',
            '-Wno-unused-parameter', '-Wno-missing-field-initializers',
            '-I', str(out / 'stubs'), '-I', str(root / 'src'),
@@ -175,6 +176,9 @@ if a.content:
         ('batch-revokes-internal-holes', 'RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 'if (transfer->replica_copy && transfer->replica_copy->IsBatch()) { const auto r=transfer->replica_copy->Regions(); RevokeBufferContent(destination.Handle(), destination.Offset()+r.front().destination_offset,r.back().destination_offset+r.back().size-r.front().destination_offset); } else RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 1),
         ('batch-keeps-unrecorded-suffix', 'RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 'if (operation.destination_offset == transfer->content->Commands().front().destination_offset) RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 1),
         ('batch-without-hole-current-gate', 'for (const auto& part : plan->DestinationRoots())\n                    if (', 'for (const auto& part : plan->DestinationRoots())\n                    if (part.offset >= request.destination_offset && part.offset < request.destination_offset + request.size) continue; else if (', 1),
+        ('batch-checks-first-hole-only', 'for (const auto& part : plan->DestinationRoots())\n                    if (', 'for (const auto& part : plan->DestinationRoots())\n                    if (part.offset > request.destination_offset + request.size / 2 && part.offset < request.destination_offset + request.size) continue; else if (', 1),
+        ('batch-checks-first-complement-piece-only', 'for (const auto& part : plan->DestinationRoots())\n                    if (', 'for (const auto& part : plan->DestinationRoots())\n                    if (&part != plan->DestinationRoots().data() && (&part-1)->offset + (&part-1)->size == part.offset) continue; else if (', 1),
+        ('batch-keeps-first-write', 'RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 'if (operation.destination_offset != transfer->content->Commands().front().destination_offset) RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 1),
         ('batch-records-only-prefix', 'transfer->positions[index++] = journal.RecordAccess();', 'transfer->positions[index++] = journal.RecordAccess(); if (transfer->replica_copy && transfer->replica_copy->IsBatch()) break;', 1),
         ('target-current-prefix-only', 'for (const auto& part : plan->DestinationRoots()) {', 'for (const auto& part : plan->DestinationRoots()) {\n                        if (&part != plan->DestinationRoots().data()) break;', 1),
         ('target-without-completed-history', '!CompletedReplicaCopy(destination_receipt, parent)', 'false', 1),
@@ -237,6 +241,7 @@ if a.content:
         ('combined-source-flattens-projection', 'source_copy->HasRoot(parent_offset, end - begin, fill, root_offset + begin - offset)', 'source_copy->HasRoot(parent_offset, end - begin, fill, parent_offset)'),
         ('batch-without-complement-coverage', 'if (retained != extent) return {};', ''),
         ('batch-without-window-tail', 'cursor != begin + size || ', ''),
+        ('batch-without-complement-root-proof', '!(destination_copy ? destination_copy->HasRoot(part.offset,part.size,part.fill,part.root_offset)\n                    : parent->HasRoot(destination,part.offset,part.size,part.fill,part.root_offset))', 'false'),
         ('batch-flattens-root-projection', 'parent->HasRoot(region.source,projection,end-begin,fill,root_offset+begin-offset)', 'parent->HasRoot(region.source,projection,end-begin,fill,projection)'),
         ('combined-complement-uses-anchor', ': !copied && destination_copy', ': false && destination_copy'),
         ('target-without-complement-tail', 'if (preserved != destination_size) return {};', '/* missing complement suffix */'),

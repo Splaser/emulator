@@ -23,6 +23,7 @@ struct Driver {
     bool corrupt=false;
     bool fail_allocation=false;
     bool fail_copy_record=false;
+    size_t fail_copy_after{},copies_recorded{};
     bool uncertain_submit_effects=false;
     bool host_read_barrier=false;
     VkBuffer readback_target=VK_NULL_HANDLE;
@@ -89,7 +90,7 @@ struct CommandBuffer {
                 std::memcpy(dst.data()+copy.dstOffset,src.data()+copy.srcOffset,copy.size);
                 if(driver->corrupt && destination==driver->readback_target) dst[copy.dstOffset+7]^=1;
             });
-            if(driver->fail_copy_record) throw std::runtime_error("partial copy recording failure");
+            if(driver->fail_copy_record || (driver->fail_copy_after && ++driver->copies_recorded == driver->fail_copy_after)) throw std::runtime_error("partial copy recording failure");
         }
     }
 };

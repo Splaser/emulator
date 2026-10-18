@@ -1676,9 +1676,12 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     REQUIRE(poll(delayed) == State::Unknown);
     REQUIRE_FALSE(content_transfer->ResourcesRetained());
     REQUIRE(asynchronous_payload.expired());
-    for (const bool region_batch_holes : {false, true}) {
+    for (const unsigned region_batch_layout : {0u,1u,2u}) {
+        const bool region_batch_holes=region_batch_layout!=0,region_batch_mixed_holes=region_batch_layout==2;
+        const u64 region_batch_piece=region_batch_mixed_holes?8:16;
         const u64 region_batch_right=region_batch_holes?32:24;
-        const u64 region_batch_end=region_batch_right+16,region_batch_window=region_batch_end-8;
+        const u64 region_batch_end=region_batch_mixed_holes?64:region_batch_right+16;
+        const u64 region_batch_window=region_batch_end-8;
         // Separate bounded batch acceptance after trusted-idle retirement frees the 16-receipt budget.
         std::array<std::shared_ptr<Vulkan::Buffer>,4> region_batch_owners;
         std::vector<Vulkan::Scheduler::TransferBuffer> region_batch_targets;
@@ -1698,6 +1701,18 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         for(u64 region_batch_byte=48;region_batch_byte<56;++region_batch_byte) {
             region_batch_values[2][region_batch_byte]=region_batch_values[3][region_batch_byte-48];region_batch_labels[2][region_batch_byte]=region_batch_labels[3][region_batch_byte-48];
         }
+        if(region_batch_mixed_holes) {
+            const auto region_batch_seed=[&](u32 region_batch_seed_destination,u32 region_batch_seed_source,u64 region_batch_seed_to,u64 region_batch_seed_from,u64 region_batch_seed_count) {
+                region_batch_initialize.push_back({Kind::Copy,region_batch_seed_destination,region_batch_seed_source,region_batch_seed_to,region_batch_seed_from,region_batch_seed_count});
+                const auto region_batch_seed_values=region_batch_values[region_batch_seed_source];const auto region_batch_seed_labels=region_batch_labels[region_batch_seed_source];
+                for(u64 region_batch_seed_byte=0;region_batch_seed_byte<region_batch_seed_count;++region_batch_seed_byte) {
+                    region_batch_values[region_batch_seed_destination][region_batch_seed_to+region_batch_seed_byte]=region_batch_seed_values[region_batch_seed_from+region_batch_seed_byte];
+                    region_batch_labels[region_batch_seed_destination][region_batch_seed_to+region_batch_seed_byte]=region_batch_seed_labels[region_batch_seed_from+region_batch_seed_byte];
+                }
+            };
+            region_batch_seed(0,0,8,0,8);region_batch_seed(0,0,56,32,8);
+            region_batch_seed(2,3,24,4,8);region_batch_seed(2,1,48,12,8);
+        }
         const auto region_batch_oracle_copy=[&](u32 region_batch_source,u32 region_batch_destination,u64 region_batch_begin,u64 region_batch_size) {
             for(u64 region_batch_byte=region_batch_begin;region_batch_byte<region_batch_begin+region_batch_size;++region_batch_byte) {
                 region_batch_values[region_batch_destination][region_batch_byte]=region_batch_values[region_batch_source][region_batch_byte];
@@ -1714,18 +1729,23 @@ TEST_CASE("Checked write provenance separates emission completion and current re
             region_batch_anchor=renderer->scheduler.RecordTransferBatch(region_batch_targets,region_batch_initialize);
         });
         REQUIRE(region_batch_anchor);finish_content(region_batch_anchor);
-        const std::array<ReplicaRoot,2> region_batch_roots_a{{{8,8,0,8},{16,8,0,0}}};
-        const std::array<ReplicaRoot,1> region_batch_roots_b{{{region_batch_right,16,1,region_batch_right}}};
+        std::vector<ReplicaRoot> region_batch_roots_a{{8,8,0,8},{16,8,0,0}};
+        if(region_batch_mixed_holes) region_batch_roots_a={{8,8,0,0}};
+        const std::array<ReplicaRoot,1> region_batch_roots_b{{{region_batch_right,region_batch_piece,1,region_batch_right}}};
         std::vector<ReplicaRoot> region_batch_complements{{0,8,2,0}};
         if(region_batch_holes) region_batch_complements.push_back({24,8,2,24});
         if(region_batch_end<48) region_batch_complements.push_back({region_batch_end,48-region_batch_end,2,region_batch_end});
         region_batch_complements.push_back({48,8,3,0});region_batch_complements.push_back({56,8,2,56});
-        std::array<Vulkan::Scheduler::ReplicaCopyRegion,2> region_batch_regions{{{0,8,8,16,{},region_batch_roots_a},{1,region_batch_right,region_batch_right,16,{},region_batch_roots_b}}};
+        if(region_batch_mixed_holes) region_batch_complements={{0,8,2,0},{16,8,2,16},{24,8,3,4},{40,8,2,40},{48,8,1,12}};
+        const std::array<ReplicaRoot,1> region_batch_roots_c{{{56,8,0,32}}};
+        std::vector<Vulkan::Scheduler::ReplicaCopyRegion> region_batch_regions{{0,8,8,region_batch_piece,{},region_batch_roots_a},{1,region_batch_right,region_batch_right,region_batch_piece,{},region_batch_roots_b}};
+        if(region_batch_mixed_holes) region_batch_regions.push_back({0,56,56,8,{},region_batch_roots_c});
         on_gpu([&] {region_batch_first=renderer->scheduler.RecordControlledReplicaCopies(device_memory,{region_batch_anchor,2,8,region_batch_window,region_batch_regions,{},region_batch_complements});});
-        REQUIRE(region_batch_first);finish_content(region_batch_first);region_batch_oracle_copy(0,2,8,16);region_batch_oracle_copy(1,2,region_batch_right,16);
+        REQUIRE(region_batch_first);finish_content(region_batch_first);region_batch_oracle_copy(0,2,8,region_batch_piece);region_batch_oracle_copy(1,2,region_batch_right,region_batch_piece);
+        if(region_batch_mixed_holes) region_batch_oracle_copy(0,2,56,8);
         REQUIRE(region_batch_first->PlannedReplicaCopy()->IsBatch());
         if(region_batch_holes) {
-            on_gpu([&] {current_root=renderer->scheduler.CurrentTransferHasRoot(region_batch_anchor,device_memory,2,24,8,2,24);});
+            on_gpu([&] {current_root=renderer->scheduler.CurrentTransferHasRoot(region_batch_anchor,device_memory,2,24,8,region_batch_mixed_holes?3:2,region_batch_mixed_holes?4:24);});
             REQUIRE(current_root);
             on_gpu([&] {current_root=renderer->scheduler.CurrentTransferHasRoot(region_batch_anchor,device_memory,2,32,8,2,32);});
             REQUIRE_FALSE(current_root);
@@ -1733,22 +1753,33 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         std::vector<ReplicaRoot> region_batch_whole{{8,8,0,8},{16,8,0,0}};
         if(region_batch_holes) region_batch_whole.push_back({24,8,2,24});
         region_batch_whole.push_back({region_batch_right,16,1,region_batch_right});
+        if(region_batch_mixed_holes) region_batch_whole={{8,8,0,0},{16,8,2,16},{24,8,3,4},{32,8,1,32},{40,8,2,40},{48,8,1,12},{56,8,0,32}};
         on_gpu([&] {region_batch_second=renderer->scheduler.RecordControlledReplicaCopy(device_memory,
             {region_batch_anchor,2,3,8,8,region_batch_window,0,3,8,0,region_batch_first,region_batch_whole});});
         REQUIRE(region_batch_second);finish_content(region_batch_second);region_batch_oracle_copy(2,3,8,region_batch_window);
         region_batch_regions[1].source=3;region_batch_regions[1].source_receipt=region_batch_second;
         on_gpu([&] {region_batch_third=renderer->scheduler.RecordControlledReplicaCopies(device_memory,
             {region_batch_anchor,2,8,region_batch_window,region_batch_regions,region_batch_first,region_batch_complements});});
-        REQUIRE(region_batch_third);finish_content(region_batch_third);region_batch_oracle_copy(0,2,8,16);region_batch_oracle_copy(3,2,region_batch_right,16);
+        REQUIRE(region_batch_third);finish_content(region_batch_third);region_batch_oracle_copy(0,2,8,region_batch_piece);region_batch_oracle_copy(3,2,region_batch_right,region_batch_piece);
+        if(region_batch_mixed_holes) region_batch_oracle_copy(0,2,56,8);
         region_batch_regions[0].source=3;region_batch_regions[0].source_receipt=region_batch_second;
         region_batch_regions[1].source=1;region_batch_regions[1].source_receipt.reset();
+        if(region_batch_mixed_holes) {region_batch_regions[2].source=3;region_batch_regions[2].source_receipt=region_batch_second;}
         on_gpu([&] {region_batch_fourth=renderer->scheduler.RecordControlledReplicaCopies(device_memory,
             {region_batch_anchor,2,8,region_batch_window,region_batch_regions,region_batch_third,region_batch_complements});});
-        REQUIRE(region_batch_fourth);finish_content(region_batch_fourth);region_batch_oracle_copy(3,2,8,16);region_batch_oracle_copy(1,2,region_batch_right,16);
+        REQUIRE(region_batch_fourth);finish_content(region_batch_fourth);region_batch_oracle_copy(3,2,8,region_batch_piece);region_batch_oracle_copy(1,2,region_batch_right,region_batch_piece);
+        if(region_batch_mixed_holes) region_batch_oracle_copy(3,2,56,8);
         REQUIRE(region_batch_fourth->PlannedReplicaCopy()->Depth()==4);
         on_gpu([&] {region_batch_fifth=renderer->scheduler.RecordControlledReplicaCopies(device_memory,
             {region_batch_anchor,2,8,region_batch_window,region_batch_regions,region_batch_fourth,region_batch_complements});});
         REQUIRE_FALSE(region_batch_fifth);
+        if(region_batch_mixed_holes) {
+            for(const auto region_batch_hole_offset:std::array<u64,4>{{16,24,40,48}}) {
+                const auto region_batch_hole_label=region_batch_labels[2][region_batch_hole_offset];
+                on_gpu([&] {current_root=renderer->scheduler.CurrentTransferHasRoot(region_batch_anchor,device_memory,2,region_batch_hole_offset,8,region_batch_hole_label.command,region_batch_hole_label.offset);});
+                REQUIRE(current_root);
+            }
+        }
         std::array<bool,64> region_batch_current{},region_batch_wrong{};
         std::vector<u8> region_batch_bytes;
         on_gpu([&] {
@@ -1765,7 +1796,7 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         REQUIRE(region_batch_bytes==std::vector<u8>(region_batch_values[2].begin(),region_batch_values[2].end()));
         on_gpu([&] {
             Access::FillPinRange(rasterizer,region_batch_targets[3].pin,8,4,0x4d4d4d4d);
-            current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(region_batch_fourth,device_memory,region_batch_anchor,8,8,0,8);
+            current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(region_batch_fourth,device_memory,region_batch_anchor,8,8,0,region_batch_mixed_holes?0:8);
         });
         REQUIRE(current_root); // Completed captured source content is immutable.
         on_gpu([&] {
@@ -1776,27 +1807,39 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         REQUIRE_FALSE(current_root);
         std::fill(region_batch_values[2].begin()+region_batch_right,region_batch_values[2].begin()+region_batch_right+4,u8{88});
         REQUIRE(region_batch_bytes==std::vector<u8>(region_batch_values[2].begin(),region_batch_values[2].end()));
-        on_gpu([&] {current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(region_batch_fourth,device_memory,region_batch_anchor,48,8,3,0);});
+        on_gpu([&] {current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(region_batch_fourth,device_memory,region_batch_anchor,48,8,region_batch_mixed_holes?1:3,region_batch_mixed_holes?12:0);});
         REQUIRE(current_root);
-        REQUIRE(region_batch_first->PlannedReplicaCopy()->HasRoot(region_batch_right,16,1,region_batch_right));
-        REQUIRE(region_batch_fourth->PlannedReplicaCopy()->HasRoot(region_batch_right,16,1,region_batch_right));
+        REQUIRE(region_batch_first->PlannedReplicaCopy()->HasRoot(region_batch_right,region_batch_piece,1,region_batch_right));
+        REQUIRE(region_batch_fourth->PlannedReplicaCopy()->HasRoot(region_batch_right,region_batch_piece,1,region_batch_right));
         if(region_batch_holes) {
             on_gpu([&] {
                 Access::FillPinRange(rasterizer,region_batch_targets[2].pin,24,4,0x42424242);
-                current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(region_batch_fourth,device_memory,region_batch_anchor,24,4,2,24);
+                current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(region_batch_fourth,device_memory,region_batch_anchor,24,4,region_batch_mixed_holes?3:2,region_batch_mixed_holes?4:24);
             });
             REQUIRE_FALSE(current_root);
-            on_gpu([&] {current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(region_batch_fourth,device_memory,region_batch_anchor,28,4,2,28);});
+            on_gpu([&] {current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(region_batch_fourth,device_memory,region_batch_anchor,28,4,region_batch_mixed_holes?3:2,region_batch_mixed_holes?8:28);});
             REQUIRE(current_root);
-            REQUIRE(region_batch_fourth->PlannedReplicaCopy()->HasRoot(24,8,2,24));
+            REQUIRE(region_batch_fourth->PlannedReplicaCopy()->HasRoot(24,8,region_batch_mixed_holes?3:2,region_batch_mixed_holes?4:24));
             std::fill(region_batch_values[2].begin()+24,region_batch_values[2].begin()+28,u8{66});
             on_gpu([&] {region_batch_bytes=Access::ReadPin(rasterizer,region_batch_targets[2].pin);});
             REQUIRE(region_batch_bytes==std::vector<u8>(region_batch_values[2].begin(),region_batch_values[2].end()));
         }
+        if(region_batch_mixed_holes) {
+            on_gpu([&] {
+                for(u64 region_batch_byte=0;region_batch_byte<64;++region_batch_byte) {
+                    const auto region_batch_label=region_batch_labels[2][region_batch_byte];
+                    const bool region_batch_valid=renderer->scheduler.CurrentReplicaCopyHasRoot(region_batch_fourth,device_memory,region_batch_anchor,
+                        region_batch_byte,1,region_batch_label.command,region_batch_label.offset);
+                    const bool region_batch_overwritten=(region_batch_byte>=24&&region_batch_byte<28)||(region_batch_byte>=32&&region_batch_byte<36);
+                    region_batch_current[region_batch_byte]=region_batch_valid==!region_batch_overwritten;
+                }
+            });
+            REQUIRE(std::ranges::all_of(region_batch_current,[](bool region_batch_valid){return region_batch_valid;}));
+        }
         std::weak_ptr<const void> region_batch_payload=region_batch_targets[2].pin.RetainedOwner();
         on_gpu([&] {
             region_batch_owners[2]->RevokeContentEligibility();region_batch_owners[2].reset();region_batch_targets.clear();
-            current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(region_batch_fourth,device_memory,region_batch_anchor,48,8,3,0);
+            current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(region_batch_fourth,device_memory,region_batch_anchor,48,8,region_batch_mixed_holes?1:3,region_batch_mixed_holes?12:0);
         });
         REQUIRE_FALSE(current_root);REQUIRE_FALSE(region_batch_payload.expired());
         on_gpu([&] {
@@ -1806,7 +1849,8 @@ TEST_CASE("Checked write provenance separates emission completion and current re
             if(!rasterizer.SetControlledStorageWriteObservation(false)) throw std::runtime_error("batch observation shutdown refused");
         });
         REQUIRE(region_batch_payload.expired());
-    } // contiguous and non-contiguous native acceptance
+        std::cout<<"PASS native Copy layout="<<region_batch_layout<<" four-hop byte oracle/readback and retained complements\n";
+    } // contiguous, disjoint and multiple mixed-root holes
     std::cout << "PASS checked write provenance: skipped intent, distinct actual submissions, "
                  "repeated dirty interval, historical completion versus current snapshot, "
                  "pending worker, independent replica, remap and retained old native allocation; "
