@@ -426,6 +426,17 @@ four hops. A target still needs a known whole-pin anchor root for its complement
 Actual same-queue submission/barrier/completion and storage/remap gates are
 unchanged. The new native case copies B's 10/99/10 source into C while preserving
 C's outer 20 intervals; unit controls cover partial cancellation, failure, remap,
-retirement and mixed four-hop ancestry. Linux validation is pending. Cross-queue
+retirement and mixed four-hop ancestry. Cross-queue
 Unknown, ordinary selection disabled, no latest-writer authority; F3/F2 stay Open.
 Android remains on demand.
+
+Source `c3cb37cfb1` passed
+[Linux-only workflow 39093574539](https://github.com/Splaser/emulator/actions/runs/39093574539)
+on 2026-10-18: all five CTest processes, native Vulkan provenance 241 assertions
+plus three independent repeats, 46 new mixed-source modes, 51 expected assertion
+failures, 256 new mixed-source byte-oracle prefixes and the full existing
+content/registration/coherency/backing/lifecycle regression suite. All 18 extracted
+input hashes match committed blobs; all 52 fixture logs and downloaded artifacts
+are retained in `.diagnostics/ci-39093574539/`. F3 still fails two fixed-required
+aliases (exit 42); F2 remains backing 77/cache 10. Android was intentionally
+skipped. This documentation-only evidence update does not rerun source CI.

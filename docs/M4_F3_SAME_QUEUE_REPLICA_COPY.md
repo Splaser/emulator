@@ -229,5 +229,25 @@ The native Vulkan witness copies the mixed interval into a third private staged
 allocation, checks all 64 byte roots and the full readback, then overwrites copied
 and untouched portions of B and a partial region of C. It also retains the mixed
 copy's intermediate allocation across asynchronous retirement until trusted idle.
-Linux validation is pending. Cross-queue remains Unknown; ordinary automatic
+Cross-queue remains Unknown; ordinary automatic
 selection, latest-writer publication and production F3/F2 closure remain excluded.
+
+Validation (2026-10-18): source `c3cb37cfb18e79931e359c8dc362131ad7728bf3` passed
+[Linux-only workflow 39093574539](https://github.com/Splaser/emulator/actions/runs/39093574539),
+Linux job `117575230493`:
+
+- Full CLI/shader/unit build and all five CTest processes passed. Native Vulkan
+  provenance passed 241 assertions plus three independent repeated processes,
+  each with 241 assertions, including the mixed readback and 64 byte-root checks.
+- All 46 new mixed-source modes passed alongside 49 single-hop, 44 multi-hop and
+  46 local transfer modes. All 51 mutation controls failed by assertion as required.
+- The byte oracle passed 256 new mixed-source prefixes, 256 preceding multi-hop
+  prefixes and the existing 512 content/2,048 eligibility prefixes. Full physical
+  coherency, registration, backing import and GPU lifecycle regressions passed.
+- All 18 extraction input hashes match committed Git blobs; the artifact source
+  SHA matches this commit. All 52 fixture logs and downloaded artifacts are retained
+  in `.diagnostics/ci-39093574539/`. Original F3 fixed-required mode still fails
+  two alias checks (exit 42); F2 remains `expected=77 observed=10 backing=77`.
+
+Android was intentionally skipped. No device/game acceptance is claimed. The
+documentation-only evidence update does not repeat the same source validation.
