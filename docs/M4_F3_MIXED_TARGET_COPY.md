@@ -155,6 +155,9 @@ must have the expected current root/projection; deliberately wrong roots and
 offsets must reject. Actual Vulkan C readback must match all copied bytes and
 both untouched complements. Later B writes leave captured C history/content
 unchanged; later C writes revoke only overlap. Previous ancestry remains intact.
+The asynchronous native target-retirement case also supplies both mixed source
+and target receipts, retaining the actual allocation until trusted device idle
+while refusing current qualification after retirement.
 
 The extracted-production-body suite adds 40 simultaneous-mixed modes. Both source
 and target partitions have independent tail/gap/overlap/Unknown/projection
@@ -167,6 +170,26 @@ Two extra mutations flatten nonidentity source projection or bypass old-target
 ancestry; both must fail by assertion. These failure injections simulate Vulkan
 dispatch/device execution; native success uses real Vulkan copy and readback.
 
-Linux validation is pending for this source. Cross-queue remains Unknown, no
-ordinary BufferCache selection or physical latest-writer authority is added,
-F2/F3 remain Open, and Android remains on demand.
+Source `9bf69055a71b9c73cefa267d8ead66184520bac9` passed
+[Linux-only workflow 39101068176](https://github.com/Splaser/emulator/actions/runs/39101068176)
+on 2026-10-18. Production targets built and all five CTest processes passed.
+Native Vulkan provenance passed 285 assertions in CTest and all three independent
+repeat runs. This includes the real double-mixed fourth-hop Copy/readback,
+nonidentity root projections, untouched complements, fifth-hop rejection, later
+writes and asynchronous mixed-target retirement described above.
+
+All 40 new simultaneous-mixed deterministic modes and all prior fixtures passed;
+all 61 mutations failed by assertion as required. All 20 extracted input SHA-256
+hashes match committed blobs, and the positive/mutation logs total 62 files.
+Existing standalone byte oracles and the complete registration/coherency/backing/
+lifecycle regressions passed. Downloaded artifacts, extraction manifests,
+mutation logs, native repeat logs and complete job output are retained in
+`.diagnostics/ci-39101068176/`; local focused and extra-mutation logs remain in
+`.diagnostics/m4-combined-*.log`.
+
+Original F3 fixed-required mode still fails both ordinary aliases (expected 99,
+observed 10, exit 42); F2 still reports expected 77, observed 10, backing 77.
+Android was intentionally skipped. Cross-queue remains Unknown, no ordinary
+BufferCache selection or physical latest-writer authority is added, and F2/F3
+remain Open. The following documentation-only evidence commit does not rerun
+unchanged source CI.

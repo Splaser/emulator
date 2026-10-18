@@ -477,6 +477,16 @@ Forty new deterministic simultaneous-mixed modes cover exact partitions,
 stale/Unknown pieces, failure/pending submission, barriers/queue linkage,
 remap and retirement; two added mutations target projection and target ancestry.
 See [M4_F3_MIXED_TARGET_COPY.md](M4_F3_MIXED_TARGET_COPY.md) for the sequence and
-evidence boundaries. Linux validation is pending. Android remains on demand;
+evidence boundaries. Source `9bf69055a7` passed
+[Linux-only workflow 39101068176](https://github.com/Splaser/emulator/actions/runs/39101068176):
+all five CTest processes, native Vulkan provenance 285 assertions plus three
+independent repeats, all 40 new deterministic simultaneous-mixed modes and all
+61 expected assertion mutations. All 20 extracted input hashes match committed
+blobs, with all 62 fixture logs, actual readback/repeat evidence, complete job
+output and registration/coherency/backing/lifecycle regressions retained in
+`.diagnostics/ci-39101068176/`. The native asynchronous retirement case now also
+uses both mixed receipts. Ordinary F3 still fails two fixed-required aliases
+(exit 42); F2 remains backing 77/cache 10. Android was intentionally skipped;
 cross-queue Unknown, no ordinary automatic replica selection or latest-writer
-authority, F2/F3 Open and their original negative witnesses retained.
+authority, F2/F3 Open. This documentation-only evidence update does not rerun
+unchanged source CI.
