@@ -346,7 +346,52 @@ int main() {
         complement={{132,124,1,132}};regions.push_back({0,128,128,4,{},{{128,4,0,128}}});
         assert(!Batch::BuildBatch(anchor,1,0,132,256,regions,{},complement)); // 33 commands.
     }
+    // Independent byte oracle for disjoint overlays and retained internal holes.
+    for (unsigned trial=0;trial<128;++trial) {
+        using Batch=Vulkan::ReplicaCopyProvenance;
+        const std::array<Plan::Offset,3> extents{{64,64,64}};
+        const std::array<Plan::Command,4> initialize{{{Kind::Fill,0,0,0,0,64,99},
+            {Kind::Fill,1,0,0,0,64,10},{Kind::Fill,2,0,0,0,64,20},{Kind::Copy,0,0,16,0,16}}};
+        auto anchor=std::make_shared<const Plan>(*Plan::Build(extents,initialize));
+        std::array<std::array<Plan::Root,64>,3> oracle;
+        for(unsigned slot=0;slot<3;++slot) for(unsigned b=0;b<64;++b) oracle[slot][b]={slot,b};
+        for(unsigned b=16;b<32;++b) oracle[0][b]=oracle[0][b-16];
+        std::shared_ptr<const Batch> previous;
+        for(unsigned hop=0;hop<4;++hop) {
+            std::array<bool,64> written{};
+            std::vector<Batch::Region> writes;
+            // Always retain alternating blocks; vary sources and the other block positions.
+            for(unsigned block=0;block<16;++block) {
+                if(block%4==1 || (next()&0x100u)==0) continue;
+                const unsigned source=next()%2,begin=block*4;
+                std::vector<Batch::RootSpan> roots;
+                for(unsigned b=begin;b<begin+4;++b) {
+                    const auto label=oracle[source][b];
+                    roots.push_back({b,1,label.command,label.offset});written[b]=true;
+                }
+                writes.push_back({source,begin,begin,4,{},std::move(roots)});
+            }
+            if(writes.empty()) {--hop;continue;}
+            std::vector<Batch::RootSpan> retained;
+            for(unsigned b=0;b<64;++b) if(!written[b]) {
+                const auto label=oracle[2][b];retained.push_back({b,1,label.command,label.offset});
+            }
+            const auto begin=writes.front().destination_offset;
+            const auto end=writes.back().destination_offset+4;
+            auto disjoint_plan=Batch::BuildBatch(anchor,2,begin,end-begin,64,writes,previous,retained);
+            assert(disjoint_plan);
+            for(const auto& w:writes) for(unsigned b=w.destination_offset;b<w.destination_offset+w.size;++b)
+                oracle[2][b]=oracle[w.source][b];
+            for(unsigned b=0;b<64;++b) {
+                const auto label=oracle[2][b];
+                assert(disjoint_plan->HasRoot(b,1,label.command,label.offset));
+                assert(!disjoint_plan->HasRoot(b,1,label.command,label.offset+1));
+            }
+            previous=std::make_shared<const Batch>(std::move(*disjoint_plan));
+        }
+        assert(previous->Depth()==4);
+    }
     std::cout << "PASS exact transfer content: partial copies, untouched roots, copy-of-copy, "
                  "source overwrite after copy, Unknown bytes, 512 content/2048 eligibility byte-oracle prefixes, "
-                 "256 multi-hop/256 mixed-source/256 mixed-target byte-oracle prefixes, batch 32-command/64-piece boundaries, bounds and fail-closed eligibility capacity\n";
+                 "256 multi-hop/256 mixed-source/256 mixed-target byte-oracle prefixes, 512 disjoint mixed-target byte-oracle prefixes, batch 32-command/64-piece boundaries, bounds and fail-closed eligibility capacity\n";
 }

@@ -41,9 +41,9 @@ public:
         Offset cursor=begin;size_t root_budget{};
         Index ancestry=destination_copy ? destination_copy->Depth() : 0;
         for (const auto& region : regions) {
-            if (region.source == destination || region.destination_offset != cursor || !region.size ||
+            if (region.source == destination || region.destination_offset < cursor || region.destination_offset > begin + size || !region.size ||
                 (region.source_offset | region.destination_offset | region.size) % 4 ||
-                region.size > begin + size - cursor || region.size > std::numeric_limits<Offset>::max() - region.source_offset ||
+                region.size > begin + size - region.destination_offset || region.size > std::numeric_limits<Offset>::max() - region.source_offset ||
                 region.roots.empty() || (root_budget += region.roots.size()) > MaxRootSpans ||
                 (region.source_copy && (region.source_copy->ParentContent() != parent ||
                     region.source_copy->DestinationBuffer() != region.source || region.source_copy->Depth() >= MaxHops))) return {};
@@ -56,19 +56,27 @@ public:
             }
             if (source_cursor != region.source_offset + region.size) return {};
             ancestry=std::max(ancestry,region.source_copy ? region.source_copy->Depth() : 0u);
-            cursor += region.size;
+            cursor = region.destination_offset + region.size;
         }
         if (cursor != begin + size || complements.size() > MaxRootSpans) return {};
+        // Merge the exact write union with independently proven old destination pieces.
+        // A bounding window is not a write footprint: internal holes must be retained too.
         Offset retained{};
+        size_t next_region{};
+        const auto skip_writes = [&] {
+            while (next_region < regions.size() && regions[next_region].destination_offset == retained) {
+                retained += regions[next_region++].size;
+            }
+        };
         for (const auto& part : complements) {
-            if (retained == begin) retained += size;
-            if (part.offset != retained || !part.size || part.size > extent - retained ||
-                (part.offset < begin + size && begin < part.offset + part.size) ||
+            skip_writes();
+            const auto limit = next_region < regions.size() ? regions[next_region].destination_offset : extent;
+            if (part.offset != retained || !part.size || part.size > limit - retained ||
                 !(destination_copy ? destination_copy->HasRoot(part.offset,part.size,part.fill,part.root_offset)
                     : parent->HasRoot(destination,part.offset,part.size,part.fill,part.root_offset))) return {};
             retained += part.size;
         }
-        if (retained == begin) retained += size;
+        skip_writes();
         if (retained != extent) return {};
         ReplicaCopyProvenance plan{std::move(parent),0,destination,0,begin,size,extent,{}, {},std::move(destination_copy),complements};
         plan.regions.assign(regions.begin(),regions.end()); // Own every source partition before recording.

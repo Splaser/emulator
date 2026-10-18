@@ -172,6 +172,9 @@ if a.content:
     for name, guard, replacement, count in [
         ('batch-without-current-qualification', 'if (!qualify()) return {};', 'if ((static_cast<void>(qualify), false)) return {};', 2),
         ('batch-without-planned-revocation', 'RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', '(void)destination;', 1),
+        ('batch-revokes-internal-holes', 'RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 'if (transfer->replica_copy && transfer->replica_copy->IsBatch()) { const auto r=transfer->replica_copy->Regions(); RevokeBufferContent(destination.Handle(), destination.Offset()+r.front().destination_offset,r.back().destination_offset+r.back().size-r.front().destination_offset); } else RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 1),
+        ('batch-keeps-unrecorded-suffix', 'RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 'if (operation.destination_offset == transfer->content->Commands().front().destination_offset) RevokeBufferContent(destination.Handle(), destination.Offset() + operation.destination_offset, operation.size);', 1),
+        ('batch-without-hole-current-gate', 'for (const auto& part : plan->DestinationRoots())\n                    if (', 'for (const auto& part : plan->DestinationRoots())\n                    if (part.offset >= request.destination_offset && part.offset < request.destination_offset + request.size) continue; else if (', 1),
         ('batch-records-only-prefix', 'transfer->positions[index++] = journal.RecordAccess();', 'transfer->positions[index++] = journal.RecordAccess(); if (transfer->replica_copy && transfer->replica_copy->IsBatch()) break;', 1),
         ('target-current-prefix-only', 'for (const auto& part : plan->DestinationRoots()) {', 'for (const auto& part : plan->DestinationRoots()) {\n                        if (&part != plan->DestinationRoots().data()) break;', 1),
         ('target-without-completed-history', '!CompletedReplicaCopy(destination_receipt, parent)', 'false', 1),
@@ -232,7 +235,7 @@ if a.content:
     expanded = expanded.replace('#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"', replica_header)
     for name, guard, replacement in [
         ('combined-source-flattens-projection', 'source_copy->HasRoot(parent_offset, end - begin, fill, root_offset + begin - offset)', 'source_copy->HasRoot(parent_offset, end - begin, fill, parent_offset)'),
-        ('batch-without-unique-coverage', 'region.destination_offset != cursor || ', ''),
+        ('batch-without-complement-coverage', 'if (retained != extent) return {};', ''),
         ('batch-without-window-tail', 'cursor != begin + size || ', ''),
         ('batch-flattens-root-projection', 'parent->HasRoot(region.source,projection,end-begin,fill,root_offset+begin-offset)', 'parent->HasRoot(region.source,projection,end-begin,fill,projection)'),
         ('combined-complement-uses-anchor', ': !copied && destination_copy', ': false && destination_copy'),
