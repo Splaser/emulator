@@ -95,6 +95,22 @@ void TestReconciliationPlanner() {
             const bool uncertain=mode==SubmitFailure||mode==UncertainSubmit;
             assert(s->scheduler.CurrentTransferHasRoot(anchor,s->runtime.test_mapping,2,b,1,old[b].root,old[b].offset)==(!uncertain&&!copied));
         }
+        if(mode==Good) {
+            std::vector<R> current_target;
+            for(u64 b=0;b<64;++b) {
+                const bool copied=(b>=8&&b<16)||(b>=32&&b<40)||b>=56;
+                const auto label=copied?oracle[b>=32&&b<40?1:0][b]:old[b];
+                if(!current_target.empty()&&current_target.back().fill==label.root&&current_target.back().root_offset+current_target.back().size==label.offset)
+                    ++current_target.back().size;
+                else current_target.push_back({b,1,label.root,label.offset});
+            }
+            replicas[2]={2,result,current_target};
+            const auto before=s->scheduler.commands.size();
+            const auto second_plan=s->scheduler.PlanControlledReconciliation(s->runtime.test_mapping,
+                {anchor,{targets[2].physical->Backing(),targets[2].physical->Segments().front().physical_offset,64},2,replicas});
+            assert(second_plan.state==State::Candidate && second_plan.reason==Reason::None && second_plan.content->Depth()==2);
+            assert(s->scheduler.commands.size()==before);
+        }
         assert(plan.state==State::Candidate && plan.content==metadata); // Immutable recipe, not a mutable content/authority certificate.
         s->scheduler.RetireCheckedWritesAfterDeviceIdle();
     }

@@ -17,8 +17,8 @@ Native allocations must be distinct. An offered source must also have a distinct
 DAddr from the target, preserving existing controlled admission restrictions.
 
 Each source supplies only explicitly **offered** `RootSpan` intervals from that
-anchor or its existing copy receipt. The target supplies a complete logical
-historical partition. Offers are the caller's requested patch coverage, not a
+anchor or its existing copy receipt. The target supplies a structurally complete logical
+historical partition; only retained pieces require historical/current proof. Offers are the caller's requested patch coverage, not a
 registry of all physical producers or a claim that unlisted replicas are older.
 The planner never guesses desired physical contents. Target bytes outside the
 union of offered intervals must have independently known and current content.
@@ -119,8 +119,11 @@ are checked individually. Four new adapter mutants join the prior 74 assertion
 mutants; all 78 are required. These injections are model evidence, not hardware
 failure recovery or ordinary Draw/Dispatch validation.
 
-The existing Linux Vulkan mixed-hole layout now obtains its first three-region
-Copy from the planner and passes it through existing admission. The same accepted
+The existing Linux Vulkan mixed-hole layout now obtains its first and fourth
+three-region Copies from the planner and passes them through existing admission.
+The fourth query consumes a completed legacy source receipt and a completed batch
+target receipt on the actual shared queue spine. A separate extracted-body query
+checks an existing target receipt without recording another Copy. The same accepted
 Copy combination, four-hop receipts, independent root/value oracle and actual
 readback remain in use; no new Copy expression has been introduced. The workflow
 adds pure planner tests/mutations and their full artifact directory, while keeping
@@ -137,3 +140,13 @@ assertion with the new API initially returning refusal, not a claimed prior F3
 production defect. Local logic and extracted-body transcripts are
 `.diagnostics/reconciliation-logic-local.log` and
 `.diagnostics/reconciliation-integration-local.log`.
+
+
+The first Linux run
+[39122121531](https://github.com/Splaser/emulator/actions/runs/39122121531)
+rejected the `without-input-budget` mutant at compile time: GCC diagnosed `pieces`
+as set-but-unused after the guard was removed. That result is **not** accepted as
+a mutation assertion. The mutant now reads the counter explicitly while bypassing
+the condition; `-Werror` remains intact. The failed job/artifacts are retained in
+`.diagnostics/ci-39122121531/`. Receipt-input acceptance was also strengthened
+before the corrected source validation; production planner semantics are unchanged.

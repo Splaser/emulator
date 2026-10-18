@@ -1789,8 +1789,40 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         region_batch_regions[0].source=3;region_batch_regions[0].source_receipt=region_batch_second;
         region_batch_regions[1].source=1;region_batch_regions[1].source_receipt.reset();
         if(region_batch_mixed_holes) {region_batch_regions[2].source=3;region_batch_regions[2].source_receipt=region_batch_second;}
-        on_gpu([&] {region_batch_fourth=renderer->scheduler.RecordControlledReplicaCopies(device_memory,
-            {region_batch_anchor,2,8,region_batch_window,region_batch_regions,region_batch_third,region_batch_complements});});
+        Vulkan::BoundedReconciliationPlanner::Result region_batch_later_candidate;
+        std::vector<Vulkan::Scheduler::ReplicaCopyRegion> region_batch_later_regions;
+        if(region_batch_mixed_holes) {
+            const std::array<ReplicaRoot,2> region_batch_later_offers{{{8,8,0,0},{56,8,0,32}}};
+            std::vector<ReplicaRoot> region_batch_later_target;
+            for(u64 region_batch_byte=0;region_batch_byte<64;++region_batch_byte) {
+                const auto region_batch_label=region_batch_labels[2][region_batch_byte];
+                if(!region_batch_later_target.empty() && region_batch_later_target.back().fill==region_batch_label.command &&
+                    region_batch_later_target.back().root_offset+region_batch_later_target.back().size==region_batch_label.offset)
+                    ++region_batch_later_target.back().size;
+                else region_batch_later_target.push_back({region_batch_byte,1,region_batch_label.command,region_batch_label.offset});
+            }
+            const std::array<Vulkan::Scheduler::ReconciliationReplica,3> region_batch_later_inputs{{
+                {3,region_batch_second,region_batch_later_offers},{1,{},region_batch_roots_b},{2,region_batch_third,region_batch_later_target}}};
+            on_gpu([&] {
+                const auto& region_batch_physical=region_batch_targets[2].physical;
+                region_batch_later_candidate=renderer->scheduler.PlanControlledReconciliation(device_memory,
+                    {region_batch_anchor,{region_batch_physical->Backing(),region_batch_physical->Segments().front().physical_offset,64},2,region_batch_later_inputs});
+            });
+            CAPTURE(static_cast<int>(region_batch_later_candidate.reason));
+            REQUIRE(region_batch_later_candidate.state==Vulkan::BoundedReconciliationPlanner::State::Candidate);
+            REQUIRE(region_batch_later_candidate.reason==Vulkan::BoundedReconciliationPlanner::Reason::None);
+            REQUIRE(region_batch_later_candidate.content);
+            for(const auto& region_batch_region:region_batch_later_candidate.content->Regions())
+                region_batch_later_regions.push_back({region_batch_region.source,region_batch_region.source_offset,
+                    region_batch_region.destination_offset,region_batch_region.size,
+                    region_batch_region.source==3?region_batch_second:Vulkan::Scheduler::Transfer{},region_batch_region.roots});
+        }
+        on_gpu([&] {
+            if(region_batch_mixed_holes) region_batch_fourth=renderer->scheduler.RecordControlledReplicaCopies(device_memory,
+                {region_batch_anchor,2,8,region_batch_window,region_batch_later_regions,region_batch_third,region_batch_later_candidate.content->DestinationRoots()});
+            else region_batch_fourth=renderer->scheduler.RecordControlledReplicaCopies(device_memory,
+                {region_batch_anchor,2,8,region_batch_window,region_batch_regions,region_batch_third,region_batch_complements});
+        });
         REQUIRE(region_batch_fourth);finish_content(region_batch_fourth);region_batch_oracle_copy(3,2,8,region_batch_piece);region_batch_oracle_copy(1,2,region_batch_right,region_batch_piece);
         if(region_batch_mixed_holes) region_batch_oracle_copy(3,2,56,8);
         REQUIRE(region_batch_fourth->PlannedReplicaCopy()->Depth()==4);

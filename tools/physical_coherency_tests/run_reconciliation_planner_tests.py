@@ -43,7 +43,7 @@ mutations = [
     ('without-backing-identity', 'if (physical->Backing()!=scope.backing)', 'if (false)'),
     ('without-mapping-generation', 'if (!physical->CapturedEpochCurrent())', 'if (false)'),
     ('without-physical-projection', 'segment.physical_offset!=scope.offset+mapped', 'false'),
-    ('without-input-budget', 'if (replica.roots.size()>P::MaxRootSpans-pieces)', 'if (false)'),
+    ('without-input-budget', 'if (replica.roots.size()>P::MaxRootSpans-pieces)', 'if ((static_cast<void>(pieces), false))'),
     ('without-replica-budget', 'request.replicas.size()>3 || ', ''),
 ]
 for name, guard, replacement in mutations:
