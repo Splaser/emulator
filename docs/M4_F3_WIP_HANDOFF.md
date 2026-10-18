@@ -518,3 +518,35 @@ F3 still fails two fixed-required aliases (exit 42); F2 remains backing 77/cache
 10. F2/F3 remain Open, cross-queue Unknown, no ordinary automatic selection or
 physical authority. Android was intentionally skipped. This documentation-only
 evidence update does not rerun unchanged source CI.
+
+
+### Non-contiguous explicit-source controlled Copy (2026-10-18)
+
+Source `d223b5ca33` extends the existing bounded batch provenance partition to
+allow internal holes as independently qualified untouched complement. It changes
+only the metadata merge, reusing per-command planned cancellation, actual checked
+submission spine, barriers, immutable roots, mapping/native identity and retained
+pins. Partial recording leaves all possible write intervals unqualified, including
+unrecorded suffixes; old hole evidence can survive independently. A separately
+flushed hole Fill cancels its overlap alone. Submit-domain uncertainty remains
+conservatively global Unknown; there is no rollback or fabricated completion.
+
+[Linux-only run 39111978882](https://github.com/Splaser/emulator/actions/runs/39111978882)
+passed real Scheduler/BufferCache compilation, CLI/shader/tests, all five CTest
+processes and the full registration/coherency/backing/lifecycle regressions.
+Native Vulkan provenance now has 351 assertions plus three repeats; both
+contiguous and disjoint four-hop chains compare complete readback and all root
+projections with independent oracles, reject a fifth hop and retain local hole
+cancellation/retirement rules. The extracted fixture has 35 contiguous and 41
+non-contiguous modes plus three repeats; all 70 assertion mutations and standalone
+512 new disjoint oracle prefixes pass their expected checks. Exact source and all
+21 extracted input hashes match committed blobs. Complete Linux/artifact output,
+all 71 fixture transcripts, local red/green/repeat evidence and a verified index
+are retained in `.diagnostics/ci-39111978882/`.
+
+See [M4_F3_DISJOINT_COPY.md](M4_F3_DISJOINT_COPY.md) for the contract, changed files,
+fault-model boundaries and complete acceptance. Android was skipped. F3 fixed
+required still has two expected 99/observed 10 failures (exit 42); F2 remains
+backing 77/cache 10. F2/F3 stay Open, restricted eligibility blocked, cross queue
+Unknown; no ordinary automatic replica selection or latest-writer authority.
+This evidence-only follow-up does not rerun unchanged source CI.

@@ -1,5 +1,9 @@
 # M4/F3: explicit-source same-queue multi-region Copy
 
+This is the contiguous-window acceptance record. The later
+[non-contiguous extension](M4_F3_DISJOINT_COPY.md) supersedes its internal-hole
+restriction while preserving this baseline evidence.
+
 Baseline: `70fc6ae474`. This extends the existing controlled receipt/provenance
 mechanism; it does not select replicas or establish physical content authority.
 

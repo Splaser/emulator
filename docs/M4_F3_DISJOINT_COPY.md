@@ -80,7 +80,54 @@ authority, and does not establish F2/F3 production correctness.
 
 ## Verification record
 
-Pending final source commit and Linux CI. Local baseline red evidence:
-`.diagnostics/m4-disjoint-red.log`, assertion `bool(result)==!refused` on the new
-non-contiguous positive case. Local focused acceptance and mutations are in
-`.diagnostics/m4-disjoint-green.log`; full final evidence is recorded separately.
+Source `d223b5ca33dce80283f0b44c6256c62394caedcc` passed
+[Linux-only run 39111978882](https://github.com/Splaser/emulator/actions/runs/39111978882),
+Linux job `117629864396`; Android job intentionally skipped. Acceptance includes:
+
+- Actual Scheduler/BufferCache translation units, CLI/shader/test builds, all five
+  CTest processes and all existing registration/coherency/backing/lifecycle suites.
+- Native Vulkan provenance: 351 assertions, plus three independent passing runs;
+  both contiguous and non-contiguous four-hop variants, complete readback, exact
+  roots/projections, old hole qualification, later local cancellation and pin retirement.
+- Extracted-production-body fixture: 35 contiguous and 41 non-contiguous modes,
+  plus three independent repeats. All 70 mutation variants failed by assertion;
+  all 71 fixture transcripts are retained (one positive plus 70 mutations).
+- Standalone 512 disjoint mixed-target byte-oracle prefixes, existing content,
+  eligibility, multi-hop and mixed-source/target oracles, and 32/64-piece bounds.
+- Exact source file equals the accepted SHA; all 21 extracted input SHA-256 hashes
+  match committed Git blobs. This checks the tested implementation, not just filenames.
+- Original F3 full/partial aliases still report expected 99 / observed 10; its
+  fixed-required run has two assertion failures and exit 42. F2 remains expected
+  77 / observed 10 / backing 77. These are preserved defects, not acceptance of a fix.
+
+Complete artifact files, generated sources/executables, extraction manifest,
+CTest output and complete Linux job output are archived under
+`.diagnostics/ci-39111978882/`. The independently checked index is
+`verified-acceptance.json`. Local baseline red assertion
+`bool(result)==!refused` is preserved in `m4-disjoint-red.log`; local focused
+acceptance, all mutation results and three repeat logs are retained alongside
+the CI archive. Initial focused checks exposed a fixture Fill that had not been
+flushed, and a shadowed standalone-test local; both were fixed before the source
+commit without relaxing assertions or compiler warnings. Final source CI passed
+on its first run; no unchanged source validation was retriggered.
+
+Changed source/test files:
+
+- `src/video_core/renderer_vulkan/vk_replica_copy_provenance.h`: exact disjoint
+  write/complement merge; existing submission/eligibility machinery is reused.
+- `src/tests/core/controlled_cpu_scheduler.cpp`: real Vulkan contiguous/disjoint
+  four-hop acceptance, oracle/readback and local hole invalidation.
+- `tools/physical_coherency_tests/multi_region_fixture.cpp.in`: deterministic
+  positive/negative and execution-uncertainty probes.
+- `tools/physical_coherency_tests/run_sync_provenance_tests.py`: 70 expected
+  assertion mutants, including hole cancellation and qualification faults.
+- `tools/physical_coherency_tests/transfer_content_tests.cpp`: 512 independent
+  disjoint mixed-target root-oracle prefixes.
+
+This document defines the extension and acceptance; the prior multi-region
+record and WIP handoff link it separately. No workflow change was needed because
+the existing Linux scope already builds the affected real production units and
+runs the complete suites. Actual hardware device-loss behavior, cross-queue
+provenance, ordinary automatic selection and latest-writer authority remain
+unproved. Submission-domain uncertainty may reject all holes conservatively.
+Original F2/F3 and M3B restricted production eligibility remain Open/blocked.
