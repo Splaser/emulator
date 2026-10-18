@@ -464,3 +464,19 @@ regressions are retained in `.diagnostics/ci-39095898124/`. Original ordinary F3
 still fails two fixed-required aliases (exit 42); F2 remains backing 77/cache 10.
 Android was intentionally skipped. F2/F3 remain Open. This evidence-only
 documentation update does not repeat source CI.
+
+### Simultaneously mixed source/target acceptance (2026-10-18)
+
+The existing native mixed-target case now uses mixed B and mixed C together on
+its fourth actual copy. An anchor disjoint copy makes root offsets nonidentical
+to allocation offsets. The independent byte oracle checks all C roots,
+projections, untouched complements and actual readback; later source/target
+writes check immutable history versus current overlap qualification. A fifth
+hop refuses. No production implementation or queue/admission rules change.
+Forty new deterministic simultaneous-mixed modes cover exact partitions,
+stale/Unknown pieces, failure/pending submission, barriers/queue linkage,
+remap and retirement; two added mutations target projection and target ancestry.
+See [M4_F3_MIXED_TARGET_COPY.md](M4_F3_MIXED_TARGET_COPY.md) for the sequence and
+evidence boundaries. Linux validation is pending. Android remains on demand;
+cross-queue Unknown, no ordinary automatic replica selection or latest-writer
+authority, F2/F3 Open and their original negative witnesses retained.

@@ -1529,16 +1529,21 @@ TEST_CASE("Checked write provenance separates emission completion and current re
             target_labels[oracle_destination][oracle_byte]=target_labels[oracle_source][oracle_byte];
         }
     };
-    on_gpu([&] {target_anchor=renderer->scheduler.RecordTransferBatch(isolated_targets,replica_initialize);});
+    // Seed a nonidentity root projection inside the anchor using a real disjoint Copy.
+    for(u64 oracle_byte=16;oracle_byte<32;++oracle_byte) target_labels[0][oracle_byte].offset=oracle_byte-16;
+    std::vector<Content::Command> target_initialize(replica_initialize.begin(),replica_initialize.end());
+    target_initialize.push_back({Kind::Copy,0,0,16,0,16});
+    const std::array<ReplicaRoot,3> target_incoming{{{8,8,1,8},{16,16,0,0},{32,8,1,32}}};
+    on_gpu([&] {target_anchor=renderer->scheduler.RecordTransferBatch(isolated_targets,target_initialize);});
     REQUIRE(target_anchor);finish_content(target_anchor);
     on_gpu([&] {target_first=renderer->scheduler.RecordControlledReplicaCopy(device_memory,
-        {target_anchor,0,1,16,16,16,0,1,16,0});});
+        {target_anchor,0,1,16,16,16,0,1,0,0});});
     REQUIRE(target_first);finish_content(target_first);target_oracle_copy(0,1,16,16);
     on_gpu([&] {target_mixed=renderer->scheduler.RecordControlledReplicaCopy(device_memory,
-        {target_anchor,1,2,8,8,32,0,2,8,0,target_first,mixed_source_roots});});
+        {target_anchor,1,2,8,8,32,0,2,8,0,target_first,target_incoming});});
     REQUIRE(target_mixed);finish_content(target_mixed);target_oracle_copy(1,2,8,32);
     const auto old_target_history=target_mixed->PlannedReplicaCopy();
-    const std::array<ReplicaRoot,5> target_complements{{{0,8,2,0},{8,4,1,8},{28,4,0,28},{32,8,1,32},{40,24,2,40}}};
+    const std::array<ReplicaRoot,5> target_complements{{{0,8,2,0},{8,4,1,8},{28,4,0,12},{32,8,1,32},{40,24,2,40}}};
     on_gpu([&] {target_patch=renderer->scheduler.RecordControlledReplicaCopy(device_memory,
         {target_anchor,3,2,12,12,16,3,2,12,0,{}, {},target_mixed,target_complements});});
     REQUIRE(target_patch);finish_content(target_patch);target_oracle_copy(3,2,12,16);
@@ -1548,54 +1553,64 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     std::array<bool,3> old_target_current{};
     on_gpu([&] {
         old_target_current[0]=renderer->scheduler.CurrentReplicaCopyHasRoot(target_mixed,device_memory,target_anchor,0,8,2,0);
-        old_target_current[1]=renderer->scheduler.CurrentReplicaCopyHasRoot(target_mixed,device_memory,target_anchor,28,4,0,28);
+        old_target_current[1]=renderer->scheduler.CurrentReplicaCopyHasRoot(target_mixed,device_memory,target_anchor,28,4,0,12);
         old_target_current[2]=renderer->scheduler.CurrentReplicaCopyHasRoot(target_mixed,device_memory,target_anchor,12,4,1,12);
     });
     REQUIRE(old_target_current[0]);REQUIRE(old_target_current[1]);REQUIRE_FALSE(old_target_current[2]);
     REQUIRE(old_target_history->HasRoot(12,4,1,12));
-    const std::array<ReplicaRoot,6> downstream_roots{{{4,4,2,4},{8,4,1,8},{12,16,3,12},{28,4,0,28},{32,8,1,32},{40,4,2,40}}};
+    // Both ends are mixed: B=10/99/10, C=20/10/30/99/10/20.
+    // Replacing D's interval with B's roots changes the actual copied bytes.
+    const std::array<ReplicaRoot,3> combined_source{{{12,4,1,12},{16,16,0,0},{32,4,1,32}}};
+    const std::array<ReplicaRoot,4> combined_complement{{{0,8,2,0},{8,4,1,8},{36,4,1,36},{40,24,2,40}}};
     on_gpu([&] {target_downstream=renderer->scheduler.RecordControlledReplicaCopy(device_memory,
-        {target_anchor,2,4,4,4,40,0,4,4,0,target_patch,downstream_roots});});
-    REQUIRE(target_downstream);finish_content(target_downstream);target_oracle_copy(2,4,4,40);
-    REQUIRE(target_downstream->PlannedReplicaCopy()->Depth()==4);
-    std::array<bool,64> target_byte_current{},downstream_byte_current{};
-    std::vector<u8> downstream_bytes;
+        {target_anchor,1,2,12,12,24,0,2,12,0,target_first,combined_source,target_patch,combined_complement});});
+    REQUIRE(target_downstream);finish_content(target_downstream);target_oracle_copy(1,2,12,24);
+    const auto combined_history=target_downstream->PlannedReplicaCopy();
+    REQUIRE(combined_history->Depth()==4);
+    REQUIRE(combined_history->SourceCopy()==target_first->PlannedReplicaCopy());
+    REQUIRE(combined_history->DestinationCopy()==target_patch->PlannedReplicaCopy());
+    REQUIRE(std::ranges::equal(combined_history->SourceRoots(),combined_source));
+    REQUIRE(std::ranges::equal(combined_history->DestinationRoots(),combined_complement));
+    // The fifth hop is refused before recording and cannot alter C or its old ancestry.
+    Vulkan::Scheduler::Transfer refused_fifth;
+    on_gpu([&] {refused_fifth=renderer->scheduler.RecordControlledReplicaCopy(device_memory,
+        {target_anchor,2,4,12,12,24,0,4,12,0,target_downstream,combined_source});});
+    REQUIRE_FALSE(refused_fifth);
+    std::array<bool,64> combined_current{},wrong_projection{},wrong_root{};
     on_gpu([&] {
         for(u64 oracle_byte=0;oracle_byte<64;++oracle_byte) {
-            const auto target_label=target_labels[2][oracle_byte],downstream_label=target_labels[4][oracle_byte];
-            target_byte_current[oracle_byte]=renderer->scheduler.CurrentReplicaCopyHasRoot(target_patch,device_memory,target_anchor,
-                oracle_byte,1,target_label.command,target_label.offset);
-            downstream_byte_current[oracle_byte]=renderer->scheduler.CurrentReplicaCopyHasRoot(target_downstream,device_memory,target_anchor,
-                oracle_byte,1,downstream_label.command,downstream_label.offset);
+            const auto label=target_labels[2][oracle_byte];
+            combined_current[oracle_byte]=renderer->scheduler.CurrentReplicaCopyHasRoot(target_downstream,device_memory,target_anchor,
+                oracle_byte,1,label.command,label.offset);
+            wrong_projection[oracle_byte]=combined_history->HasRoot(oracle_byte,1,label.command,label.offset+1);
+            wrong_root[oracle_byte]=combined_history->HasRoot(oracle_byte,1,(label.command+1)%5,label.offset);
         }
         content_c=Access::ReadPin(rasterizer,isolated_targets[2].pin);
-        downstream_bytes=Access::ReadPin(rasterizer,isolated_targets[4].pin);
     });
-    REQUIRE(std::ranges::all_of(target_byte_current,[](bool root_valid){return root_valid;}));
-    REQUIRE(std::ranges::all_of(downstream_byte_current,[](bool root_valid){return root_valid;}));
+    REQUIRE(std::ranges::all_of(combined_current,[](bool valid){return valid;}));
+    REQUIRE(std::ranges::none_of(wrong_projection,[](bool valid){return valid;}));
+    REQUIRE(std::ranges::none_of(wrong_root,[](bool valid){return valid;}));
     REQUIRE(content_c==std::vector<u8>(target_values[2].begin(),target_values[2].end()));
-    REQUIRE(downstream_bytes==std::vector<u8>(target_values[4].begin(),target_values[4].end()));
     on_gpu([&] {
-        Access::FillPinRange(rasterizer,isolated_targets[3].pin,12,4,0x4d4d4d4d);
-        current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(target_patch,device_memory,target_anchor,12,16,3,12);
+        Access::FillPinRange(rasterizer,isolated_targets[1].pin,16,4,0x4d4d4d4d);
+        current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(target_downstream,device_memory,target_anchor,16,16,0,0);
     });
-    REQUIRE(current_root); // Later source writes cannot rebase the completed target.
+    REQUIRE(current_root); // Later mixed-source writes do not rebase captured target bytes.
     on_gpu([&] {
         Access::FillPinRange(rasterizer,isolated_targets[2].pin,12,4,0x58585858);
-        current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(target_patch,device_memory,target_anchor,12,16,3,12);
+        current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(target_downstream,device_memory,target_anchor,12,4,1,12);
         content_c=Access::ReadPin(rasterizer,isolated_targets[2].pin);
-        downstream_bytes=Access::ReadPin(rasterizer,isolated_targets[4].pin);
     });
     REQUIRE_FALSE(current_root);
     std::fill(target_values[2].begin()+12,target_values[2].begin()+16,u8{88});
     REQUIRE(content_c==std::vector<u8>(target_values[2].begin(),target_values[2].end()));
-    REQUIRE(downstream_bytes==std::vector<u8>(target_values[4].begin(),target_values[4].end()));
-    on_gpu([&] {current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(target_patch,device_memory,target_anchor,16,12,3,16);});
+    on_gpu([&] {current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(target_downstream,device_memory,target_anchor,16,16,0,0);});
     REQUIRE(current_root);
-    on_gpu([&] {current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(target_patch,device_memory,target_anchor,8,4,1,8);});
+    on_gpu([&] {current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(target_downstream,device_memory,target_anchor,8,4,1,8);});
     REQUIRE(current_root);
-    on_gpu([&] {current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(target_downstream,device_memory,target_anchor,12,16,3,12);});
-    REQUIRE(current_root); // Intermediate target writes do not revoke captured downstream bytes.
+    on_gpu([&] {current_root=renderer->scheduler.CurrentReplicaCopyHasRoot(target_downstream,device_memory,target_anchor,36,4,1,36);});
+    REQUIRE(current_root);
+    REQUIRE(combined_history->HasRoot(12,4,1,12));
     REQUIRE(target_patch->PlannedReplicaCopy()->HasRoot(12,16,3,12));
     REQUIRE(target_mixed->PlannedReplicaCopy()==old_target_history);
     on_gpu([&] { asynchronous_parent = renderer->scheduler.RecordTransferBatch(isolated_targets, replica_initialize); });
@@ -1610,10 +1625,12 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     on_gpu([&] {asynchronous_mixed=renderer->scheduler.RecordControlledReplicaCopy(device_memory,
         {asynchronous_parent,1,2,8,8,32,0,2,8,0,asynchronous_first,mixed_source_roots});});
     REQUIRE(asynchronous_mixed);finish_content(asynchronous_mixed);
+    const std::array<ReplicaRoot,3> asynchronous_source{{{12,4,1,12},{16,16,0,16},{32,4,1,32}}};
+    const std::array<ReplicaRoot,4> asynchronous_complements{{{0,8,2,0},{8,4,1,8},{36,4,1,36},{40,24,2,40}}};
     std::weak_ptr<const void> asynchronous_payload = isolated_targets[2].pin.RetainedOwner();
     on_gpu([&] {
         asynchronous_copy = renderer->scheduler.RecordControlledReplicaCopy(device_memory,
-            {asynchronous_parent,3,2,12,12,16,3,2,12,0,{}, {},asynchronous_mixed,target_complements});
+            {asynchronous_parent,1,2,12,12,24,0,2,12,0,asynchronous_first,asynchronous_source,asynchronous_mixed,asynchronous_complements});
         if (!asynchronous_copy) throw std::runtime_error("asynchronous copy refused");
         isolated_owners[2]->RevokeContentEligibility();
         isolated_owners[2].reset();

@@ -133,3 +133,40 @@ The original ordinary F3 fixed-required witness still fails both aliases
 `expected=77 observed=10 backing=77`. Android was intentionally skipped. F2/F3
 remain Open; controlled success does not close those production defects. The
 following evidence-only documentation commit does not repeat source CI.
+
+## Simultaneously mixed source and target (2026-10-18)
+
+This acceptance slice uses the existing implementation unchanged. The native
+test now exercises both receipt inputs on its fourth actual same-queue copy:
+
+1. The anchor fills A/B/C/D/E with 99/10/20/30/40, then copies A `[0,16)`
+   into its disjoint `[16,32)`. Those bytes now project to original root offsets
+   `[0,16)`, rather than allocation offsets `[16,32)`.
+2. A to B `[16,32)` creates a mixed B; B to C `[8,40)` creates a mixed C.
+3. D to C `[12,28)` changes real C bytes while preserving its mixed complements.
+4. Mixed B to mixed C `[12,36)` uses the first source receipt and third target
+   receipt. Their exact three-piece source and four-piece complement partitions
+   are verified on the same retained submission spine. The new receipt is depth
+   four; a fifth hop must refuse before recording.
+
+An independent per-byte value/root/offset oracle applies the seed and copies
+without querying production provenance to construct expectations. All 64 bytes
+must have the expected current root/projection; deliberately wrong roots and
+offsets must reject. Actual Vulkan C readback must match all copied bytes and
+both untouched complements. Later B writes leave captured C history/content
+unchanged; later C writes revoke only overlap. Previous ancestry remains intact.
+
+The extracted-production-body suite adds 40 simultaneous-mixed modes. Both source
+and target partitions have independent tail/gap/overlap/Unknown/projection
+controls, including stale first/middle/last source pieces and stale left/right
+complements. Stale overwritten target bytes may be replaced. Failed or pending
+target history, failed new submission, missing source/target/final barriers,
+broken queue linkage/identity, remap before admission/worker/after completion,
+retired source/target/ancestor, and borrowed declaration lifetime are checked.
+Two extra mutations flatten nonidentity source projection or bypass old-target
+ancestry; both must fail by assertion. These failure injections simulate Vulkan
+dispatch/device execution; native success uses real Vulkan copy and readback.
+
+Linux validation is pending for this source. Cross-queue remains Unknown, no
+ordinary BufferCache selection or physical latest-writer authority is added,
+F2/F3 remain Open, and Android remains on demand.

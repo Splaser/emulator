@@ -132,7 +132,8 @@ if a.content:
     source += read('tools/physical_coherency_tests/replica_copy_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/mixed_replica_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/destination_replica_fixture.cpp.in')
-source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();' if a.content else '') + '}\n'
+    source += read('tools/physical_coherency_tests/combined_replica_fixture.cpp.in')
+source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();TestCombinedReplicaCopy();' if a.content else '') + '}\n'
 command = [a.cxx, '-std=c++23', '-O1', '-Wall', '-Wextra', '-Werror',
            '-Wno-unused-parameter', '-Wno-missing-field-initializers',
            '-I', str(out / 'stubs'), '-I', str(root / 'src'),
@@ -224,6 +225,8 @@ if a.content:
         '#include "video_core/renderer_vulkan/vk_transfer_content.h"', '')
     expanded = expanded.replace('#include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"', replica_header)
     for name, guard, replacement in [
+        ('combined-source-flattens-projection', 'source_copy->HasRoot(parent_offset, end - begin, fill, root_offset + begin - offset)', 'source_copy->HasRoot(parent_offset, end - begin, fill, parent_offset)'),
+        ('combined-complement-uses-anchor', ': !copied && destination_copy', ': false && destination_copy'),
         ('target-without-complement-tail', 'if (preserved != destination_size) return {};', '/* missing complement suffix */'),
         ('target-without-complement-order', 'part.offset != preserved || ', ''),
         ('target-with-covered-complement', '(part.offset < destination_offset + size && destination_offset < part.offset + part.size) ||', ''),
