@@ -503,6 +503,18 @@ GPU writes, and unknown submission outcomes cannot publish completion. Four-hop,
 16-receipt, eight-resource and partition budgets remain. New deterministic
 faults allow prefix execution and writes despite a failed queue result.
 The native test composes batch/single/batch/batch with byte oracle and readback.
-Linux validation is pending; early real Scheduler/BufferCache compilation was
-added to the existing Linux-only workflow. F2/F3 remain Open, cross-queue Unknown,
-no ordinary automatic selection or physical authority; Android on demand.
+Implementation `bb6b845784` plus native test-name fix `4bb3231040` passed
+[Linux-only workflow 39104473255](https://github.com/Splaser/emulator/actions/runs/39104473255):
+all five CTest processes, native Vulkan provenance 315 assertions plus three
+independent repeats, all 35 new deterministic modes plus three fixture repeats,
+all 67 expected assertion mutations, budget boundaries and the full existing
+registration/coherency/backing/lifecycle regressions. All 21 extracted input
+hashes match committed blobs; all 68 fixture logs, exact source, readback/repeat
+evidence and complete Linux output are retained in `.diagnostics/ci-39104473255/`.
+The initial native variable-name conflict and failed run are preserved in
+`.diagnostics/ci-39103686983/`; only test locals changed for the successful rerun.
+Early real Scheduler/BufferCache compilation was added to the Linux workflow.
+F3 still fails two fixed-required aliases (exit 42); F2 remains backing 77/cache
+10. F2/F3 remain Open, cross-queue Unknown, no ordinary automatic selection or
+physical authority. Android was intentionally skipped. This documentation-only
+evidence update does not rerun unchanged source CI.

@@ -93,13 +93,61 @@ with the oracle; wrong projections and a fifth hop reject. Subsequent source and
 target writes, retained target pins and trusted-idle retirement are checked.
 No intermediate readback submission is inserted into the controlled spine.
 
-Linux validation is pending. The existing full Linux production build, tests,
-three native repeats, original F2/F3 negative controls and lifecycle suite remain
-enabled. Because Scheduler production code/header changed, the early native
-translation-unit check now explicitly includes real `vk_scheduler.cpp` and
-`vk_buffer_cache.cpp`. No Android-specific paths changed; Android remains on
-demand and is not claimed validated here.
+Implementation commit `bb6b845784` and native-test naming correction
+`4bb323104025682ea2bd06956ca111788007d202` passed
+[Linux-only workflow 39104473255](https://github.com/Splaser/emulator/actions/runs/39104473255)
+on 2026-10-18. All five CTest processes passed; native Vulkan provenance passed
+315 assertions in CTest plus three independent repeats. All 35 deterministic
+multi-region modes passed, including three additional fixture repeats. All 67
+mutations failed by assertion; the positive/mutation log set contains 68 files.
+All 21 extracted input SHA-256 hashes match the committed source blobs. The
+standalone command/partition boundaries and existing byte-oracle suites passed.
+CLI, shader tool, production unit tests and the full registration/coherency/
+backing/lifecycle regressions also passed.
+
+Because Scheduler production code/header changed, the early native translation-
+unit check explicitly includes real `vk_scheduler.cpp` and `vk_buffer_cache.cpp`.
+The first run, [39103686983](https://github.com/Splaser/emulator/actions/runs/39103686983),
+passed its deterministic/mutation controls but stopped at a conflicting native
+test variable declaration (`batch_first`, `batch_second`, line 1704). Commit
+`4bb3231040` renamed the added test locals without changing production semantics
+or weakening compiler checks. Its new source run above completed all validation.
+
+Complete job logs and downloaded artifacts are retained in
+`.diagnostics/ci-39104473255/` and `.diagnostics/ci-39103686983/`. The former contains
+the exact-source/extraction manifests, all mutation logs, native and fixture
+repeat logs, original negative controls and complete Linux job output. The
+original F3 fixed-required witness still fails both aliases (expected 99,
+observed 10, exit 42); F2 still reports expected 77, observed 10, backing 77.
+Android was intentionally skipped; no Android-specific paths changed. The
+following documentation-only evidence commit does not rerun unchanged source CI.
 
 Cross-queue remains Unknown. There is no ordinary BufferCache automatic source
 selection, global coordinator, physical latest-writer publication, Draw/Dispatch
 scope expansion, or claim that F2/F3 are fixed.
+
+## Changed files and remaining limitations
+
+| Files | Change |
+| --- | --- |
+| `src/video_core/renderer_vulkan/vk_replica_copy_provenance.h` | Owned bounded multi-source partitions and immutable per-byte projection |
+| `src/video_core/renderer_vulkan/vk_scheduler.h`, `vk_scheduler.cpp` | Explicit batch admission, retained dependencies, native target index, command coupling and completed synchronization checks |
+| `src/tests/core/controlled_cpu_scheduler.cpp` | Real Vulkan batch/single interoperation, four hops, byte oracle, current cancellation and retained lifetime |
+| `tools/physical_coherency_tests/multi_region_fixture.cpp.in` | Deterministic multi-region admission, failure and uncertainty controls |
+| `tools/physical_coherency_tests/first_registration_pipeline.cpp.in` | Actual-body scaffold and non-rollback simulated submit fault |
+| `tools/physical_coherency_tests/run_sync_provenance_tests.py`, `run_registration_pipeline_tests.py` | Extract real batch admission/types, run controls, add six mutations |
+| `tools/physical_coherency_tests/transfer_content_tests.cpp` | Command/partition budget boundaries |
+| `.github/workflows/pr375-pr380-integration.yml` | Early real Scheduler/BufferCache compilation and three fixture repeats |
+| `docs/M4_F3_MULTI_REGION_COPY.md`, `docs/M4_F3_WIP_HANDOFF.md` | Contract, failure matrix and validation handoff |
+
+This is one contiguous declared target window with explicitly named sources on
+one anchor/spine. Current qualification is scoped to those staged bytes; it does
+not prove which replica holds the newest physical data. Cancellation can be
+conservative across the whole retained resource/submission domain. Host failures
+without an accounted queue attempt remain quarantined; this slice adds no retry,
+submission-domain reset or device-loss recovery. Android and real target-device
+failure behavior remain unproved. Fault-injection results must not be read as
+real GPU rollback or recovery evidence.
+The native case proves two explicit source regions and their four-hop
+composition; maximum 32-command/64-piece budgets are unit-tested, not a claim of
+32-region execution on every Vulkan driver.
