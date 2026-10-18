@@ -112,6 +112,7 @@ jobs:
             src/core/CMakeFiles/core.dir/memory.cpp.o \
             src/core/CMakeFiles/core.dir/cpu_manager.cpp.o \
             src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/vk_scheduler.cpp.o \
+            src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/vk_rasterizer.cpp.o \
             src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/vk_buffer_cache.cpp.o -- -k 0
       - name: Reject unsupported synchronization evidence before native execution
         run: |
@@ -120,6 +121,7 @@ jobs:
             -o .diagnostics/pr375-pr380/sync-provenance
           .diagnostics/pr375-pr380/sync-provenance \
             | tee .diagnostics/pr375-pr380/sync-provenance.txt
+          python tools/physical_coherency_tests/run_private_guard_kernel_tests.py
           python tools/physical_coherency_tests/run_producer_coverage_tests.py
           python tools/physical_coherency_tests/run_reconciliation_planner_tests.py
           python tools/physical_coherency_tests/run_sync_provenance_tests.py --content
@@ -234,6 +236,7 @@ jobs:
             .diagnostics/m4-sync-provenance/*
             .diagnostics/m4-reconciliation-planner/*
             .diagnostics/m4-producer-coverage/*
+            .diagnostics/m4-private-guard/*
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn

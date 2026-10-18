@@ -27,6 +27,7 @@
 #include "video_core/renderer_vulkan/vk_transfer_eligibility.h"
 #include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"
 #include "video_core/renderer_vulkan/vk_reconciliation_planner.h"
+#include "video_core/renderer_vulkan/vk_private_producer_guard.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
 namespace VideoCommon {
@@ -68,6 +69,7 @@ public:
     };
     class CheckedTransfer {
         friend class Scheduler;
+        friend class PrivateProducerTestAccess;
         explicit CheckedTransfer(std::shared_ptr<std::atomic_bool> owner_) : owner{std::move(owner_)} {}
         enum class Emission { Pending, Recorded, Unknown };
         const std::shared_ptr<std::atomic_bool> owner;
@@ -98,6 +100,7 @@ public:
         bool current_eligible{}; // GPU/cache-thread cancellation only, never an execution version.
         std::array<TransferEligibility, TransferContent::MaxBuffers> current_ranges;
         bool retired{};
+        std::shared_ptr<PrivateProducerGuard> exclusion;
     public:
         // Planned metadata is inspectable before execution, never completed evidence.
         const auto& PlannedContent() const noexcept { return content; }
@@ -106,6 +109,31 @@ public:
         bool ResourcesRetained() const noexcept { return !resources.empty(); }
     };
     using Transfer = std::shared_ptr<CheckedTransfer>;
+    enum class WriteState;
+    class PrivateProducerDomain {
+        friend class BufferCacheRuntime;
+        friend class PrivateProducerTestAccess;
+        Scheduler* scheduler;
+        std::thread::id owner_thread=std::this_thread::get_id();
+        std::weak_ptr<std::atomic_bool> owner_lifetime;
+        std::shared_ptr<PrivateProducerGuard::State> backing;
+        std::vector<TransferBuffer> replicas;
+        std::weak_ptr<CheckedTransfer> operation;
+        PrivateProducerDomain(Scheduler& owner,std::shared_ptr<PrivateProducerGuard::State> state)
+            :scheduler{&owner},owner_lifetime{owner.submission_owner},backing{std::move(state)}{}
+        bool Available() const;
+        bool Initialize();
+    public:
+        ~PrivateProducerDomain(){backing->Close();}
+        bool Fill(u32 replica,u64 offset,u64 size,u32 value);
+        bool CpuWrite(u64 offset,std::span<const u8> bytes);
+        // Same owner thread as creation. Returns actual checked completion,
+        // never a caller-provided success boolean. No native capability export.
+        WriteState Poll();
+        void Retire(){backing->Close();}
+        PrivateProducerDomain(const PrivateProducerDomain&)=delete;
+        PrivateProducerDomain& operator=(const PrivateProducerDomain&)=delete;
+    };
     struct ReplicaCopyRequest {
         Transfer parent;
         TransferContent::Index source{}, destination{};
@@ -610,7 +638,8 @@ private:
     Transfer RecordTransferBatchImpl(std::span<const TransferBuffer> buffers,
         std::span<const TransferContent::Command> commands,
         std::shared_ptr<const ReplicaCopyProvenance> replica_copy, Transfer parent, Transfer predecessor = {},
-        Transfer destination_history = {}, std::span<const Transfer> dependencies = {});
+        Transfer destination_history = {}, std::span<const Transfer> dependencies = {},
+        std::shared_ptr<PrivateProducerGuard> exclusion = {});
     void RevokeTransferContentEligibility() noexcept {
         for (const auto& transfer : checked_transfers) transfer->current_eligible = false;
     }

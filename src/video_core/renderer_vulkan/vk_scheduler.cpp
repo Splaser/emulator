@@ -259,10 +259,63 @@ Scheduler::Transfer Scheduler::RecordTransferBatch(std::span<const TransferBuffe
     return RecordTransferBatchImpl(buffers, commands, {}, {});
 }
 
+bool Scheduler::PrivateProducerDomain::Initialize() {
+    auto guard=PrivateProducerGuard::Acquire(backing);
+    if(!guard) return false;
+    std::vector<TransferContent::Command> commands;
+    for(u32 slot=0;slot<replicas.size();++slot) {
+        if(!scheduler->InvalidatePhysicalWrite(*replicas[slot].physical,0,backing->extent)) return false;
+        commands.push_back({TransferContent::Kind::Fill,slot,0,0,0,backing->extent,0});
+    }
+    const auto recorded=scheduler->RecordTransferBatchImpl(replicas,commands,{},{},{},{},{},std::move(guard));
+    operation=recorded;
+    replicas.clear(); // Only the existing checked pool owns native storage after publication.
+    return bool(recorded);
+}
+
+bool Scheduler::PrivateProducerDomain::Available() const {
+    const auto owner=owner_lifetime.lock();
+    if(!owner || !owner->load(std::memory_order_acquire)){backing->Close();return false;}
+    return std::this_thread::get_id()==owner_thread;
+}
+
+bool Scheduler::PrivateProducerDomain::Fill(u32 replica,u64 offset,u64 size,u32 value) {
+    if(!Available() || !size ||
+       offset>=backing->extent || size>backing->extent-offset || ((offset|size)%4)) return false;
+    const auto previous=operation.lock();
+    if(!previous || previous->retired){backing->Close();return false;}
+    if(replica>=previous->resources.size()) return false;
+    auto guard=PrivateProducerGuard::Acquire(backing);
+    if(!guard) return false;
+    if(!scheduler->InvalidatePhysicalWrite(*previous->resources[replica].physical,offset,size)) return false;
+    const std::array<TransferContent::Command,1> commands{{
+        {TransferContent::Kind::Fill,replica,0,offset,0,size,value}}};
+    const auto recorded=scheduler->RecordTransferBatchImpl(previous->resources,commands,{},{},{},{},{},std::move(guard));
+    operation=recorded;return bool(recorded);
+}
+
+bool Scheduler::PrivateProducerDomain::CpuWrite(u64 offset,std::span<const u8> bytes) {
+    if(!Available() || bytes.empty() || offset>=backing->extent ||
+       bytes.size()>backing->extent-offset) return false;
+    const auto previous=operation.lock();
+    if(!previous || previous->retired || previous->resources.empty()){backing->Close();return false;}
+    auto guard=PrivateProducerGuard::Acquire(backing);
+    if(!guard) return false;
+    if(!scheduler->InvalidatePhysicalWrite(*previous->resources[0].physical,offset,bytes.size())) return false;
+    return guard->CommitCpu(offset,bytes);
+}
+
+Scheduler::WriteState Scheduler::PrivateProducerDomain::Poll() {
+    if(!Available()) return WriteState::Unknown;
+    const auto recorded=operation.lock();
+    if(!recorded || recorded->retired){backing->Close();return WriteState::Unknown;}
+    return scheduler->PollCheckedTransfer(recorded);
+}
+
 Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferBuffer> buffers,
     std::span<const TransferContent::Command> commands,
     std::shared_ptr<const ReplicaCopyProvenance> replica_copy, Transfer parent, Transfer predecessor, Transfer destination_history,
-    std::span<const Transfer> dependencies) {
+    std::span<const Transfer> dependencies, std::shared_ptr<PrivateProducerGuard> exclusion) {
     if (!predecessor) predecessor = parent;
     const auto source_history = predecessor;
     if (replica_copy && replica_copy->IsBatch()) {
@@ -315,6 +368,7 @@ Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferB
         } else if (replica_copy->DestinationCopy()) return {};
         if (replica_copy->Depth() != (predecessor->replica_copy ? predecessor->replica_copy->Depth() + 1 : 1)) return {};
     }
+    if (exclusion && !exclusion->Ready()) return {};
     if (observed_submission || !device.HasTimelineSemaphore() ||
         !submission_owner->load(std::memory_order_acquire) || checked_transfers.size() >= 16 ||
         buffers.empty() || buffers.size() > TransferContent::MaxBuffers) return {};
@@ -324,6 +378,7 @@ Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferB
         for (size_t i = 0; i < buffers.size(); ++i) {
             const auto& buffer = buffers[i];
             const auto& physical = buffer.physical;
+            if (exclusion && (!physical || !exclusion->Matches(*physical) || !buffer.pin.CopyProvenanceEligible())) return {};
             if (!buffer.pin.IsUsable() || buffer.pin.Offset() % 4 || !physical || !physical->OwnersAlive() ||
                 physical->Representation() != buffer.pin.Identity() || physical->Size() != buffer.pin.Size() ||
                 physical->NativeOffset() != buffer.pin.Offset()) return {};
@@ -351,6 +406,7 @@ Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferB
     try {
         RequestOutsideRenderPassOperationContext();
         observed_submission = transfer->submission;
+        transfer->exclusion=std::move(exclusion); // Retain real exclusion before any command is queued.
         transfer->worker_pending.store(true, std::memory_order_release);
         for (const auto& operation : transfer->content->Commands()) {
             const auto& destination = transfer->resources[operation.destination].pin;
@@ -362,6 +418,8 @@ Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferB
                 return;
             }
             try {
+                if (transfer->exclusion && !transfer->exclusion->Ready())
+                    throw std::runtime_error("private producer exclusion no longer valid");
                 if (transfer->replica_copy) {
                     const auto& producer = transfer->replica_parent->submission;
                     if (last_accepted_submission.lock() != producer ||
@@ -426,26 +484,31 @@ Scheduler::Transfer Scheduler::RecordTransferBatchImpl(std::span<const TransferB
 }
 
 Scheduler::WriteState Scheduler::PollCheckedTransfer(const Transfer& transfer) const noexcept {
-    if (!transfer || transfer->owner != submission_owner || transfer->retired ||
-        !submission_owner->load(std::memory_order_acquire)) return WriteState::Unknown;
-    if (transfer->emission.load(std::memory_order_acquire) == CheckedTransfer::Emission::Unknown)
+    const auto unknown=[&] {
+        if(transfer && transfer->exclusion) transfer->exclusion->Quarantine();
         return WriteState::Unknown;
+    };
+    if (!transfer || transfer->owner != submission_owner || transfer->retired ||
+        !submission_owner->load(std::memory_order_acquire)) return unknown();
+    if (transfer->emission.load(std::memory_order_acquire) == CheckedTransfer::Emission::Unknown)
+        return unknown();
     for (const auto& resource : transfer->resources) {
         if (!resource.pin.IsUsable() || !resource.physical->OwnersAlive()) {
             transfer->emission.store(CheckedTransfer::Emission::Unknown, std::memory_order_release);
-            return WriteState::Unknown;
+            return unknown();
         }
     }
     const auto result = PollChecked(transfer->submission);
     if (result != VK_SUCCESS && result != VK_NOT_READY) {
         transfer->emission.store(CheckedTransfer::Emission::Unknown, std::memory_order_release);
-        return WriteState::Unknown;
+        return unknown();
     }
     if (transfer->emission.load(std::memory_order_acquire) == CheckedTransfer::Emission::Pending)
         return WriteState::Pending;
     if (result != VK_SUCCESS)
         return transfer->submission->result.load(std::memory_order_acquire) == VK_SUCCESS
             ? WriteState::Submitted : WriteState::Pending;
+    if(transfer->exclusion && !transfer->exclusion->CompleteChecked()) return unknown();
     return WriteState::Complete;
 }
 
@@ -655,7 +718,9 @@ void Scheduler::RetireCheckedWritesAfterDeviceIdle() {
     checked_writes.clear();
     for (const auto& transfer : checked_transfers) {
         transfer->retired = true;
+        if(transfer->exclusion) transfer->exclusion->Quarantine();
         transfer->resources.clear();
+        transfer->exclusion.reset();
     }
     checked_transfers.clear();
 }

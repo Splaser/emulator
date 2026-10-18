@@ -8,6 +8,7 @@
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
 #include "video_core/renderer_vulkan/vk_transfer_eligibility.h"
 #include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"
+#include "video_core/renderer_vulkan/vk_private_producer_guard.h"
 #include "common/slot_vector.h"
 #include "common/scratch_buffer.h"
 #include "common/range_sets.inc"
@@ -131,6 +132,7 @@ struct Queue {
 };
 struct Device {
     bool timeline=true;
+    bool HasDebuggingToolAttached() const {return false;}
     bool HasTimelineSemaphore() const {return timeline;}
     Queue GetGraphicsQueue() const {return {};}
     void ReportLoss() const {++driver->reported_losses;}
@@ -172,7 +174,7 @@ public:
     const VideoCommon::PhysicalWriteIdentity* CompletedPhysicalIdentity(const Write&) const noexcept;
     Transfer RecordTransferBatch(std::span<const TransferBuffer>,std::span<const TransferContent::Command>);
     Transfer RecordTransferBatchImpl(std::span<const TransferBuffer>,std::span<const TransferContent::Command>,
-        std::shared_ptr<const ReplicaCopyProvenance>,Transfer,Transfer = {},Transfer = {},std::span<const Transfer> = {});
+        std::shared_ptr<const ReplicaCopyProvenance>,Transfer,Transfer = {},Transfer = {},std::span<const Transfer> = {},std::shared_ptr<PrivateProducerGuard> = {});
     bool CompletedReplicaCopy(const Transfer&,const Transfer&) const noexcept;
     bool CompletedReplicaCopyHasRoot(const Transfer&,const Transfer&,u64,u64,TransferContent::Index,u64) const noexcept;
     WriteState PollCheckedTransfer(const Transfer&) const noexcept;
@@ -277,6 +279,7 @@ public:
     struct Staging {VkBuffer StreamBuf() const {return VK_NULL_HANDLE;}} staging_pool;
     BufferCacheRuntime(Device& device_,Scheduler& scheduler_):device{device_},scheduler{scheduler_} {}
     bool SupportsControlledTransfers() const;
+    std::shared_ptr<Scheduler::PrivateProducerDomain> CreatePrivateProducerDomain(u32=3,u64=64);
     Scheduler::Write ClearBufferChecked(StagedBufferPin,u64,u32,std::function<bool()> = {});
     bool storage_observation_active{},storage_observation_valid{true};
     ObservationMapping test_mapping;

@@ -77,6 +77,7 @@ checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    struct Rep
 checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    struct ReconciliationReplica {') + ';\n'
 checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    struct ReconciliationRequest {') + ';\n'
 checked += 'enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };\n'
+checked += body('src/video_core/renderer_vulkan/vk_scheduler.h','    class PrivateProducerDomain {')+';\n'
 checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    class CheckedWrite {')
 checked += ';\n    using Write=std::shared_ptr<CheckedWrite>;\n'
 checked += body('src/video_core/renderer_vulkan/vk_scheduler.h', '    struct WriteFootprint {')
@@ -99,6 +100,9 @@ for marker in ['Scheduler::Submission Scheduler::FlushChecked(',
                'Scheduler::WriteState Scheduler::PollCheckedWrite(',
                'Scheduler::Transfer Scheduler::RecordTransferBatch(',
                'Scheduler::Transfer Scheduler::RecordTransferBatchImpl(', 'bool Scheduler::CompletedReplicaCopyHasRoot(', 'bool Scheduler::CompletedReplicaCopy(',
+               'bool Scheduler::PrivateProducerDomain::Initialize(', 'bool Scheduler::PrivateProducerDomain::Fill(',
+               'bool Scheduler::PrivateProducerDomain::CpuWrite(', 'Scheduler::WriteState Scheduler::PrivateProducerDomain::Poll(',
+               'bool Scheduler::PrivateProducerDomain::Available(',
                'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
                'bool Scheduler::InvalidatePhysicalWrite(', 'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
                'const TransferContent* Scheduler::CompletedTransferContent(',
@@ -114,6 +118,7 @@ for marker in ['void BufferCacheRuntime::BeginStorageWriteObservation(',
                'void BufferCacheRuntime::BindStorageBuffer(Buffer&']:
     transfer += body(runtime_path, marker) + '\n'
 for marker in ['bool BufferCacheRuntime::SupportsControlledTransfers(',
+               'std::shared_ptr<Scheduler::PrivateProducerDomain> BufferCacheRuntime::CreatePrivateProducerDomain(',
                'std::shared_ptr<VideoCommon::ControlledBufferTransfer> BufferCacheRuntime::\n    PrepareControlledTransfer(',
                'void BufferCacheRuntime::RetireControlledTransfersAfterDeviceIdle(',
                'void BufferCacheRuntime::CopyBuffer(']:

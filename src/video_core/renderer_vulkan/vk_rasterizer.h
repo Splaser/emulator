@@ -106,6 +106,7 @@ public:
     };
     // Explicit GPU-owner diagnostics. No physical authority or eligibility certificate.
     bool SetControlledStorageWriteObservation(bool enabled);
+    [[nodiscard]] std::shared_ptr<Scheduler::PrivateProducerDomain> CreatePrivateProducerDomain(u32 replicas=3,u64 size=64);
     [[nodiscard]] std::optional<StorageWriteObservation> GetControlledStorageWriteObservation();
 
     void Shutdown() override;

@@ -325,6 +325,30 @@ bool BufferCacheRuntime::SupportsControlledTransfers() const {
     return device.HasTimelineSemaphore() && !staged_pin_domain->IsSealed();
 }
 
+std::shared_ptr<Scheduler::PrivateProducerDomain> BufferCacheRuntime::CreatePrivateProducerDomain(u32 replicas,u64 size) {
+    if(replicas<2 || replicas>3 || !size || size%4 || !SupportsControlledTransfers() ||
+       device.HasDebuggingToolAttached()) return {};
+    try {
+        auto state=PrivateProducerGuard::Create(size);
+        if(!state) return {};
+        auto domain=std::shared_ptr<Scheduler::PrivateProducerDomain>(new Scheduler::PrivateProducerDomain(scheduler,state));
+        for(u32 slot=0;slot<replicas;++slot) {
+            // Never register in BufferCache, publish host mappings, export a
+            // guest address or return a native handle to the caller.
+            Buffer buffer{*this,slot*PrivateProducerGuard::State::Page,size};
+            auto pin=buffer.PinStagedRepresentation(0,size);
+            if(!pin || !pin->CopyProvenanceEligible()) return {};
+            auto physical=VideoCommon::PhysicalWriteIdentity::Capture(*state,slot*PrivateProducerGuard::State::Page,size,pin->Identity());
+            if(!physical) return {};
+            domain->replicas.push_back({*pin,std::make_shared<const VideoCommon::PhysicalWriteIdentity>(*physical)});
+            state->identities[slot]=pin->Identity();
+        }
+        state->count=replicas;
+        if(!domain->Initialize()) return {};
+        return domain;
+    } catch(...) {return {};}
+}
+
 std::shared_ptr<VideoCommon::ControlledBufferTransfer> BufferCacheRuntime::
     PrepareControlledTransfer(const Buffer& buffer) {
     std::erase_if(controlled_transfers, [](const auto& weak) { return weak.expired(); });

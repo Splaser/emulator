@@ -272,6 +272,9 @@ public:
 
 private:
     bool storage_observation_active{};
+    friend class RasterizerVulkan;
+    // Only the real GPU-owner/shutdown-checked Rasterizer entry may issue domains.
+    std::shared_ptr<Scheduler::PrivateProducerDomain> CreatePrivateProducerDomain(u32 replicas,u64 size);
     const Tegra::MaxwellDeviceMemoryManager* observation_memory{};
     bool storage_observation_valid{true};
     std::vector<Scheduler::WriteFootprint> storage_write_footprints;

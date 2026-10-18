@@ -53,6 +53,12 @@
 
 namespace Vulkan {
 
+std::shared_ptr<Scheduler::PrivateProducerDomain> RasterizerVulkan::CreatePrivateProducerDomain(u32 replicas,u64 size) {
+    std::shared_lock shutdown_guard{shutdown_mutex,std::try_to_lock};
+    if(!shutdown_guard.owns_lock() || is_shutting_down || !gpu.IsGpuThread()) return {};
+    return buffer_cache_runtime.CreatePrivateProducerDomain(replicas,size);
+}
+
 bool RasterizerVulkan::SetControlledStorageWriteObservation(bool enabled) {
     std::shared_lock shutdown_guard{shutdown_mutex, std::try_to_lock};
     if (!shutdown_guard.owns_lock() || is_shutting_down || !gpu.IsGpuThread()) return false;

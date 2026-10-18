@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
@@ -47,6 +48,7 @@ checked += body(header, '    struct ReplicaCopiesRequest {') + ';\n'
 checked += body(header, '    struct ReconciliationReplica {') + ';\n'
 checked += body(header, '    struct ReconciliationRequest {') + ';\n'
 checked += 'enum class WriteState { Pending, Submitted, Skipped, Complete, Unknown };\n'
+checked += body(header,'    class PrivateProducerDomain {')+';\n'
 checked += body(header, '    class CheckedWrite {') + ';\nusing Write=std::shared_ptr<CheckedWrite>;\n'
 checked += body(header, '    struct WriteFootprint {') + ';\nusing ObservedWrites=std::shared_ptr<const std::vector<Write>>;\n'
 methods = '\n'.join(body(cpp, marker) for marker in [
@@ -59,6 +61,9 @@ methods = '\n'.join(body(cpp, marker) for marker in [
     'Scheduler::WriteState Scheduler::PollCheckedWrite(',
     'Scheduler::Transfer Scheduler::RecordTransferBatch(',
     'Scheduler::Transfer Scheduler::RecordTransferBatchImpl(', 'bool Scheduler::CompletedReplicaCopyHasRoot(', 'bool Scheduler::CompletedReplicaCopy(',
+    'bool Scheduler::PrivateProducerDomain::Initialize(', 'bool Scheduler::PrivateProducerDomain::Fill(',
+    'bool Scheduler::PrivateProducerDomain::CpuWrite(', 'Scheduler::WriteState Scheduler::PrivateProducerDomain::Poll(',
+    'bool Scheduler::PrivateProducerDomain::Available(',
     'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
     'bool Scheduler::InvalidatePhysicalWrite(', 'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
     'const TransferContent* Scheduler::CompletedTransferContent(',
@@ -68,6 +73,8 @@ methods += '\n' + body(master, 'static constexpr std::array<VkPipelineStageFlags
 methods += body(master, 'VkResult MasterSemaphore::SubmitQueueTimeline(')
 runtime = 'src/video_core/renderer_vulkan/vk_buffer_cache.cpp'
 bindings = '\n'.join(body(runtime, marker) for marker in [
+    'bool BufferCacheRuntime::SupportsControlledTransfers(',
+    'std::shared_ptr<Scheduler::PrivateProducerDomain> BufferCacheRuntime::CreatePrivateProducerDomain(',
     'void BufferCacheRuntime::CapturePhysicalOrigin(',
     'std::shared_ptr<const VideoCommon::PhysicalWriteIdentity>\nBufferCacheRuntime::PhysicalIdentityForBinding('])
 template = read('tools/physical_coherency_tests/first_registration_pipeline.cpp.in')
@@ -115,6 +122,7 @@ source = '''#include <algorithm>
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
 #include "video_core/renderer_vulkan/vk_transfer_eligibility.h"
 #include "video_core/renderer_vulkan/vk_replica_copy_provenance.h"
+#include "video_core/renderer_vulkan/vk_private_producer_guard.h"
 ''' + scaffold + bindings + '''
 struct StorageObserverHarness {
     std::shared_ptr<VideoCommon::PhysicalWriteCoverage> storage_write_coverage =
@@ -133,6 +141,7 @@ struct Scenario {
     Scenario() {driver = &gpu;}
 };
 ''' + read('tools/physical_coherency_tests/sync_dependency_fixture.cpp.in')
+source += read('tools/physical_coherency_tests/private_producer_test_access.inc')
 if a.content:
     source += read('tools/physical_coherency_tests/transfer_content_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/replica_copy_fixture.cpp.in')
@@ -143,8 +152,10 @@ if a.content:
     source += read('tools/physical_coherency_tests/mixed_holes_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/reconciliation_planner_fixture.cpp.in')
     source += read('tools/physical_coherency_tests/physical_alias_invalidation_fixture.cpp.in')
-source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();TestCombinedReplicaCopy();TestMultiRegionReplicaCopy();TestMixedInternalHoles();TestReconciliationPlanner();TestPhysicalAliasInvalidation();' if a.content else '') + '}\n'
+    source += read('tools/physical_coherency_tests/private_producer_fixture.cpp.in')
+source += '\nint main() {TestSyncDependencies();' + ('TestTransferContent();TestReplicaCopy();TestReplicaChain();TestMixedReplicaCopy();TestDestinationReplicaCopy();TestCombinedReplicaCopy();TestMultiRegionReplicaCopy();TestMixedInternalHoles();TestReconciliationPlanner();TestPhysicalAliasInvalidation();TestPrivateProducerDomain();' if a.content else '') + '}\n'
 command = [a.cxx, '-std=c++23', '-O1', '-Wall', '-Wextra', '-Werror',
+           '-pthread',
            '-Wno-unused-parameter', '-Wno-missing-field-initializers',
            '-I', str(out / 'stubs'), '-I', str(root / 'src'),
            '-I', str(a.vulkan_include or root / 'externals/Vulkan-Headers/include')]
@@ -166,6 +177,18 @@ if result.returncode:
     raise RuntimeError(result.stderr)
 if a.positive_only:
     raise SystemExit(0)
+if a.content and sys.platform.startswith('linux'):
+    for name,guard,replacement in [
+        ('private-guard-not-retained','transfer->exclusion=std::move(exclusion);','transfer->exclusion.reset();'),
+        ('private-completes-while-pending','if (transfer->emission.load(std::memory_order_acquire) == CheckedTransfer::Emission::Pending)\n        return WriteState::Pending;',
+         'if (transfer->emission.load(std::memory_order_acquire) == CheckedTransfer::Emission::Pending) { if(transfer->exclusion) (void)transfer->exclusion->CompleteChecked(); return WriteState::Pending; }'),
+        ('private-without-worker-recheck','if (transfer->exclusion && !transfer->exclusion->Ready())','if (false)'),
+        ('private-without-physical-fanout','if(!scheduler->InvalidatePhysicalWrite(*previous->resources[replica].physical,offset,size)) return false;','')]:
+        assert source.count(guard)==1,name
+        result=run(name,source.replace(guard,replacement))
+        if result.returncode==0 or 'Assertion' not in result.stderr:
+            raise RuntimeError(f'{name} failed incorrectly: {result.returncode} {result.stderr}')
+        print('PASS expected private provider mutation assertion:',name)
 if a.content:
     for name, guard, replacement in [
         ('fanout-without-physical-revocation', 'if (!InvalidatePhysicalWrite(*physical, offset, size)) return {};', ''),
@@ -312,6 +335,7 @@ if a.content:
             raise RuntimeError(f'{name} failed incorrectly: {result.returncode} {result.stderr}')
         print('PASS expected eligibility mutation failure:', name)
 inputs.add('src/video_core/renderer_vulkan/vk_reconciliation_planner.h')
+inputs.add('src/video_core/renderer_vulkan/vk_private_producer_guard.h')
 inputs.add('src/video_core/renderer_vulkan/vk_sync_provenance.h')
 inputs.add('src/video_core/renderer_vulkan/vk_transfer_content.h')
 inputs.add('src/video_core/renderer_vulkan/vk_transfer_eligibility.h')

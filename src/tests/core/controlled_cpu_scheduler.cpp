@@ -32,6 +32,11 @@
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/vulkan_common/vulkan_instance.h"
 #include "video_core/vulkan_common/vulkan_library.h"
+#include "../../../tools/physical_coherency_tests/private_producer_test_access.inc"
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <sys/uio.h>
+#include <unistd.h>
+#endif
 
 namespace {
 using namespace std::chrono_literals;
@@ -1940,6 +1945,68 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         if(region_batch_mixed_holes) std::cout<<"PASS bounded planner candidate through existing admission and native Vulkan four-hop readback\n";
         std::cout<<"PASS native Copy layout="<<region_batch_layout<<" four-hop byte oracle/readback and retained complements\n";
     } // contiguous, disjoint and multiple mixed-root holes
+#if defined(__linux__) && !defined(__ANDROID__)
+    using PrivateAccess=Vulkan::PrivateProducerTestAccess;
+    std::shared_ptr<Vulkan::Scheduler::PrivateProducerDomain> private_domain;
+    REQUIRE_FALSE(rasterizer.CreatePrivateProducerDomain()); // Real wrong-owner entry must not issue a capability.
+    on_gpu([&]{private_domain=rasterizer.CreatePrivateProducerDomain();});
+    REQUIRE(private_domain);
+    void* private_page=PrivateAccess::Page(*private_domain);
+    const auto private_cpu_probe=[&] {
+        u8 private_value=241;ssize_t private_result{};
+        std::thread private_cpu([&]{iovec private_local{&private_value,1},private_remote{private_page,1};
+            private_result=process_vm_writev(getpid(),&private_local,1,&private_remote,1,0);});
+        private_cpu.join();return private_result==1;
+    };
+    REQUIRE_FALSE(private_cpu_probe());
+    const auto private_finish=[&] {
+        State private_status{};
+        REQUIRE(Until([&]{on_gpu([&]{private_status=private_domain->Poll();});
+            return private_status==State::Complete||private_status==State::Unknown;}));
+        REQUIRE(private_status==State::Complete);
+    };
+    private_finish();
+    auto private_initial=PrivateAccess::Operation(*private_domain);
+    const std::array<u8,4> private_cpu_bytes{17,17,17,17};
+    bool private_cpu_written{},private_fill_admitted{},private_cpu_refused{},private_guest_mapping{};
+    on_gpu([&]{
+        private_guest_mapping=PrivateAccess::GuestMappingMatches(*private_domain,device_memory);
+        private_cpu_written=private_domain->CpuWrite(8,private_cpu_bytes);
+        private_fill_admitted=private_domain->Fill(0,16,16,0x63636363);
+        private_cpu_refused=!private_domain->CpuWrite(16,private_cpu_bytes);
+    });
+    REQUIRE_FALSE(private_guest_mapping);REQUIRE(private_cpu_written);REQUIRE(private_fill_admitted);REQUIRE(private_cpu_refused);
+    REQUIRE(static_cast<const u8*>(private_page)[8]==17);
+    std::array<bool,3> private_current{};
+    on_gpu([&]{for(u32 private_slot=0;private_slot<3;++private_slot){
+        bool private_valid=true;
+        for(u64 private_byte=0;private_byte<64;++private_byte){
+            const bool private_expected=!(private_byte>=8&&private_byte<12)&&!(private_byte>=16&&private_byte<32);
+            private_valid=private_valid&&(PrivateAccess::Current(*private_domain,private_initial,private_slot,private_byte,1)==private_expected);
+        }
+        private_current[private_slot]=private_valid;
+    }});
+    REQUIRE(std::ranges::all_of(private_current,[](bool private_valid){return private_valid;}));
+    REQUIRE_FALSE(private_cpu_probe()); // Historical polling above cannot release the current guard.
+    private_finish();
+    auto private_targets=PrivateAccess::Targets(*private_domain);
+    std::array<std::vector<u8>,3> private_native;
+    on_gpu([&]{for(u32 private_slot=0;private_slot<3;++private_slot)
+        private_native[private_slot]=Access::ReadPin(rasterizer,private_targets[private_slot].pin);});
+    auto private_expected_bytes=std::vector<u8>(64,0);std::fill(private_expected_bytes.begin()+16,private_expected_bytes.begin()+32,u8{99});
+    REQUIRE(private_native[0]==private_expected_bytes);REQUIRE(private_native[1]==std::vector<u8>(64,0));REQUIRE(private_native[2]==std::vector<u8>(64,0));
+    on_gpu([&]{private_cpu_written=private_domain->CpuWrite(40,private_cpu_bytes);private_domain->Retire();
+        private_cpu_refused=!private_domain->CpuWrite(0,private_cpu_bytes);});
+    REQUIRE(private_cpu_written);REQUIRE(private_cpu_refused);REQUIRE_FALSE(private_cpu_probe());
+    REQUIRE(private_initial->PlannedContent()->HasRoot(1,0,64,1,0));
+    on_gpu([&]{renderer->scheduler.Finish();std::scoped_lock private_idle_lock{renderer->scheduler.submit_mutex};
+        if(renderer->device.GetLogical().WaitIdle()!=VK_SUCCESS)throw std::runtime_error("private domain idle failed");
+        rasterizer.RetireControlledTransfersAfterDeviceIdle();
+        private_cpu_refused=!private_domain->Fill(0,0,4,0);});
+    REQUIRE(private_cpu_refused);REQUIRE(PrivateAccess::Targets(*private_domain).empty());
+    private_domain.reset(); // No native ownership escapes renderer retirement.
+    std::cout<<"PASS native private producer domain: owned OS guard, post-admission CPU denial, checked release, physical fan-out and Vulkan readback; guest/NCE admission Unknown\n";
+#endif
     std::cout << "PASS checked write provenance: skipped intent, distinct actual submissions, "
                  "repeated dirty interval, historical completion versus current snapshot, "
                  "pending worker, independent replica, remap and retained old native allocation; "
