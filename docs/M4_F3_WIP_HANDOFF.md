@@ -668,3 +668,41 @@ repeats; all five CTest processes and complete coherency/lifecycle suites. All
 acceptance index are in `.diagnostics/ci-39127457695/`. Native Copy evidence does
 not establish real guest producer exclusion. Original F2 cache10/backing77 and
 F3 two expected alias failures/exit42 remain; restricted eligibility stays blocked.
+
+### Physical alias Current Content Gate fan-out (2026-10-18)
+
+Source `fecb02c9a9` adds `Scheduler::InvalidatePhysicalWrite`: an owner-thread,
+pre-effect bounded scan over existing retained transfer resources, saved backing
+identity and physical segments. Every intersecting representation loses the
+projected old current interval; untouched/disjoint/different-backing intervals
+retain qualification where independently valid. Remapped/retired/unknown bindings
+reject conservatively. No immutable receipt ancestry is changed.
+
+An explicit `RecordControlledPhysicalFill` endpoint qualifies a saved resource,
+performs fan-out before recording, and reuses RecordTransferBatch for the new Fill's
+own retained pins/worker/checked submission/retirement. It does NOT call the pure
+coverage verifier or grant an exclusion lease. Native regression now exercises
+three allocations under the same physical interval, a 192-byte gate oracle, actual
+Fill/readback and unchanged peers/history. Extracted production methods add 14
+failure/lifecycle/projection modes, 24,576 reordered/duplicate-page byte checks,
+strict pre-enqueue revocation assertions and nine assertion mutants.
+
+This is precise invalidation of existing tracked gates for explicit writes, not
+complete physical producer enrollment. Ordinary native-only hooks are unchanged;
+real CPU/NCE/raw-pointer/mapping exclusion through asynchronous effects is still
+absent. An owned enforcement provider remains the next gate. Cross queue stays
+Unknown, production eligibility blocked and F2/F3 Open. Planner/Copy expression,
+ordinary automatic source selection and content authority are not expanded.
+See [implementation and evidence boundaries](M4_F3_PHYSICAL_ALIAS_INVALIDATION.md).
+
+Exact source `fecb02c9a98c6441bf58356a06035b29135f5c0e` passed
+[Linux run 39134590517](https://github.com/Splaser/emulator/actions/runs/39134590517):
+87 extracted-body assertion mutants (nine new), existing 12 Planner/20 coverage
+mutants, 14 fan-out fixture modes plus 24,576 page-projection byte checks and three
+full repeats; native Vulkan 407 assertions plus three repeats with the new 192-byte
+fan-out oracle and prior four-hop Copy/Planner; all five CTest processes and complete
+coherency/lifecycle/backing regressions. All 25+6+4 hashes match Git. Complete logs,
+artifacts and an independently verified index are in `.diagnostics/ci-39134590517/`.
+Android skipped; original F2 cache10/backing77 and F3 aliases99/10/exit42 retained.
+Only controlled invalidation is proved; ordinary producer enrollment and an owned
+exclusion provider remain unimplemented, so production closure stays Unknown.

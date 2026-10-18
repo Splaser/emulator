@@ -52,6 +52,13 @@ from a signal handler. A real future provider must marshal/prevent writes before
 effects while holding owned physical/alias exclusion; no new ordinary store hook
 or fictitious certificate is added here.
 
+For that future provider, merely setting eligibility or submission state Unknown
+is **not** safe quarantine and does not justify releasing exclusion. Quarantine
+must retain storage/lifetime ownership and enforce inaccessibility to conflicting
+CPU/NCE/GPU/raw-pointer users and frame reuse until possible effects are resolved
+or the affected mappings/storage are demonstrably isolated. This stage supplies
+neither that enforcement nor permission to release a guard after a failed query.
+
 ## Boundaries and evidence
 
 This fan-out reaches **all existing retained Current Content Gates**, not every
@@ -97,5 +104,43 @@ readback confirms the written replica's expected interval and unchanged peer
 bytes; historical roots remain intact. The existing four-hop Copy/Planner native
 acceptance and all original negative witnesses remain in the workflow.
 
-Acceptance source, Linux run, mutations and archived manifests are recorded after
-validation. Android is not requested.
+## Linux acceptance
+
+Accepted source `fecb02c9a98c6441bf58356a06035b29135f5c0e` passed
+[run 39134590517](https://github.com/Splaser/emulator/actions/runs/39134590517),
+Linux job `117696419145` (31m19s). Android job `117696420232` was skipped.
+
+- All nine new fan-out assertion mutants and the existing 78 extracted-body
+  mutants pass their expected-failure checks (87 total). The existing 12 pure
+  Planner and 20 coverage-contract mutants also remain assertion failures.
+- The extracted fixture's 14 modes and 24,576 page-projection byte checks pass,
+  including all three complete fixture repeats. Full local mutation acceptance
+  and three independent local fixture repeats also pass.
+- Actual native Vulkan passes **407 assertions**, with three repeats. Every
+  repeat includes the new three-allocation/192-byte fan-out oracle and actual
+  Fill/readback, unchanged peer bytes/history, plus all prior four-hop
+  Planner/Copy layouts. The controlled harness does not prove CPU/NCE exclusion.
+- Production Scheduler/BufferCache/native translation units, full CLI/shader/test
+  build, all five CTest processes and complete coherency/lifecycle/backing
+  regressions pass. Existing workflow coverage was sufficient; no Android build
+  or extra workflow was added.
+- All 25 extracted-body, 6 Planner and 4 coverage input SHA256 values match exact
+  Git blobs at the accepted source (35 inputs).
+- F2 remains expected 77 / observed 10 / backing 77. F3 full/partial aliases remain
+  expected 99 / observed 10; fixed-required fails two assertions and exits 42.
+  F2/F3 Open, restricted eligibility blocked, production closure Unknown.
+
+Complete artifacts, generated source/executables, mutation/repeat transcripts,
+manifests, CTest and full job output are archived in
+`.diagnostics/ci-39134590517/`. The retained verification script/index independently
+checks source hashes, all 87+12+20 assertion mutants, repeat markers, CTest and
+original negative witnesses. Local final mutation/repeat logs are also archived.
+
+Changed files: `src/video_core/renderer_vulkan/vk_scheduler.h` and `.cpp`;
+`src/tests/core/controlled_cpu_scheduler.cpp`;
+`tools/physical_coherency_tests/first_registration_pipeline.cpp.in`,
+`run_registration_pipeline_tests.py`, `run_sync_provenance_tests.py` and the new
+`physical_alias_invalidation_fixture.cpp.in`; this document and
+`docs/M4_F3_WIP_HANDOFF.md`. Planner, Copy receipts/expression, ordinary write
+entry points and the coverage verifier remain unchanged. Acceptance-only
+documentation does not rerun unchanged source CI.
