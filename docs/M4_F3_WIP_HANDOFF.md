@@ -739,3 +739,23 @@ Do not relabel private Linux native-store protection as an ARM NCE runtime hook.
 Planner/Copy expression stays frozen. Future guest adoption requires enforcement
 of all writable aliases across asynchronous effects, not a coverage-query result.
 See [provider contract and acceptance](M4_F3_PRIVATE_PRODUCER_PROVIDER.md).
+
+## 2026-10-19: guest-backed exclusion feasibility audit
+
+[Static audit at 0ea2b9a5c8](M4_F3_GUEST_EXCLUSION_FEASIBILITY_AUDIT.md) selects
+acknowledged whole-guest quiescence plus host/device producer close-and-drain and
+an all-alias mapping freeze as the first guest-backed mechanism. NCE/JIT stay
+stopped through checked GPU completion; no live fault-parking implementation is
+selected. PhysicalPageGates only drain enrolled stores. The current NCE access
+fault chain can enter cache locks/GPU handoff and cannot acquire or wait for an
+exclusion lease safely; access/alignment fallback must not emulate a conflicting
+store or skip it as success. Existing SuspendEmulation really waits for guest
+execution to stop, but does not supply complete host/device producer drainage.
+
+General guest admission remains Unknown. Missing prerequisites are exhaustive
+alias/owner/export coverage (including canonical pointers and audio/VIC writers),
+host/device close-and-join, mapping/permission freeze, bounded safe quiescence and
+retained guest-wide Unknown isolation. A single VMA mprotect, generation check,
+gate counter or successful private-domain test cannot substitute. No runtime code
+changed and no new CI/build/device tests were dispatched for this static audit.
+Planner and ordinary BufferCache remain frozen; authority absent; F2/F3 Open.
