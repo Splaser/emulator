@@ -17,8 +17,8 @@ namespace Core::Memory {
 class Memory;
 class ControlledCpuWriteRequest;
 
-/// Non-owning Memory pointer with a short execution-use boundary. Closing precedes Memory/
-/// process page-table destruction; it never waits for queued GPU work or native completion.
+/// Non-owning Memory pointer with an explicit CPU execution-use boundary. Closing joins entered
+/// store/preparation callbacks before Memory/process PTE destruction, never queued GPU work.
 struct CpuWriteOwner {
     explicit CpuWriteOwner(Memory* memory_) : memory{memory_} {}
     template <typename Visit>
@@ -30,6 +30,11 @@ struct CpuWriteOwner {
         visit(*memory); // Only bounded CPU store/publication; no GPU polling/wait here.
         return true;
     }
+    // Cold request preparation is also an actual managed use, not an empty probe.
+    // No renderer dispatch/wait or effects in the factory. Its owner lock ends
+    // before Track takes the exclusive registry lock; the entry covers both.
+    template <typename Prepare>
+    std::shared_ptr<ControlledCpuWriteRequest> TryPrepare(Prepare&& prepare);
     [[nodiscard]] bool Track(const std::shared_ptr<ControlledCpuWriteRequest>& request);
     [[nodiscard]] bool TryAccept(const std::shared_ptr<ControlledCpuWriteRequest>& request);
     void Close();
@@ -281,6 +286,19 @@ private:
     std::atomic<PreparedCpuWriteResult> result{PreparedCpuWriteResult::NeedSlow};
 };
 using ControlledCpuWriteRequestPtr = std::shared_ptr<ControlledCpuWriteRequest>;
+
+template <typename Prepare>
+inline ControlledCpuWriteRequestPtr CpuWriteOwner::TryPrepare(Prepare&& prepare) {
+    const auto execution = managed_stores.TryEnter();
+    if (!execution) return {};
+    std::shared_lock lock{mutex, std::try_to_lock};
+    if (!lock.owns_lock() || !memory) return {};
+    auto request = prepare(*memory);
+    lock.unlock();
+    // Close may win here. Track then refuses without using Memory or its PTEs.
+    if (!request || !Track(request)) return {};
+    return request;
+}
 
 inline bool CpuWriteOwner::Track(const ControlledCpuWriteRequestPtr& request) {
     std::unique_lock lock{mutex, std::try_to_lock};

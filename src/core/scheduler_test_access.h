@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "core/core.h"
@@ -23,6 +24,10 @@ struct SchedulerTestAccess : SystemTestAccess {
     static auto EnterGuestExecution(Kernel::PhysicalCore& core) {return core.guest_execution.TryEnter();}
     static bool VisitManagedMemory(Memory::Memory& memory, const std::function<void(Memory::Memory&)>& visit) {
         return memory.controlled_owner->TryVisit(visit);
+    }
+    template <typename Prepare>
+    static auto PrepareManagedMemory(Memory::Memory& memory, Prepare&& prepare) {
+        return memory.controlled_owner->TryPrepare(std::forward<Prepare>(prepare));
     }
     static auto& Cache(Vulkan::RasterizerVulkan& rasterizer) { return rasterizer.buffer_cache; }
     static auto& CounterGuard(Tegra::MaxwellDeviceMemoryManager& memory) {

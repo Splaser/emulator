@@ -117,16 +117,18 @@ public:
                           Common::ProcessAddress addr, u64 data);
 
     /// Cold CPU-owner preparation, before effects and outside sys-core/PTE/cache guards.
-    /// Copies the scalar and retains immutable physical/context identity; no admission, store
-    /// or wait. Only single-page cached targets qualify. Caller keeps process/Memory alive.
+    /// Copies the scalar and retains immutable physical/context identity; no physical admission,
+    /// store or GPU wait. A managed owner entry covers snapshot/pinning through registry publish.
+    /// Only single-page cached targets qualify. Caller keeps process/Memory alive at entry;
+    /// this does not authorize concurrent object destruction or arbitrary guest exclusion.
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite8(Common::ProcessAddress, u8);
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite16(Common::ProcessAddress, u16);
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite32(Common::ProcessAddress, u32);
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite64(Common::ProcessAddress, u64);
     /// Owner teardown only, before process PTE finalization or Memory reset/destruction.
-    /// Closes short CPU execution visits, without waiting for GPU requests to finish.
+    /// Closes CPU store/preparation visits, without waiting for GPU requests to finish.
     void SealControlledCpuWrites();
-    // Only existing owner-bound controlled visits; ordinary Memory::Write/bulk,
+    // Existing owner-bound preparation and stores only; ordinary Memory::Write/bulk,
     // escaped pointers, services and native stores are NOT enrolled by this API.
     [[nodiscard]] auto TryCloseControlledStores(u32 poll_budget=64) const {
         return controlled_owner->TryCloseManagedStores(poll_budget);

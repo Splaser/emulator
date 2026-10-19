@@ -1,5 +1,11 @@
 # M4-F3 guest-backed exclusion feasibility audit
 
+2026-10-19 continuation: see the
+[CPU preparation lifetime audit](M4_F3_CPU_PREPARATION_LIFETIME.md) for the current
+owner matrix and minimal repair of an empty readiness visit in the controlled
+scalar request API. It does not close the outer PTE/service/backend/GPU gates or
+authorize ordinary guest admission; F2/F3 remain Open.
+
 Audited 2026-10-19 at `0ea2b9a5c85197753861d34341e755fbf386e055`
 (provider source `3d271fc313322403a451cf6e4fd2409504530ff9`). This is a static
 source/contract audit, not new runtime acceptance or an implemented guest provider.

@@ -1039,6 +1039,57 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         REQUIRE(host->ResumeNoEffects());
         REQUIRE(Access::VisitManagedMemory(memory,[](auto&) {}));
         std::cout<<"PASS native kernel four-core entry closure and controlled Memory owner drainage; privileged in-flight entries, no ARM/NCE execution; guest backing Unknown\n";
+
+        // Real owner, actual CPU snapshot/pinning; the test peer pauses the cold factory.
+        // This is preparation drainage, not a guest-wide lease or GPU admission.
+        std::promise<void> pinned, release_preparation;
+        auto release = release_preparation.get_future();
+        bool has_pin = false;
+        std::exception_ptr pin_error;
+        std::thread preparing([&] {
+            (void)Access::PrepareManagedMemory(memory, [&](auto& target) -> Core::Memory::ControlledCpuWriteRequestPtr {
+                std::optional<Core::Memory::PreparedCpuPage> view;
+                try {
+                    auto cold = target.PrepareControlledCpuPage(owner.heap);
+                    if (cold) view.emplace(std::move(*cold));
+                } catch (...) { pin_error = std::current_exception(); }
+                has_pin = view.has_value();
+                pinned.set_value();
+                release.wait();
+                return {};
+            });
+        });
+        pinned.get_future().wait();
+        auto preparation_close = memory.TryCloseControlledStores(8);
+        const auto preparation_pending = preparation_close ? preparation_close->Poll() : Drain::Result::Unknown;
+        const bool preparation_resumed = preparation_close && preparation_close->ResumeNoEffects();
+        bool entered_again = false;
+        (void)Access::PrepareManagedMemory(memory, [&](auto&) -> Core::Memory::ControlledCpuWriteRequestPtr {
+            entered_again = true;
+            return {};
+        });
+        release_preparation.set_value();
+        preparing.join();
+        REQUIRE_FALSE(pin_error);
+        REQUIRE(has_pin);
+        REQUIRE(preparation_close.has_value());
+        REQUIRE(preparation_pending == Drain::Result::Pending);
+        REQUIRE_FALSE(preparation_resumed);
+        REQUIRE_FALSE(entered_again);
+        REQUIRE(preparation_close->Poll() == Drain::Result::DrainedSubset);
+        REQUIRE(preparation_close->ResumeNoEffects());
+        bool threw = false;
+        try {
+            (void)Access::PrepareManagedMemory(memory, [](auto&) -> Core::Memory::ControlledCpuWriteRequestPtr {
+                throw std::runtime_error("cold preparation before effects");
+            });
+        } catch (const std::runtime_error&) { threw = true; }
+        auto exception_close = memory.TryCloseControlledStores(8);
+        REQUIRE(threw);
+        REQUIRE(exception_close.has_value());
+        REQUIRE(exception_close->Poll() == Drain::Result::DrainedSubset);
+        REQUIRE(exception_close->ResumeNoEffects());
+        std::cout << "PASS native controlled CPU preparation owns real pin/owner entry through closure and exception cleanup; guest exclusion Unknown\n";
     }
     constexpr DAddr A = 0x1000000, B = 0x2000000, C = 0x4000000, D = 0x5000000, E = 0x6000000;
     constexpr u32 Page = 4096;

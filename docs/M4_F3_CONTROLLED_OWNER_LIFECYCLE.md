@@ -1,5 +1,11 @@
 # M4-F3 controlled owner lifecycle substage
 
+Follow-up: the [CPU preparation lifetime audit](M4_F3_CPU_PREPARATION_LIFETIME.md)
+identifies ordinary-guest owner/publication blockers and closes the empty-visit
+gap in explicit scalar request preparation. Its new source requires separate
+Linux validation; the accepted CPU-only arena evidence below remains scoped to
+`a36bae493c`. No ordinary guest admission is enabled.
+
 ## Scope and enforcement
 
 `Common::ControlledGuestArena` constructs fresh, private HostMemory with two fixed

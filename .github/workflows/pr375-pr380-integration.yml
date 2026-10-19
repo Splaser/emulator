@@ -167,6 +167,8 @@ jobs:
             timeout 30 build-integration/bin/controlled_cpu_scheduler_tests '[f3-provenance]' \
               > .diagnostics/pr375-pr380/f3-provenance-$repeat.txt 2>&1
             cat .diagnostics/pr375-pr380/f3-provenance-$repeat.txt
+            grep -F 'PASS native controlled CPU preparation owns real pin/owner entry through closure and exception cleanup; guest exclusion Unknown' \
+              .diagnostics/pr375-pr380/f3-provenance-$repeat.txt
           done
       - name: Preserve original F2 defect and fixed-mode negative control
         run: |
@@ -211,6 +213,7 @@ jobs:
           python tools/physical_coherency_tests/run_page_writer_tests.py
           python tools/physical_coherency_tests/run_cpu_mapping_tests.py
           python tools/physical_coherency_tests/run_first_registration_tests.py --repeat 10
+          python tools/physical_coherency_tests/run_cpu_preparation_owner_tests.py
           python tools/physical_coherency_tests/run_registration_pipeline_tests.py --repeat 10
           python tools/physical_coherency_tests/run_m3b_candidate_tests.py --repeat 3
           python tools/dma_snapshot_tests/run_tests.py
@@ -248,6 +251,7 @@ jobs:
             .diagnostics/m4-producer-drain/*
             .diagnostics/m4-host-mapping-freeze/*
             .diagnostics/m4-controlled-owner/*
+            .diagnostics/m4-cpu-preparation-owner/*
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn
