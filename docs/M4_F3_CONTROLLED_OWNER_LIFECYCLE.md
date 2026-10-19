@@ -125,3 +125,45 @@ used as a correctness certificate.
 Linux-only [39212193213](https://github.com/Splaser/emulator/actions/runs/39212193213)
 at `ebf84de7b4528eda91c7e2499c750f8e640495c1` was superseded and cancelled after
 the request for separate opt-in diagnostics. It cannot accept the metrics source.
+
+## Pause checkpoint — 2026-10-19
+
+Paused at the user's request to wait for the five-hour usage reset. All code is
+pushed to PR #375's existing `codex/issue-372-fixes` branch. Exact code/test source:
+`a36bae493c555dd3a6f50f7e48f6cd88cb9d67ef`; subsequent checkpoint changes are
+documentation only. No Android build was dispatched.
+
+Current Linux-only run: [39212903431](https://github.com/Splaser/emulator/actions/runs/39212903431),
+Linux job `117930077501`, Android job `117930078993` **skipped**. At this
+checkpoint the run is still building CLI/shader/tests. The following steps have
+passed: real HostMemory mapping suite, real controlled owner suite (eleven
+assertion mutants and three positive repeats, including idle closure drop and
+real byte/mapping lock contention), early native integration translation units,
+and the full synchronization/content boundary suite. This is **not full native
+or regression acceptance**; do not infer final workflow success from this note.
+The existing remote run is left running; no replacement run is needed merely
+because the conversation paused.
+
+On resume, first inspect this exact run's final result and first actual failure,
+if any. If successful, download its artifact and verify source stamp, ZIP digest,
+all manifest hashes against Git at the source above, eleven owner and nineteen
+mapping assertion mutants, three real owner repeats, all five CTest processes,
+three native provenance repeats with both new progress/metrics markers, and the
+original F2/F3 negative witnesses. Record actual assertion counts and metrics;
+do not reuse the preceding source's 447-assertion count. Then update this document
+and the two linked audit/mapping documents with final evidence and push only this
+branch. If it failed, repair that failure and dispatch Linux-only for the changed
+source; compiler failures/timeouts are never successful mutation kills.
+
+Local ignored continuation evidence is prepared in
+`.diagnostics/ci-39212903431/verify_acceptance.py` (requires the final job log,
+metadata, jobs JSON and downloaded/extracted artifact before it can run).
+`.diagnostics/m4-fast-path-audit/` retains the identical ordinary-entry assembly
+comparison; `.diagnostics/ci-39211644236/` retains the failed mutation-attempt log.
+These local paths are helpers, not substitutes for final remote evidence.
+
+The implementation stop remains deliberate: owner cohort and inner HostMemory
+freeze only. Outer CPU PTE/process/backend/service/GPU enrollment and retained
+guest-wide Unknown isolation are still blocked as listed above. No ordinary
+guest fast-path instrumentation, automatic frame route, guest lease or general
+resume authority has been enabled.
