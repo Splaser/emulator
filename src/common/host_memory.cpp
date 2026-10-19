@@ -1300,8 +1300,10 @@ private:
 
 HostMemory::HostMemory(size_t backing_size_, size_t virtual_size_,
                        std::span<const int> backing_fds, size_t chunk_size, bool direct_importable,
-                       bool lazy_backing, std::shared_ptr<GuestBackingExporter> exporter)
+                       bool lazy_backing, std::shared_ptr<GuestBackingExporter> exporter,
+                       bool managed_mapping_entries)
     : backing_size(backing_size_)
+    , mapping_domain{managed_mapping_entries}
     , driver_fds(backing_fds.begin(), backing_fds.end())
     , driver_chunk_size(chunk_size)
     , driver_direct_importable(direct_importable)
@@ -1486,7 +1488,7 @@ void HostMemory::EnsureBackingRange(size_t offset, size_t length) const {
     // Preserve the existing hot ready-chunk path: no new global mutex/shared_ptr
     // operation for every DeviceMemory pointer lookup. Only cold publication joins
     // the mutation domain. Ready chunks cannot be replaced while this owner lives.
-    if (impl->BackingRangeReady(offset, length)) {
+    if (!mapping_domain.IsManaged() || impl->BackingRangeReady(offset, length)) {
         impl->EnsureBackingRange(offset, length);
         return;
     }

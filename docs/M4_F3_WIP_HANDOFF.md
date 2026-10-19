@@ -829,6 +829,9 @@ Planner/Copy remains frozen; F2/F3 remain Open. No Android compilation was run.
 The [HostMemory mapping contract](M4_F3_HOST_MAPPING_FREEZE.md) adds an owner-created
 bounded actual alias ledger and a continuous mapping-entry closure around real
 Map/Unmap/Protect, backing materialization/clear/pin and direct-address mutation.
+The final design is explicitly enrolled at construction for fresh controlled
+arenas only; ordinary Core::DeviceMemory/NCE arenas remain default-off, allocate
+no new ledger state and enter no new mapping mutex. No later adoption is supported.
 Partial interval complements, canonical backing and irreversible raw export-family
 history are retained. External/driver/direct-address/unsupported arenas and census
 overflow refuse. A token can explicitly cancel CPU-only closure; unfinished drop
@@ -865,3 +868,19 @@ repeats, the injected NDEBUG protection-failure control and ten primitive/seven
 actual-wrapper assertion mutants. Native compilation/full regressions are still
 in progress; Android is skipped. Recover this run's result and artifact before
 further implementation or another dispatch.
+
+### Constructor-only enrollment correction
+
+Run `39201797569` is now cancelled after source review found that default-on
+HostMemory::Protect tracking could add a mutex to the existing NCE fault chain.
+Its early native compilation and old synchronization/content boundary gates passed,
+but full build/regression acceptance was not completed. Do not use its focused
+results as acceptance for the revised constructor-only opt-in component.
+
+Ordinary guest arenas now stay untracked and cannot freeze, with no new ledger
+allocation or mapping mutex. Only fresh explicitly controlled arenas enroll.
+Local macOS checks pass three repeats and eleven assertion mutants, adding a forced
+legacy-domain-enrollment negative. The real Linux suite additionally mutates the
+HostMemory public constructor default and expects ordinary-arena refusal; it still
+has seven actual wrapper guard mutants. Final Linux-only acceptance is pending;
+Android remains unrequested. No NCE runtime stop/resume or fault recovery is claimed.

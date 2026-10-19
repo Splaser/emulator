@@ -38,7 +38,8 @@ private:
         bool complete{true}, alive{true}, closed{}, sealed{};
         std::atomic<u32> escapes{};
     };
-    std::shared_ptr<State> state = std::make_shared<State>();
+    std::shared_ptr<State> state;
+    bool managed;
 
 public:
     // Immutable metadata only. Canonical backing is always an additional alias;
@@ -97,13 +98,15 @@ public:
         std::unique_lock<std::mutex> lock;
         bool finished{};
         explicit Mutation(std::shared_ptr<State> s)
-            : state{std::move(s)}, lock{state->mutex} {
+            : state{std::move(s)} {
+            if (!state) return; // Unmanaged legacy arena: no new mutex or ledger.
+            lock = std::unique_lock<std::mutex>{state->mutex};
             if (state->closed || !state->alive)
                 throw std::runtime_error("HostMemory mapping entries are frozen");
         }
         void Replace(size_t begin, size_t length, const std::optional<Alias>& mapped,
                      const std::optional<u32>& permissions) {
-            if (!state->complete) return;
+            if (!state || !state->complete) return;
             if (length > std::numeric_limits<size_t>::max() - begin) {
                 state->complete = false;
                 return;
@@ -149,28 +152,33 @@ public:
         void Protect(size_t va, size_t size, u32 permissions) {
             Replace(va, size, {}, permissions);
         }
-        void Unsupported() { state->complete = false; }
+        void Unsupported() { if (state) state->complete = false; }
         void Finish() {
+            if (!state) { finished = true; return; }
             if (state->generation == std::numeric_limits<u64>::max()) state->complete = false;
             else ++state->generation;
             finished = true;
         }
     };
 
-    HostMappingDomain() = default;
+    explicit HostMappingDomain(bool managed_ = true)
+        : state{managed_ ? std::make_shared<State>() : nullptr}, managed{managed_} {}
     HostMappingDomain(HostMappingDomain&&) noexcept = default;
     HostMappingDomain& operator=(HostMappingDomain&& other) noexcept {
-        if (this != &other) { Retire(); state = std::move(other.state); }
+        if (this != &other) { Retire(); state = std::move(other.state); managed = other.managed; }
         return *this;
     }
     HostMappingDomain(const HostMappingDomain&) = delete;
     ~HostMappingDomain() { Retire(); }
+    bool IsManaged() const noexcept { return managed; }
     void Initialize(size_t backing_size, bool supported) {
+        if (!state) return; // No adoption after any untracked historical use.
         std::lock_guard lock{state->mutex};
         state->backing_size = backing_size;
         state->complete = supported;
     }
     Mutation BeginMutation() const {
+        if (!managed) return Mutation{nullptr};
         if (!state) throw std::runtime_error("HostMemory mapping owner was moved");
         return Mutation{state};
     }

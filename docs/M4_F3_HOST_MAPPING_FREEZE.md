@@ -8,8 +8,14 @@ into GPU admission; guest backing remains Unknown and F2/F3 remain Open.
 
 ## Actual enrollment and ownership boundary
 
-Each HostMemory owns one HostMappingDomain, created with the arena rather than
-adopting a caller's alias list. Successful production Map, Unmap and Protect calls
+Fresh controlled arenas explicitly opt in with `managed_mapping_entries=true` at
+HostMemory construction, rather than adopting a caller's alias list. The default
+is **off**: ordinary guest arenas allocate no mapping-domain state, enter no new
+mapping mutex, record no escape history and always refuse freezing. They cannot
+be retroactively enrolled. Core::DeviceMemory constructors leave the flag off,
+including the NCE path; the current legacy fault chain must not acquire this lock.
+
+An enrolled arena owns one HostMappingDomain. Successful Map, Unmap and Protect calls
 maintain ordered physical-offset/virtual-offset/requested-permission intervals, including
 both complements of partial changes. Canonical backing is a separate whole-arena
 alias in the snapshot; lazy reserved bytes are not a claim of materialized storage.
@@ -41,8 +47,10 @@ GMMU/DAddr aliases, external OS mappings, services, plugins or renderer imports.
 The cold mutation transaction spans each actual HostMemory syscall/publication:
 Map, Unmap, Protect, ClearBackingRegion, EnsureBackingRange, PinPhysicalRange and
 EnableDirectMappedAddress. Nested materialization uses Impl directly within that
-same transaction. There is no recursive mapping lock and no lock is added to an
-NCE signal handler. Protection failure propagates even in assertion-disabled builds
+same transaction. Default-off ordinary arenas use a no-lock/no-ledger transaction;
+there is no new mapping lock in their legacy fault chain. Explicit enrollment is
+only for fresh controlled arenas, never for a live NCE/JIT guest. Protection
+failure propagates even in assertion-disabled builds
 and leaves the census incomplete instead of publishing successful permissions.
 
 Already-published ready chunks retain the existing lock-free materialization-query
@@ -85,7 +93,8 @@ On non-Linux hosts, use `--unit-only --cxx clang++`. The actual-domain tests cov
 an independent 8192-byte-observation oracle over 256 alternating Map/Unmap/Protect
 prefixes, physical offsets and permission complements, active-publication refusal,
 stale release, early drop, retirement, moves, incomplete publication and capacity.
-Ten assertion mutants challenge those boundaries. These are primitive tests, not
+Eleven assertion mutants challenge those boundaries, including forced legacy
+enrollment. These are primitive tests, not
 native guest execution or OS mapping acceptance.
 
 The Linux-only suite compiles production HostMemory with real memfd/mmap/mprotect
@@ -95,12 +104,13 @@ before effects, verifies a refused unprotect leaves a real store fault in a chil
 process, then demonstrates that a retained writable alias can still store 99.
 The latter is an ownership counterexample and must keep guest admission Unknown.
 Remap/cancel/drop/retirement/direct-address/external-fd controls are included.
-Seven further assertion mutants bypass the actual production wrapper guards.
+Seven further assertion mutants bypass the actual production wrapper guards;
+another changes the real HostMemory constructor default to enroll ordinary arenas.
 Both positive executables repeat three times; compiler failures/timeouts/signals
 without assertion diagnostics do not count as killed mutants.
 
-Local macOS: three unit repeats and all ten primitive assertion mutants passed.
-Production Linux syscalls, seven wrapper mutants and full regression acceptance
+Local macOS: three unit repeats and all eleven primitive assertion mutants passed.
+Production Linux syscalls, seven wrapper/one constructor mutants and full regression acceptance
 remain pending. The existing Linux workflow runs the new suite and archives its
 logs/source hashes under `.diagnostics/m4-host-mapping-freeze/`. No Android
 compilation or ARM/NCE execution is requested or claimed.
@@ -118,15 +128,18 @@ not supply acceptance for this source. Read the first actual failure/result and
 verify the artifact hashes, three positive repeats, ten primitive/seven wrapper
 assertion mutants and original F2/F3 controls before closing this gate.
 
-Latest Linux-only run
+Historical Linux-only run
 [39201797569](https://github.com/Splaser/emulator/actions/runs/39201797569) targets
 `cc409319a18286f0c602ae47fab5b2dfdd57ca71`, including the corrected harness include
 order. Its focused mapping suite has passed: three real-domain/production repeats,
 the injected NDEBUG protection-failure control and all ten primitive/seven actual
-wrapper assertion mutants. Native compilation and complete regression acceptance
-are still in progress, with Android skipped. These focused results do not certify
-full native guest exclusion. Do not dispatch a duplicate or substitute results
-from the failed earlier harness run.
+wrapper assertion mutants, early native integration compilation and existing
+synchronization/content boundary checks. It was cancelled before complete build/
+regression acceptance when source review identified the legacy NCE fault-chain
+risk from default-on tracking. The final component instead requires constructor-
+only explicit enrollment; its new defaults/negatives need a fresh Linux-only run.
+Android was skipped. These earlier focused results do not accept the final source
+or certify full native guest exclusion.
 
 ## Remaining gates
 

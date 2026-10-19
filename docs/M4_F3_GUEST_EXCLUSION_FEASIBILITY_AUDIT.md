@@ -274,6 +274,9 @@ PhysicalCore entry gates and one controlled Memory owner; this is only a managed
 subset, with Linux acceptance recorded separately. The
 [HostMemory alias/mapping component](M4_F3_HOST_MAPPING_FREEZE.md) subsequently
 adds actual owner-created mapping records and a cold mapping-entry freeze. Its
+final design is constructor-only opt-in for fresh controlled arenas; ordinary
+Core::DeviceMemory/NCE arenas stay untracked and acquire no new mapping mutex.
+It cannot adopt an already-used guest arena. Its
 Linux acceptance is pending. It does not close outer CPU PTE/device/GPU changes,
 escaped pointers or import/export publication. Those prerequisites above remain
 open; neither component is a truthful general guest exclusion capability.

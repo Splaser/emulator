@@ -115,10 +115,14 @@ public:
     /// With lazy_backing=true, reserve the arena and create chunks on first range access.
     /// An optional exporter provides CPU-ready dma-bufs, with memfd fallback before publication.
     /// backing_fds must be empty and chunk_size must divide the arena. No direct renderer access.
+    /// managed_mapping_entries enrolls a fresh controlled arena from construction only.
+    /// Leave disabled for ordinary guests and legacy fault-chain participants; there is no
+    /// later adoption API and no guest exclusion capability from this flag.
     explicit HostMemory(size_t backing_size_, size_t virtual_size_,
                         std::span<const int> backing_fds = {}, size_t chunk_size = 0,
                         bool direct_importable = false, bool lazy_backing = false,
-                        std::shared_ptr<GuestBackingExporter> exporter = {});
+                        std::shared_ptr<GuestBackingExporter> exporter = {},
+                        bool managed_mapping_entries = false);
     ~HostMemory();
 
     /**
@@ -143,6 +147,8 @@ public:
 
     void EnableDirectMappedAddress();
 
+    // Only arenas explicitly enrolled at construction can freeze; default guest
+    // arenas never enter the new mapping mutex (including legacy NCE fault paths).
     // Cold CPU-only mapping-entry freeze. Does not close CPU PTE mutation, raw
     // pointer use, services, imports or GPU execution; never guest admission.
     // Use only with a stable HostMemory lifecycle and outside cache/PTE locks.

@@ -49,6 +49,7 @@ def execute(name, sources, *, mutant=False, production=False):
 
 execute('domain', [root / unit_path])
 mutants = [
+    ('legacy-domain-autoenroll', 'managed{managed_}', 'managed{true}'),
     ('missing-canonical', 'return backing_size;', 'return 0;'),
     ('missing-escape-history', 'state->escapes.fetch_or(family, std::memory_order_release)',
      'state->escapes.fetch_or(0 * family, std::memory_order_release)'),
@@ -107,7 +108,7 @@ namespace Common::Log { inline void Stop() {} }
 #include <iostream>
 #include "common/host_memory.h"
 int main() {
-    Common::HostMemory arena(4096 * 8, 4096 * 4096);
+    Common::HostMemory arena(4096 * 8, 4096 * 4096, {}, 0, false, false, {}, true);
     arena.Map(0, 0, 4096, Common::MemoryPermission::ReadWrite, false);
     bool refused = false;
     try { arena.Protect(0, 4096, Common::MemoryPermission::Read); }
@@ -130,6 +131,19 @@ int main() {
         path.write_text(changed)
         execute(f'bypass-{method}', [path, root / real_path], mutant=True, production=True)
         ingress_mutants.append(method)
+    # A public constructor default must never enroll an ordinary guest arena.
+    host_header = (root / 'src/common/host_memory.h').read_text()
+    assert host_header.count('bool managed_mapping_entries = false);') == 1
+    injected_header = stubs / 'host_memory.h'
+    mutant_header = host_header.replace('bool managed_mapping_entries = false);',
+                                       'bool managed_mapping_entries = true);')
+    (out / 'legacy-host-autoenroll.h').write_text(mutant_header)
+    injected_header.write_text(mutant_header)
+    try:
+        execute('legacy-host-autoenroll', [root / 'src/common/host_memory.cpp', root / real_path],
+                mutant=True, production=True)
+    finally:
+        injected_header.unlink()
 else:
     print('NOT RUN: production Linux HostMemory, real VMA controls and seven wrapper mutants')
 
@@ -138,6 +152,7 @@ paths = [header_path, 'src/common/host_memory.h', 'src/common/host_memory.cpp', 
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in paths},
     'unit_assertion_mutants': len(mutants), 'production_ingress_mutants': ingress_mutants,
+    'legacy_enrollment_mutants': 1 if real_executed else 0,
     'repeats': 3, 'real_linux_executed': real_executed,
     'boundary': 'HostMemory mapping subset only; raw stores remain possible, guest admission Unknown; no CPU PTE, service, GPU or ARM/NCE exclusion'
 }, indent=2) + '\n')

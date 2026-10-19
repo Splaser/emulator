@@ -19,13 +19,13 @@ template <typename F> void Refused(F&& f) {
 int main() {
     constexpr size_t page = 4096;
     if (sysconf(_SC_PAGESIZE) != page) {
-        HostMemory arena(page * 8, page * 4096);
+        HostMemory arena(page * 8, page * 4096, {}, 0, false, false, {}, true);
         assert(!arena.TryFreezeMappingEntries());
         std::cout << "PASS unsupported host page size refuses mapping census\n";
         return 0;
     }
     {
-        HostMemory arena(page * 8, page * 4096, {}, page * 2, false, true);
+        HostMemory arena(page * 8, page * 4096, {}, page * 2, false, true, {}, true);
         arena.ClearBackingRegion(0, page, 10);
         arena.Map(0, 0, page * 2, Perm::ReadWrite, false);
         arena.Map(page * 4, 0, page, Perm::ReadWrite, false);
@@ -77,13 +77,14 @@ int main() {
         assert(remapped->CancelNoEffects());
     }
     {
-        auto arena = std::make_unique<HostMemory>(page * 8, page * 4096);
+        auto arena = std::make_unique<HostMemory>(page * 8, page * 4096,
+            std::span<const int>{}, 0, false, false, nullptr, true);
         auto frozen = arena->TryFreezeMappingEntries(); assert(frozen);
         arena.reset();
         assert(!frozen->MappingEntriesClosed() && !frozen->CancelNoEffects());
     }
     {
-        HostMemory source(page * 8, page * 4096);
+        HostMemory source(page * 8, page * 4096, {}, 0, false, false, {}, true);
         auto frozen = source.TryFreezeMappingEntries(); assert(frozen);
         HostMemory moved{std::move(source)};
         assert(!source.PinPhysicalRange(0, 1) && !source.TryFreezeMappingEntries());
@@ -92,12 +93,12 @@ int main() {
         assert(moved.PinPhysicalRange(0, 1));
     }
     {
-        HostMemory arena(page * 8, page * 4096);
+        HostMemory arena(page * 8, page * 4096, {}, 0, false, false, {}, true);
         { auto frozen = arena.TryFreezeMappingEntries(); assert(frozen); }
         Refused([&] { arena.Map(0, 0, page, Perm::ReadWrite, false); });
     }
     {
-        HostMemory arena(page * 8, page * 4096);
+        HostMemory arena(page * 8, page * 4096, {}, 0, false, false, {}, true);
         arena.EnableDirectMappedAddress();
         assert(!arena.TryFreezeMappingEntries());
     }
@@ -107,8 +108,15 @@ int main() {
         // HostMemory takes ownership, but the original export/owner history is
         // unknowable even if it is an ordinary memfd rather than a dma-buf.
         const std::array<int, 1> fds{fd};
-        HostMemory external(page * 8, page * 4096, fds, page * 8);
+        HostMemory external(page * 8, page * 4096, fds, page * 8, false, false, {}, true);
         assert(!external.TryFreezeMappingEntries());
     }
-    std::cout << "PASS production Linux HostMemory: canonical and two physical aliases, real read-only protection, seven pre-effect mutation refusals, retained raw-writer bypass, remap, drop and retirement; guest admission Unknown\n";
+    {
+        HostMemory ordinary(page * 8, page * 4096);
+        ordinary.Map(0, 0, page, Perm::ReadWrite, false);
+        ordinary.Protect(0, page, Perm::Read);
+        assert(!ordinary.TryFreezeMappingEntries());
+        ordinary.Unmap(0, page, false);
+    }
+    std::cout << "PASS production Linux HostMemory: canonical and two physical aliases, real read-only protection, seven pre-effect mutation refusals, retained raw-writer bypass, remap, drop, retirement and default-off enrollment; guest admission Unknown\n";
 }

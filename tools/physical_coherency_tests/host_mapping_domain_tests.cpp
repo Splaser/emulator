@@ -13,6 +13,15 @@ template <typename F> void Refused(F&& f) {
 }
 int main() {
     {
+        Domain legacy{false};
+        legacy.Initialize(4096, true); // Cannot retrospectively enroll an owner.
+        assert(!legacy.IsManaged() && !legacy.TryFreeze());
+        auto outer = legacy.BeginMutation();
+        auto nested = legacy.BeginMutation(); // No mutex, allocation or reentrant lock.
+        outer.Map(0, 0, 4096, 3); outer.Finish(); nested.Finish();
+        assert(!legacy.IsManaged() && !legacy.TryFreeze());
+    }
+    {
         Domain domain;
         std::array<int, 32> physical, permissions{};
         physical.fill(-1);
