@@ -104,6 +104,8 @@ jobs:
             -DENABLE_QT=OFF -DENABLE_SDL2=ON -DCITRON_USE_EXTERNAL_SDL2=OFF \
             -DENABLE_CUBEB=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_LIBUSB=OFF \
             -DCITRON_ROOM=OFF -DCITRON_TESTS=ON -DCITRON_CRASH_DUMPS=OFF
+      - name: Verify HostMemory mapping freeze and omitted-owner controls
+        run: python tools/physical_coherency_tests/run_host_mapping_freeze_tests.py
       - name: Check native scheduler integration translation units first
         run: |
           cmake --build build-integration --parallel 3 --target \
@@ -188,7 +190,6 @@ jobs:
             > .diagnostics/pr375-pr380/f3-teardown.txt 2>&1
       - name: Exercise real Linux HostMemory and backing import lifetime
         run: |
-          python tools/physical_coherency_tests/run_host_mapping_freeze_tests.py
           python tools/lazy_backing_tests/run_tests.py
           python tools/lazy_backing_tests/run_export_tests.py
           python tools/chunk_import_tests/run_backing_tests.py

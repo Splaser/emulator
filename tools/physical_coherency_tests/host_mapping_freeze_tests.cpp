@@ -82,6 +82,15 @@ int main() {
         assert(!frozen->MappingEntriesClosed() && !frozen->CancelNoEffects());
     }
     {
+        HostMemory source(page * 8, page * 4096);
+        auto frozen = source.TryFreezeMappingEntries(); assert(frozen);
+        HostMemory moved{std::move(source)};
+        assert(!source.PinPhysicalRange(0, 1) && !source.TryFreezeMappingEntries());
+        assert(frozen->MappingEntriesClosed());
+        assert(frozen->CancelNoEffects());
+        assert(moved.PinPhysicalRange(0, 1));
+    }
+    {
         HostMemory arena(page * 8, page * 4096);
         { auto frozen = arena.TryFreezeMappingEntries(); assert(frozen); }
         Refused([&] { arena.Map(0, 0, page, Perm::ReadWrite, false); });

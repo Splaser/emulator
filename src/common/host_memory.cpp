@@ -1478,6 +1478,8 @@ void HostMemory::EnsureBackingRange(size_t offset, size_t length) const {
 }
 
 std::optional<PinnedPhysicalMemory> HostMemory::PinPhysicalRange(size_t offset, size_t length) const {
+    // Preserve the moved-from query contract before touching the transferred gate.
+    if (!impl) return std::nullopt;
     auto mutation = mapping_domain.BeginMutation();
     mapping_domain.ObserveEscape(HostMappingDomain::PhysicalPin);
     if (!impl || length == 0 || offset >= backing_size || length > backing_size - offset) {

@@ -148,6 +148,8 @@ int main() {
         source.Initialize(4096, true);
         auto frozen = source.TryFreeze(); assert(frozen);
         Domain moved{std::move(source)};
+        assert(!source.TryFreeze());
+        Refused([&] { auto m = source.BeginMutation(); m.Finish(); });
         assert(frozen->MappingEntriesClosed() && frozen->CancelNoEffects());
         auto again = moved.TryFreeze(); assert(again && again->CancelNoEffects());
     }

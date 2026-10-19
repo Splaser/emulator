@@ -170,8 +170,12 @@ public:
         state->backing_size = backing_size;
         state->complete = supported;
     }
-    Mutation BeginMutation() const { return Mutation{state}; }
+    Mutation BeginMutation() const {
+        if (!state) throw std::runtime_error("HostMemory mapping owner was moved");
+        return Mutation{state};
+    }
     std::optional<Freeze> TryFreeze() const {
+        if (!state) return {};
         std::unique_lock lock{state->mutex, std::try_to_lock};
         if (!lock || !state->alive || !state->complete || state->closed || state->sealed)
             return {};
