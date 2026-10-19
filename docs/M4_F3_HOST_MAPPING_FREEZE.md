@@ -10,10 +10,14 @@ into GPU admission; guest backing remains Unknown and F2/F3 remain Open.
 
 Each HostMemory owns one HostMappingDomain, created with the arena rather than
 adopting a caller's alias list. Successful production Map, Unmap and Protect calls
-maintain ordered physical-offset/virtual-offset/permission intervals, including
+maintain ordered physical-offset/virtual-offset/requested-permission intervals, including
 both complements of partial changes. Canonical backing is a separate whole-arena
 alias in the snapshot; lazy reserved bytes are not a claim of materialized storage.
 An interval snapshot contains no mutable address, borrowed fd or backing pin.
+Permission flags retain the request, not an OS-effective permission query or a
+restore certificate: Execute handling is platform/build dependent. The separate
+real read-only store-fault control checks OS enforcement. A future protection
+lease must establish saved effective intersections independently before restoration.
 
 Raw canonical/virtual pointer access, physical pin creation, chunk-lease queries
 and driver-fd publication record permanent escape-family history on this owner.
@@ -113,6 +117,16 @@ Superseded runs `39187093671` and `39187016054` were cancelled and must
 not supply acceptance for this source. Read the first actual failure/result and
 verify the artifact hashes, three positive repeats, ten primitive/seven wrapper
 assertion mutants and original F2/F3 controls before closing this gate.
+
+Latest Linux-only run
+[39201797569](https://github.com/Splaser/emulator/actions/runs/39201797569) targets
+`cc409319a18286f0c602ae47fab5b2dfdd57ca71`, including the corrected harness include
+order. Its focused mapping suite has passed: three real-domain/production repeats,
+the injected NDEBUG protection-failure control and all ten primitive/seven actual
+wrapper assertion mutants. Native compilation and complete regression acceptance
+are still in progress, with Android skipped. These focused results do not certify
+full native guest exclusion. Do not dispatch a duplicate or substitute results
+from the failed earlier harness run.
 
 ## Remaining gates
 

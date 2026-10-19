@@ -856,3 +856,12 @@ the harness's source include path preceded its logging/assert stubs. The ten
 primitive mutants passed, but no production/native acceptance is inferred. The
 test include order is corrected for the next Linux-only run. Production source
 is unchanged by this harness repair; complete Linux acceptance remains pending.
+
+Latest acceptance attempt:
+[39201797569](https://github.com/Splaser/emulator/actions/runs/39201797569), exact
+source `cc409319a18286f0c602ae47fab5b2dfdd57ca71`. It includes the harness include
+order correction. The focused real Linux mapping suite passed all three positive
+repeats, the injected NDEBUG protection-failure control and ten primitive/seven
+actual-wrapper assertion mutants. Native compilation/full regressions are still
+in progress; Android is skipped. Recover this run's result and artifact before
+further implementation or another dispatch.
