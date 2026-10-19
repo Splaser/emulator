@@ -101,6 +101,16 @@ remain pending. The existing Linux workflow runs the new suite and archives its
 logs/source hashes under `.diagnostics/m4-host-mapping-freeze/`. No Android
 compilation or ARM/NCE execution is requested or claimed.
 
+Current Linux-only run
+[39187373524](https://github.com/Splaser/emulator/actions/runs/39187373524) targets
+exact source `465f626f7b55372eade5896fc28276a8239d4c33`, comprising initial component
+`56676e3bd9`, moved-from compatibility/early validation `05acd60221` and ready-query
+hot-path preservation `465f626f7b`. This run is pending acceptance; Android is
+skipped. Superseded runs `39187093671` and `39187016054` were cancelled and must
+not supply acceptance for this source. Read the first actual failure/result and
+verify the artifact hashes, three positive repeats, ten primitive/seven wrapper
+assertion mutants and original F2/F3 controls before closing this gate.
+
 ## Remaining gates
 
 1. Enroll lifetime-scoped owner/borrow use, or stop/join the complete audited owner

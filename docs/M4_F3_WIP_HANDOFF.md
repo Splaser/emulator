@@ -843,3 +843,10 @@ No Android build is requested. Do not enable this on a running guest: outer CPU
 PTE changes, services, raw stores and GPU mappings/publications are still unclosed.
 An inner HostMemory refusal cannot undo earlier outer publication. Next compose
 outer entry closure and real owner lifetimes before any guest admission attempt.
+
+Implementation is pushed through `465f626f7b55372eade5896fc28276a8239d4c33`.
+It preserves moved-from PinPhysicalRange queries and keeps already-ready backing
+lookups free of the new cold mapping mutex. Current Linux-only acceptance run is
+[39187373524](https://github.com/Splaser/emulator/actions/runs/39187373524), with
+the real mapping suite before native integration compilation. Android is skipped;
+superseded runs `39187093671`/`39187016054` are cancelled. Acceptance remains pending.
