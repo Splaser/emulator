@@ -579,6 +579,7 @@ public:
 
 private:
     friend struct Core::SystemTestAccess;
+    friend struct Core::SchedulerTestAccess;
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite(
         Common::ProcessAddress, ControlledCpuWriteRequest::Value);
     Core::System& system;
