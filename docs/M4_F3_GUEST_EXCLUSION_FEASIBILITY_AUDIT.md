@@ -277,6 +277,8 @@ adds actual owner-created mapping records and a cold mapping-entry freeze. Its
 final design is constructor-only opt-in for fresh controlled arenas; ordinary
 Core::DeviceMemory/NCE arenas stay untracked and acquire no new mapping mutex.
 It cannot adopt an already-used guest arena. Its
-Linux acceptance is pending. It does not close outer CPU PTE/device/GPU changes,
+bounded Linux acceptance passed at `a080cc5a2a` in
+[run 39205308506](https://github.com/Splaser/emulator/actions/runs/39205308506).
+It does not close outer CPU PTE/device/GPU changes,
 escaped pointers or import/export publication. Those prerequisites above remain
 open; neither component is a truthful general guest exclusion capability.

@@ -110,8 +110,9 @@ Both positive executables repeat three times; compiler failures/timeouts/signals
 without assertion diagnostics do not count as killed mutants.
 
 Local macOS: three unit repeats and all eleven primitive assertion mutants passed.
-Production Linux syscalls, seven wrapper/one constructor mutants and full regression acceptance
-remain pending. The existing Linux workflow runs the new suite and archives its
+Final production Linux syscalls, seven wrapper/one constructor mutants and full
+regression acceptance passed in the exact-source run recorded below.
+The existing Linux workflow runs the new suite and archives its
 logs/source hashes under `.diagnostics/m4-host-mapping-freeze/`. No Android
 compilation or ARM/NCE execution is requested or claimed.
 
@@ -144,11 +145,31 @@ or certify full native guest exclusion.
 Current Linux-only run
 [39205308506](https://github.com/Splaser/emulator/actions/runs/39205308506) targets
 exact constructor-only enrollment source
-`a080cc5a2ac61263c5014b94cf25836bd87ddb50`. It is in progress; Android is skipped.
-Acceptance now requires all eleven primitive, seven wrapper and one real
-constructor-default assertion mutants (nineteen total), three positive repeats,
-the NDEBUG failure control and the complete original Linux regression suite.
-Do not reuse the cancelled default-on run's results for this final component.
+`a080cc5a2ac61263c5014b94cf25836bd87ddb50`. Its Linux production job passed in full;
+Android was skipped. Independent artifact verification confirms:
+
+- All eleven primitive, seven wrapper and one public-constructor assertion mutants
+  failed assertions as required (nineteen total); no compiler failures/timeouts
+  were counted as successful negatives.
+- Primitive and real production mapping tests each passed three repeats. The
+  injected NDEBUG protection-failure control passed three repeats. Real read-only
+  protection, refused mutation effects and the retained raw-store counterexample
+  are exercised; guest admission stays Unknown.
+- Native integration translation units and CLI/shader/tests compiled. All five
+  CTest processes, three additional native provenance repeats (447 assertions
+  each), backing/import and all configured coherency/lifecycle regressions passed.
+- F3 still reproduces stale aliases; require-fixed has exactly two alias failures,
+  36 passing assertions and exit 42. F2 remains backing77/cache10 with the expected
+  failing fixed-mode control. Neither defect is claimed fixed.
+- Artifact `12166179272` matches its published ZIP digest. All 114 SHA-256 entries
+  in eight manifests match Git at this source and the resumed checkout's source
+  files (subsequent changes are documentation only).
+
+Artifact, source stamp, full job log, independent verifier and acceptance index are
+retained locally under `.diagnostics/ci-39205308506/`. This closes acceptance for
+the fresh controlled HostMemory component only. Do not reuse the cancelled
+default-on run's results or infer full guest owner enrollment, NCE execution,
+asynchronous GPU isolation or content authority from this acceptance.
 
 ## Remaining gates
 

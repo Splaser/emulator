@@ -838,7 +838,7 @@ overflow refuse. A token can explicitly cancel CPU-only closure; unfinished drop
 seals entry and owner retirement invalidates metadata. No backing pin or GPU lease
 is issued, and guest backing admission always refuses.
 
-Local macOS unit checks pass three repeats and ten assertion mutants, including
+Initial default-on checkpoint (historical): local macOS checks passed three repeats and ten assertion mutants, including
 an independent 256-prefix physical-offset/permission byte oracle. Real Linux VMA
 tests, seven actual-wrapper guard mutants and complete regression acceptance are
 pending. The Linux workflow now includes these tests and preserves their evidence.
@@ -882,12 +882,34 @@ allocation or mapping mutex. Only fresh explicitly controlled arenas enroll.
 Local macOS checks pass three repeats and eleven assertion mutants, adding a forced
 legacy-domain-enrollment negative. The real Linux suite additionally mutates the
 HostMemory public constructor default and expects ordinary-arena refusal; it still
-has seven actual wrapper guard mutants. Final Linux-only acceptance is pending;
+has seven actual wrapper guard mutants. At that checkpoint final Linux acceptance was pending;
 Android remains unrequested. No NCE runtime stop/resume or fault recovery is claimed.
 
 Current final-source acceptance attempt:
 [39205308506](https://github.com/Splaser/emulator/actions/runs/39205308506), exact
 source `a080cc5a2ac61263c5014b94cf25836bd87ddb50`. It verifies constructor-only
 enrollment: eleven primitive + seven wrapper + one public-constructor assertion
-mutants, three positive repeats and full original Linux regressions. It is in
-progress with Android skipped. Recover this run before another dispatch.
+mutants, three positive repeats and full original Linux regressions. The Linux
+job has now passed in full; Android was skipped. No duplicate dispatch is needed.
+
+### Final constructor-only component Linux acceptance
+
+Source `a080cc5a2ac61263c5014b94cf25836bd87ddb50` passed
+[run 39205308506](https://github.com/Splaser/emulator/actions/runs/39205308506).
+Artifact `12166179272` was downloaded and its ZIP digest verified. All 114 source
+hash entries across eight manifests match that Git source and the resumed checkout;
+later commits change only documentation. Three primitive/production/protection-
+failure repeats and all nineteen assertion mutants passed their required controls.
+All five CTest processes, native Vulkan provenance 447 assertions in each of three
+extra repeats, complete backing/coherency/lifecycle regressions and original F2/F3
+negative controls passed. F2 remains backing77/cache10; F3 require-fixed still has
+two alias failures and exit42. Evidence and independent verifier/index are retained
+in `.diagnostics/ci-39205308506/`; details and evidence boundaries are in the
+[component contract](M4_F3_HOST_MAPPING_FREEZE.md).
+
+This closes only the fresh explicitly enrolled HostMemory mapping component.
+Ordinary guest/NCE arenas remain default-off with no new ledger allocation/mutex.
+Complete owner/borrow enrollment, outer CPU PTE/device/GPU mapping/publication
+closure, host/device drainage and retained GPU-lifetime isolation remain next
+gates. No ordinary routing, content authority or GPU admission is enabled; F2/F3
+remain Open. No Android compilation was run.
