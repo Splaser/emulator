@@ -175,7 +175,15 @@ asynchronous GPU isolation or content authority from this acceptance.
 
 The subsequent [controlled owner lifecycle](M4_F3_CONTROLLED_OWNER_LIFECYCLE.md)
 substage creates a closed CPU-only backing cohort and composes its owned entry
-drain with this same HostMappingDomain. New acceptance is pending. It deliberately
+drain with this same HostMappingDomain. Its Linux-only acceptance is verified at
+`a36bae493c` in [39212903431](https://github.com/Splaser/emulator/actions/runs/39212903431):
+eleven owner and nineteen mapping assertion mutants, three real owner/mapping
+repeats, all five CTest processes (467 provenance assertions, also in each of three
+extra native processes), native GPU-progress/metrics controls and all configured
+regressions passed. Android was skipped. Artifact `12170850326` has a verified ZIP
+digest and 125 source hashes across nine manifests; exact metrics and scope are
+recorded in the linked owner document. F2/F3 defect controls remain unchanged.
+This accepts that fresh CPU-only owner component only. It deliberately
 stops before outer CPU PTE publication: real PageTable/process/backend/service/GPU
 owners are not enrolled, and ordinary guest admission remains Unknown.
 

@@ -285,7 +285,14 @@ open; neither component is a truthful general guest exclusion capability.
 
 The next [controlled owner lifecycle substage](M4_F3_CONTROLLED_OWNER_LIFECYCLE.md)
 adds a sealed fresh CPU-only backing cohort with actual admission/drain and retained
-lifetimes. It reuses the accepted HostMappingDomain after drainage. Its new Linux
-acceptance is pending; it does not supply outer CPU PTE, NCE/Dynarmic, raw/service
+lifetimes. It reuses the accepted HostMappingDomain after drainage. Linux-only
+[39212903431](https://github.com/Splaser/emulator/actions/runs/39212903431) passed at
+`a36bae493c`, with verified artifact/source hashes, eleven owner and nineteen
+mapping assertion mutants, three real owner repeats, five CTest processes and
+three extra 467-assertion native provenance processes. The resolved-owner GPU
+progress and separate opt-in metrics controls passed; Android was skipped.
+See the owner document for exact counters and artifact digest. This accepts the
+CPU-only cohort, not a general guest exclusion capability. It does not supply
+outer CPU PTE, NCE/Dynarmic, raw/service
 or GPU owner completeness. The documented publication/lifecycle blockers require
 stopping at this owner substage, rather than asserting a general guest lease.

@@ -77,8 +77,9 @@ backing while a controlled owner holds its resolved pointer and byte mutex;
 the GPU callback must refuse arena access before trying that mutex. This proves
 that dependency's progress, **not GPU ownership of the arena**.
 
-New Linux acceptance is pending. Do not reuse prior HostMemory or private-provider
-CI as acceptance for this owner substage. Android builds are excluded this round.
+Linux acceptance for this owner substage is now verified in run `39212903431`,
+as recorded below. Earlier HostMemory/private-provider runs are not its evidence.
+Android was skipped this round.
 
 The first Linux-only attempt [39211644236](https://github.com/Splaser/emulator/actions/runs/39211644236)
 at `603a606f56f3ebf7a79a813796e815c41497881c` stopped in mutation validation:
@@ -126,7 +127,7 @@ Linux-only [39212193213](https://github.com/Splaser/emulator/actions/runs/392121
 at `ebf84de7b4528eda91c7e2499c750f8e640495c1` was superseded and cancelled after
 the request for separate opt-in diagnostics. It cannot accept the metrics source.
 
-## Pause checkpoint — 2026-10-19
+## Historical pause checkpoint — 2026-10-19 afternoon
 
 Paused at the user's request to wait for the five-hour usage reset. All code is
 pushed to PR #375's existing `codex/issue-372-fixes` branch. Exact code/test source:
@@ -167,3 +168,67 @@ freeze only. Outer CPU PTE/process/backend/service/GPU enrollment and retained
 guest-wide Unknown isolation are still blocked as listed above. No ordinary
 guest fast-path instrumentation, automatic frame route, guest lease or general
 resume authority has been enabled.
+
+## Verified resume acceptance — 2026-10-19
+
+Resumed from checkpoint `dc7a0a2971`. Linux-only
+[39212903431](https://github.com/Splaser/emulator/actions/runs/39212903431)
+completed successfully at exact code/test source
+`a36bae493c555dd3a6f50f7e48f6cd88cb9d67ef`; Linux job `117930077501` passed,
+Android job `117930078993` was skipped. Subsequent checkpoint/evidence commits
+change documentation only. No replacement build was needed.
+
+Independent verification downloaded artifact `12170850326`, checked its source
+stamp, and matched the published ZIP SHA-256
+`ed966c1776d3457d2544eaf457f7b828076082ab7bf96f837940591322c59ec5`.
+All 125 SHA-256 entries in nine manifests match Git at that source and the resumed
+HEAD. Windows worktree comparisons agree after its configured `core.autocrlf=true`
+checkout normalization; no source rewrite was needed. The 57 normalized unique
+files are an on-disk line-ending difference, not an exception to Git hash checks.
+
+- Eleven controlled-owner mutants and nineteen mapping mutants failed assertions;
+  none was accepted because of compiler failure, timeout or unrelated crash.
+  `closure-drop-reopens` now fails the explicit idle-cohort Store/register/re-close
+  assertion, covering the previously surviving mutant.
+- Actual Linux owner, primitive mapping, production HostMemory and NDEBUG
+  protection-failure controls each passed three repeats. The owner tests exercise
+  resolved-pointer retention, real byte/mapping contention and sticky Unknown.
+- Early native integration units, the complete synchronization/content boundary
+  suite and Linux CLI/shader/test targets passed, followed by all configured
+  HostMemory/import/coherency/lifecycle regressions.
+- All five CTest processes passed: 130 ordinary test cases (3,922,962 assertions),
+  scheduler 1,708 assertions, F3 witness 38, admitted adapter 88 and provenance
+  **467**. The three extra provenance processes each passed 467 assertions and
+  both the resolved-owner GPU-progress and opt-in completion-metrics markers.
+  Do not reuse the preceding source's 447 count.
+- The native GPU progress control completes unrelated real Vulkan work while a
+  controlled owner retains a resolved pointer and byte mutex; attempted arena
+  access refuses before that mutex. This does not enroll GPU ownership of the
+  arena or prove ARM/NCE/backend exit.
+- Original F3 repeats reproduce stale aliases; fixed mode has precisely 36 passing
+  and two failing assertions, exit 42. Original F2 repeats retain backing77/cache10;
+  its fixed-mode check exits 1 as required. **F2/F3 remain Open.**
+
+Recorded diagnostics from the three real owner repeats:
+
+| Measured operation | Calls per process | Total host ns, repeats 1/2/3 | Contention | Refused | Unknown |
+| --- | --- | --- | --- | --- | --- |
+| Owner admission | 10 | 611 / 614 / 601 | 0 | 5 | 0 |
+| Owner drainage | 8 | 289 / 270 / 270 | 3 | 0 | 2 |
+| Host mapping freeze | 2 | 340 / 350 / 391 | 0 | 1 | 0 |
+| Separate real mapping-lock contention control | 1 | 3817 / 3767 / 3497 | 1 | 1 | 1 |
+
+Checked GPU completion in the three extra native processes recorded respectively
+9/9/8 calls, 6443/5371/10418 total host ns and 4/4/3 pending-contention observations.
+The CTest process recorded 9 calls, 9658 host ns and 4 contention observations.
+These are opt-in host-call diagnostics, not device execution duration, additive
+frame cost, a performance threshold or new correctness authority.
+
+Artifact, metadata, full Linux log, independent verifier and `acceptance.json`
+are retained in the resumed machine's ignored `.diagnostics/ci-39212903431/`.
+This closes Linux acceptance for the fresh CPU-only owner substage only.
+The outer PTE/process/backend/service/raw/GPU enrollment and retained guest-wide
+Unknown isolation blockers above remain; ordinary game routing stays off,
+GuestBackingAdmission stays Unknown and no guest lease/resume API is issued.
+Continue on `codex/issue-372-fixes`; push evidence there only, without promoting
+personal `main` or merging upstream as part of this checkpoint.
