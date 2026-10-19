@@ -20,6 +20,7 @@ class ProducerDrain {
     std::shared_ptr<State> state{std::make_shared<State>()};
 public:
     enum class Result { Pending, DrainedSubset, Unknown };
+    enum class EntryAttempt { Admitted, Closed, Capacity, Contended };
     class Entry {
         friend class ProducerDrain;
         std::shared_ptr<State> state;
@@ -62,12 +63,31 @@ public:
     ~ProducerDrain(){Seal();}
     void Seal() const noexcept {state->value.fetch_or(Closed|Unknown,std::memory_order_acq_rel);}
     std::optional<Entry> TryEnter() const noexcept {
+        return TryEnterImpl<false>(nullptr);
+    }
+    // Explicit diagnostics overload. The ordinary overload instantiates no
+    // observer stores, timing, registry, lock, allocation or additional wait.
+    std::optional<Entry> TryEnter(EntryAttempt& attempt) const noexcept {
+        return TryEnterImpl<true>(&attempt);
+    }
+private:
+    template <bool Diagnose>
+    std::optional<Entry> TryEnterImpl(EntryAttempt* attempt) const noexcept {
         auto value=state->value.load(std::memory_order_acquire);
-        if((value & (Closed|Unknown)) || (value & Count)==Count) return {};
+        if((value & (Closed|Unknown)) || (value & Count)==Count) {
+            if constexpr (Diagnose) *attempt = (value & (Closed|Unknown)) ?
+                EntryAttempt::Closed : EntryAttempt::Capacity;
+            return {};
+        }
         // One attempt: contention refuses entry; no CAS retry/spin/wait.
-        if(!state->value.compare_exchange_strong(value,value+1,std::memory_order_acq_rel)) return {};
+        if(!state->value.compare_exchange_strong(value,value+1,std::memory_order_acq_rel)) {
+            if constexpr (Diagnose) *attempt = EntryAttempt::Contended;
+            return {};
+        }
+        if constexpr (Diagnose) *attempt = EntryAttempt::Admitted;
         return Entry{state};
     }
+public:
     std::optional<Closure> TryClose(u32 poll_budget=64) const noexcept {
         if(!poll_budget || poll_budget>4096) return {};
         const auto old=state->value.fetch_or(Closed,std::memory_order_acq_rel);

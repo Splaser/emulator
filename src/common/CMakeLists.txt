@@ -35,6 +35,7 @@ add_library(common STATIC
     common_types.h
     concepts.h
     controlled_guest_arena.h
+    slow_path_metrics.h
     container_hash.h
     demangle.cpp
     demangle.h

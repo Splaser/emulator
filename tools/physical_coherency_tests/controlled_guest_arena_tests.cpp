@@ -9,6 +9,13 @@ using Arena = Common::ControlledGuestArena;
 using Access = Common::ControlledGuestArenaTestAccess;
 using Result = Arena::Result;
 using Perm = Common::MemoryPermission;
+using Stage = Common::SlowPathMetrics::Stage;
+void PrintMetrics(const Arena& arena, Stage stage, const char* label) {
+    const auto s = arena.Statistics(stage);
+    std::cout << "METRICS " << label << " calls=" << s.calls << " host_ns=" << s.host_ns
+              << " contention=" << s.contention << " refused=" << s.refused
+              << " unknown=" << s.unknown << '\n';
+}
 static_assert(!std::is_default_constructible_v<Arena::Owner>);
 static_assert(!std::is_copy_constructible_v<Arena::Owner>);
 static_assert(!std::is_copy_constructible_v<Arena::Close>);
@@ -60,6 +67,16 @@ int main() {
         assert(close->CancelNoEffects());
         assert(close->Poll() == Result::Unknown && !close->CancelNoEffects());
         assert(owner->Load(4096) == 77);
+        assert(arena.Statistics(Stage::Admission).calls >= 8);
+        assert(arena.Statistics(Stage::Admission).refused >= 4);
+        assert(arena.Statistics(Stage::Drainage).contention >= 1);
+        assert(arena.Statistics(Stage::Drainage).unknown >= 1);
+        assert(arena.Statistics(Stage::MappingFreeze).calls == 2);
+        assert(arena.Statistics(Stage::MappingFreeze).refused == 1);
+        assert(arena.Statistics(Stage::GpuCompletion).calls == 0);
+        PrintMetrics(arena, Stage::Admission, "owner-admission");
+        PrintMetrics(arena, Stage::Drainage, "owner-drainage");
+        PrintMetrics(arena, Stage::MappingFreeze, "host-mapping-freeze");
         std::cout << "PASS real owner entry covers resolution through store; fixed alias freeze\n";
     }
     { // Exhausted polling never masquerades as drainage, even after writer exits.
@@ -117,6 +134,27 @@ int main() {
         assert(close->Poll() == Result::DrainedSubset);
         close.reset();
         assert(!owner->Store(0, 63) && !arena.RegisterOwner() && !arena.TryClose());
+    }
+    { // Real data lock contention is separate from closed-admission refusal.
+        Arena arena; auto owner = arena.RegisterOwner(); auto op = Access::Begin(*owner);
+        bool wrote = true;
+        std::thread contender([&] { wrote = owner->Store(0, 45); }); contender.join();
+        assert(!wrote);
+        assert(arena.Statistics(Stage::Admission).contention == 1);
+        assert(op->Store(17)); op.reset();
+        assert(!arena.TryClose());
+    }
+    { // Real existing mapping authority, with its mutation lock already held.
+        Arena arena; auto owner = arena.RegisterOwner(); auto close = arena.TryClose();
+        auto mutation = Access::HoldMappingMutation(arena);
+        bool frozen = true;
+        std::thread contender([&] { frozen = close->TryFreezeHostMappings(); }); contender.join();
+        assert(!frozen);
+        assert(arena.Statistics(Stage::MappingFreeze).contention == 1);
+        assert(arena.Statistics(Stage::MappingFreeze).unknown == 1);
+        PrintMetrics(arena, Stage::MappingFreeze, "host-mapping-contention");
+        mutation.Finish();
+        assert(close->Poll() == Result::Unknown && !close->CancelNoEffects());
     }
     std::cout << "PASS timeout, retirement, early owner release, exception, drop, capacity and lifetime quarantine; ordinary guest Unknown\n";
 }

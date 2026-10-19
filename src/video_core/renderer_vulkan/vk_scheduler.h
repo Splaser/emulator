@@ -19,6 +19,7 @@
 #include "common/common_types.h"
 #include "common/polyfill_thread.h"
 #include "common/profiling.h"
+#include "common/slow_path_metrics.h"
 #include "video_core/buffer_cache/physical_write_identity.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/renderer_vulkan/vk_buffer_payload.h"
@@ -397,6 +398,16 @@ public:
     [[nodiscard]] Transfer RecordTransferBatch(std::span<const TransferBuffer> buffers,
                                               std::span<const TransferContent::Command> commands);
     [[nodiscard]] WriteState PollCheckedTransfer(const Transfer& transfer) const noexcept;
+    // Explicit diagnostic overloads only. Existing polls and frame routes pay
+    // no clock/counter cost. Not a wait, completion certificate or device timer.
+    [[nodiscard]] WriteState PollCheckedTransferMeasured(
+        const Transfer& transfer, Common::SlowPathMetrics& metrics) const noexcept {
+        Common::SlowPathMetrics::Measurement timing{metrics, Common::SlowPathMetrics::Stage::GpuCompletion};
+        const auto result = PollCheckedTransfer(transfer);
+        if (result == WriteState::Pending || result == WriteState::Submitted) timing.Contended();
+        if (result == WriteState::Unknown) timing.Unknown();
+        return result;
+    }
     [[nodiscard]] const TransferContent* CompletedTransferContent(const Transfer& transfer) const noexcept;
     template <typename Memory>
     const TransferContent* TransferContentForMapping(const Transfer& transfer, const Memory& memory) const noexcept {
@@ -511,6 +522,14 @@ public:
         const void* identity, u64 offset, u64 size, u64 intent_revision,
         std::function<bool(vk::CommandBuffer)> command);
     [[nodiscard]] WriteState PollCheckedWrite(const Write& write) const noexcept;
+    [[nodiscard]] WriteState PollCheckedWriteMeasured(
+        const Write& write, Common::SlowPathMetrics& metrics) const noexcept {
+        Common::SlowPathMetrics::Measurement timing{metrics, Common::SlowPathMetrics::Stage::GpuCompletion};
+        const auto result = PollCheckedWrite(write);
+        if (result == WriteState::Pending || result == WriteState::Submitted) timing.Contended();
+        if (result == WriteState::Unknown) timing.Unknown();
+        return result;
+    }
     // Caller has joined producers and successfully waited for real device idle.
     void RetireCheckedWritesAfterDeviceIdle();
 

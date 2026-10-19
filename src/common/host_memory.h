@@ -153,8 +153,9 @@ public:
     // pointer use, services, imports or GPU execution; never guest admission.
     // Use only with a stable HostMemory lifecycle and outside cache/PTE locks.
     // CancelNoEffects explicitly reopens entry; unfinished drop seals it.
-    [[nodiscard]] std::optional<HostMappingDomain::Freeze> TryFreezeMappingEntries() const {
-        return mapping_domain.TryFreeze();
+    [[nodiscard]] std::optional<HostMappingDomain::Freeze> TryFreezeMappingEntries(
+        bool* contended = nullptr) const {
+        return mapping_domain.TryFreeze(contended);
     }
 
     void ClearBackingRegion(size_t physical_offset, size_t length, u32 fill_value);
@@ -230,6 +231,7 @@ public:
     size_t backing_size{};
 
 private:
+    friend struct ControlledGuestArenaTestAccess;
     HostMappingDomain mapping_domain;
     std::vector<int> driver_fds;
     size_t driver_chunk_size{};

@@ -182,9 +182,11 @@ public:
         if (!state) throw std::runtime_error("HostMemory mapping owner was moved");
         return Mutation{state};
     }
-    std::optional<Freeze> TryFreeze() const {
+    std::optional<Freeze> TryFreeze(bool* contended = nullptr) const {
+        if (contended) *contended = false; // Output diagnostics, never an admission input.
         if (!state) return {};
         std::unique_lock lock{state->mutex, std::try_to_lock};
+        if (!lock && contended) *contended = true;
         if (!lock || !state->alive || !state->complete || state->closed || state->sealed)
             return {};
         state->closed = true;

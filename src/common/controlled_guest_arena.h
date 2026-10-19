@@ -10,6 +10,7 @@
 #include <utility>
 #include "common/host_memory.h"
 #include "common/producer_drain.h"
+#include "common/slow_path_metrics.h"
 
 namespace Common {
 struct ControlledGuestArenaTestAccess;
@@ -21,6 +22,7 @@ class ControlledGuestArena {
     struct State {
         HostMemory backing{4096 * 8, 4096 * 4096, {}, 0, false, false, {}, true};
         ProducerDrain admission;
+        SlowPathMetrics metrics;
         std::mutex registry_mutex, bytes_mutex;
         size_t registered{}; // Bounded registration only; never used to prove drainage.
         std::array<std::atomic<bool>, 8> owners{}; // Stable slots; never reused.
@@ -71,11 +73,21 @@ class ControlledGuestArena {
     };
     static std::optional<Operation> Begin(const std::shared_ptr<State>& s, size_t offset) {
         if (!s) return {};
-        if (offset >= 8192) { s->admission.Seal(); return {}; }
-        auto entry = s->admission.TryEnter();
-        if (!entry) return {};
-        try { return Operation{s, std::move(*entry), offset}; }
-        catch (...) { s->admission.Seal(); throw; }
+        SlowPathMetrics::Measurement timing{s->metrics, SlowPathMetrics::Stage::Admission};
+        if (offset >= 8192) { timing.Refused(); s->admission.Seal(); return {}; }
+        ProducerDrain::EntryAttempt attempt;
+        auto entry = s->admission.TryEnter(attempt);
+        if (!entry) {
+            timing.Refused();
+            if (attempt == ProducerDrain::EntryAttempt::Contended) timing.Contended();
+            if (attempt == ProducerDrain::EntryAttempt::Capacity) s->admission.Seal();
+            return {};
+        }
+        try {
+            Operation operation{s, std::move(*entry), offset};
+            if (!operation.pointer) { timing.Contended(); timing.Refused(); }
+            return operation;
+        } catch (...) { timing.Unknown(); s->admission.Seal(); throw; }
     }
 public:
     static constexpr size_t OwnerCapacity = 8;
@@ -115,13 +127,25 @@ public:
     public:
         Close(Close&&) = default;
         Close(const Close&) = delete;
-        Result Poll() noexcept { return state ? closure.Poll() : Result::Unknown; }
+        Result Poll() noexcept {
+            if (!state) return Result::Unknown;
+            SlowPathMetrics::Measurement timing{state->metrics, SlowPathMetrics::Stage::Drainage};
+            const auto result = closure.Poll();
+            if (result == Result::Pending) timing.Contended();
+            if (result == Result::Unknown) timing.Unknown();
+            return result;
+        }
         bool TryFreezeHostMappings() {
-            if (!state || mappings || Poll() != Result::DrainedSubset) return false;
+            if (!state) return false;
+            SlowPathMetrics::Measurement timing{state->metrics, SlowPathMetrics::Stage::MappingFreeze};
+            if (mappings || Poll() != Result::DrainedSubset) { timing.Refused(); return false; }
             try {
-                auto frozen = state->backing.TryFreezeMappingEntries();
+                bool contended{};
+                auto frozen = state->backing.TryFreezeMappingEntries(&contended);
+                if (contended) timing.Contended();
                 if (frozen) { mappings.emplace(std::move(*frozen)); return true; }
-            } catch (...) { closure.Quarantine(); throw; }
+            } catch (...) { timing.Unknown(); closure.Quarantine(); throw; }
+            timing.Refused(); timing.Unknown();
             closure.Quarantine();
             return false;
         }
@@ -141,18 +165,31 @@ public:
     ControlledGuestArena(const ControlledGuestArena&) = delete;
     ~ControlledGuestArena() { Retire(); }
     void Retire() noexcept { state->admission.Seal(); }
+    SlowPathMetrics::Snapshot Statistics(SlowPathMetrics::Stage stage) const noexcept {
+        return state->metrics.Read(stage);
+    }
     std::optional<Owner> RegisterOwner() {
-        auto entry = state->admission.TryEnter();
-        if (!entry) return {};
+        SlowPathMetrics::Measurement timing{state->metrics, SlowPathMetrics::Stage::Admission};
+        ProducerDrain::EntryAttempt attempt;
+        auto entry = state->admission.TryEnter(attempt);
+        if (!entry) {
+            timing.Refused();
+            if (attempt == ProducerDrain::EntryAttempt::Contended) timing.Contended();
+            if (attempt == ProducerDrain::EntryAttempt::Capacity) state->admission.Seal();
+            return {};
+        }
         try {
             std::unique_lock lock{state->registry_mutex, std::try_to_lock};
             if (!lock || state->registered == OwnerCapacity) {
+                timing.Refused();
+                if (!lock) timing.Contended();
                 state->admission.Seal(); return {};
             }
             const auto slot = state->registered++;
             state->owners[slot].store(true, std::memory_order_release);
             return Owner{state, slot};
         } catch (...) {
+            timing.Unknown();
             state->admission.Seal(); throw;
         }
     }

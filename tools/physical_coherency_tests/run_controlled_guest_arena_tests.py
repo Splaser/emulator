@@ -48,12 +48,12 @@ def execute(name, mutant=False):
             print(log, end='', flush=True)
 
 mutants = [
-    ('independent-mapping-authority', 'auto frozen = state->backing.TryFreezeMappingEntries();',
-     'HostMappingDomain separate; auto frozen = separate.TryFreeze();'),
-    ('untracked-resolved-pointer', 'auto entry = s->admission.TryEnter();',
-     'ProducerDrain omitted; auto entry = omitted.TryEnter();'),
-    ('closed-entry-bypass', 'if (!entry) return {};\n        try { return Operation',
-     'if (!entry) { ProducerDrain bypass; auto e = bypass.TryEnter(); entry.emplace(std::move(*e)); }\n        try { return Operation'),
+    ('independent-mapping-authority', 'auto frozen = state->backing.TryFreezeMappingEntries(&contended);',
+     'HostMappingDomain separate; auto frozen = separate.TryFreeze(&contended);'),
+    ('untracked-resolved-pointer', 'auto entry = s->admission.TryEnter(attempt);',
+     'ProducerDrain omitted; auto entry = omitted.TryEnter(attempt);'),
+    ('closed-entry-bypass', 'auto entry = s->admission.TryEnter(attempt);\n        if (!entry)',
+     'auto entry = s->admission.TryEnter(attempt);\n        if (!entry) { ProducerDrain bypass; auto e = bypass.TryEnter(); entry.emplace(std::move(*e)); }\n        if (!entry)'),
     ('abort-not-quarantined', 'if (state && !completed) state->admission.Seal();',
      'if (state && !completed) {}'),
     ('owner-loss-not-quarantined', 'state->owners[slot].store(false, std::memory_order_release);\n                state->admission.Seal();',
@@ -62,8 +62,8 @@ mutants = [
      'void Retire() noexcept {}'),
     ('capacity-truncation', 'state->admission.Seal(); return {};\n            }\n            const auto slot',
      'return {};\n            }\n            const auto slot'),
-    ('invalid-access-not-quarantined', 'if (offset >= 8192) { s->admission.Seal(); return {}; }',
-     'if (offset >= 8192) { return {}; }'),
+    ('invalid-access-not-quarantined', 'if (offset >= 8192) { timing.Refused(); s->admission.Seal(); return {}; }',
+     'if (offset >= 8192) { timing.Refused(); return {}; }'),
     ('false-ordinary-guest-admission', 'Result GuestBackingAdmission() { return Result::Unknown; }',
      'Result GuestBackingAdmission() { return Result::DrainedSubset; }'),
 ]
@@ -97,6 +97,7 @@ for name, before, after in [
         injected.unlink()
 execute('production')
 paths = [header_path, test_path, 'src/common/producer_drain.h', 'src/common/host_memory.h',
+         'src/common/slow_path_metrics.h', 'src/video_core/renderer_vulkan/vk_scheduler.h',
          'src/common/host_memory.cpp', 'src/common/host_mapping_domain.h',
          'tools/physical_coherency_tests/controlled_guest_arena_test_access.inc',
          'tools/physical_coherency_tests/run_controlled_guest_arena_tests.py',

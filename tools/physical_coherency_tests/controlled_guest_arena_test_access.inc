@@ -8,6 +8,9 @@ struct ControlledGuestArenaTestAccess {
         return ControlledGuestArena::Begin(owner.state, offset);
     }
     static HostMemory& Backing(ControlledGuestArena& arena) { return arena.state->backing; }
+    static auto HoldMappingMutation(ControlledGuestArena& arena) {
+        return arena.state->backing.mapping_domain.BeginMutation();
+    }
     static std::weak_ptr<void> Lifetime(ControlledGuestArena& arena) { return arena.state; }
     static size_t Registered(ControlledGuestArena& arena) {
         size_t count{};

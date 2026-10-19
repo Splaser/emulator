@@ -87,3 +87,41 @@ in-flight drop case alone was insufficient: its later entry decrement masked the
 reopening. A separate idle-closure drop control now directly checks Store,
 registration and re-close refusal. This failed attempt supplies no new owner or
 native acceptance. The production implementation is unchanged by this test fix.
+
+## Opt-in diagnostics and ordinary fast-path boundary
+
+Enrollment and this arena's measured accesses are explicit slow-path prototype
+operations. They are not selected during normal frames. Whole-guest quiescence
+remains a separate, blocked slow-path design, never an automatic production route.
+Ordinary guest/NCE accesses gain no per-access mutex, registry lookup, allocation,
+clock/counter operation or synchronous GPU wait. The default ProducerDrain entry
+instantiates an unmeasured implementation; the diagnostic overload alone records
+the actual failed-CAS reason. A local Clang `-O2` comparison against the pre-metrics
+entry implementation produced identical assembly, with no clock/metrics symbols;
+this is not an ARM64/NCE runtime benchmark.
+
+`SlowPathMetrics` keeps separate Admission, Drainage, MappingFreeze and
+GpuCompletion snapshots: invocation count, total host nanoseconds, contention,
+refusal and Unknown observations. Snapshots are nontransactional relaxed counters,
+diagnostic only; they are never admission, exclusion or completion evidence.
+Admission contention counts an actual failed CAS or byte/registry try-lock.
+Closed-entry refusal is recorded separately. Drainage contention counts Pending
+with existing in-flight entries. Mapping contention counts the existing
+HostMappingDomain try-lock failure, not a second mapping authority. GPU completion
+contention counts actual checked Pending/Submitted polls; it does not claim to
+observe a Vulkan driver's internal lock. Timing covers host API call cost, not
+device execution duration or total stop-to-drain latency; nested stages can overlap
+and their times must not be added as independent frame cost.
+
+Scheduler exposes explicit `PollCheckedWriteMeasured` and
+`PollCheckedTransferMeasured` wrappers. Existing frame routes and ordinary checked
+polls remain unmeasured and do not call them. The wrappers poll once, preserve the
+existing result/Unknown quarantine, and add no synchronous wait, renderer callback
+or resource allocation. Tests record real mapping-lock/data-lock contention and
+native Vulkan worker-pending completion counters independently of successful
+completion. Numeric observations are saved in the CI logs, with no timing limit
+used as a correctness certificate.
+
+Linux-only [39212193213](https://github.com/Splaser/emulator/actions/runs/39212193213)
+at `ebf84de7b4528eda91c7e2499c750f8e640495c1` was superseded and cancelled after
+the request for separate opt-in diagnostics. It cannot accept the metrics source.

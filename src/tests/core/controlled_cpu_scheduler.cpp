@@ -1061,9 +1061,10 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         on_gpu([&] { bytes = Access::ReadPin(rasterizer, Access::OrdinaryPin(rasterizer, address, Page)); });
         return bytes;
     };
+    Common::SlowPathMetrics completion_metrics;
     const auto poll = [&](const Vulkan::Scheduler::Write& write) {
         State state{};
-        on_gpu([&] { state = renderer->scheduler.PollCheckedWrite(write); });
+        on_gpu([&] { state = renderer->scheduler.PollCheckedWriteMeasured(write, completion_metrics); });
         return state;
     };
     const auto finish = [&](const Vulkan::Scheduler::Write& write, State expected) {
@@ -1156,6 +1157,17 @@ TEST_CASE("Checked write provenance separates emission completion and current re
     REQUIRE(delayed);
     REQUIRE(entered->get_future().wait_for(5s) == std::future_status::ready);
     REQUIRE(poll(delayed) == State::Pending);
+    const auto measured_pending = completion_metrics.Read(Common::SlowPathMetrics::Stage::GpuCompletion);
+    REQUIRE(measured_pending.calls > 0);
+    REQUIRE(measured_pending.contention > 0);
+    REQUIRE(measured_pending.host_ns > 0);
+    std::cout << "METRICS checked-gpu-completion calls=" << measured_pending.calls
+              << " host_ns=" << measured_pending.host_ns
+              << " contention=" << measured_pending.contention << '\n';
+    REQUIRE(poll({}) == State::Unknown);
+    REQUIRE(completion_metrics.Read(Common::SlowPathMetrics::Stage::GpuCompletion).unknown == 1);
+    REQUIRE(completion_metrics.Read(Common::SlowPathMetrics::Stage::Admission).calls == 0);
+    std::cout << "PASS opt-in checked completion host timing and pending contention; no synchronous diagnostic wait\n";
     REQUIRE(poll(first) == State::Complete);
     std::optional<Vulkan::StagedBufferPin> old_pin;
     on_gpu([&] {
