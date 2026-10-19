@@ -915,7 +915,11 @@ public:
             layout_lock.lock();
             ret = mprotect(virtual_base + virtual_offset, length, flags);
         }
-        assert(ret == 0 && "mprotect failed: {}" && (void(errno), true));
+        if (ret != 0) {
+            // The outer mapping transaction must not publish successful permissions
+            // when protection failed, including builds with assertions disabled.
+            throw std::runtime_error("HostMemory mprotect failed");
+        }
         layout_lock.unlock();
         RequestVmaSample();
     }
@@ -1292,6 +1296,14 @@ HostMemory::HostMemory(size_t backing_size_, size_t virtual_size_,
     , lazy_backing_enabled(lazy_backing)
     , virtual_size(virtual_size_)
 {
+    // Only ordinary, internally owned Linux mappings have this first census.
+    // Exported/external backing and other platforms refuse rather than guessing.
+#if defined(__linux__)
+    mapping_domain.Initialize(backing_size, backing_fds.empty() && !direct_importable &&
+                                              !exporter && sysconf(_SC_PAGESIZE) == static_cast<long>(PageAlignment));
+#else
+    mapping_domain.Initialize(backing_size, false);
+#endif
     // Try to allocate a fastmem arena.
     // The implementation will fail with std::bad_alloc on errors.
     if (lazy_backing) {
@@ -1324,6 +1336,7 @@ HostMemory::~HostMemory() {
 }
 
 GuestChunkLease HostMemory::GetPublishedChunk([[maybe_unused]] u64 physical_offset) const {
+    mapping_domain.ObserveEscape(HostMappingDomain::ChunkLease);
 #if defined(__linux__) || defined(__FreeBSD__)
     return impl ? impl->FindPublishedChunk(physical_offset, impl, backing_lifetime.Get()) : nullptr;
 #else
@@ -1332,6 +1345,7 @@ GuestChunkLease HostMemory::GetPublishedChunk([[maybe_unused]] u64 physical_offs
 }
 
 GuestChunkLease HostMemory::FirstPublishedExportedChunk() const {
+    mapping_domain.ObserveEscape(HostMappingDomain::ChunkLease);
 #if defined(__linux__) || defined(__FreeBSD__)
     return impl ? impl->FindPublishedChunk(std::nullopt, impl, backing_lifetime.Get()) : nullptr;
 #else
@@ -1345,6 +1359,7 @@ HostMemory& HostMemory::operator=(HostMemory&&) noexcept = default;
 
 void HostMemory::Map(size_t virtual_offset, size_t host_offset, size_t length,
                      MemoryPermission perms, bool separate_heap) {
+    auto mutation = mapping_domain.BeginMutation();
     if (virtual_offset % PageAlignment != 0) [[unlikely]] {
         CrashHostMemoryInvariant("Map", "virtual_offset is not page aligned", virtual_offset,
                                  host_offset, length, virtual_size, backing_size, perms, virtual_base,
@@ -1373,13 +1388,19 @@ void HostMemory::Map(size_t virtual_offset, size_t host_offset, size_t length,
                                  virtual_base_offset);
     }
     if (length == 0 || !virtual_base || !impl) {
+        mutation.Finish();
         return;
     }
-    EnsureBackingRange(host_offset, length);
+#if defined(__linux__) || defined(__FreeBSD__)
+    impl->EnsureBackingRange(host_offset, length);
+#endif
     impl->Map(virtual_offset + virtual_base_offset, host_offset, length, perms);
+    mutation.Map(virtual_offset, host_offset, length, static_cast<u32>(perms));
+    mutation.Finish();
 }
 
 void HostMemory::Unmap(size_t virtual_offset, size_t length, bool separate_heap) {
+    auto mutation = mapping_domain.BeginMutation();
     if (virtual_offset % PageAlignment != 0) [[unlikely]] {
         CrashHostMemoryInvariant("Unmap", "virtual_offset is not page aligned", virtual_offset, 0,
                                  length, virtual_size, backing_size, {}, virtual_base,
@@ -1396,12 +1417,16 @@ void HostMemory::Unmap(size_t virtual_offset, size_t length, bool separate_heap)
                                  virtual_base_offset);
     }
     if (length == 0 || !virtual_base || !impl) {
+        mutation.Finish();
         return;
     }
     impl->Unmap(virtual_offset + virtual_base_offset, length);
+    mutation.Unmap(virtual_offset, length);
+    mutation.Finish();
 }
 
 void HostMemory::Protect(size_t virtual_offset, size_t length, MemoryPermission perm) {
+    auto mutation = mapping_domain.BeginMutation();
     if (virtual_offset % PageAlignment != 0) [[unlikely]] {
         CrashHostMemoryInvariant("Protect", "virtual_offset is not page aligned", virtual_offset,
                                  0, length, virtual_size, backing_size, perm, virtual_base,
@@ -1419,40 +1444,56 @@ void HostMemory::Protect(size_t virtual_offset, size_t length, MemoryPermission 
                                  virtual_base_offset);
     }
     if (length == 0 || !virtual_base || !impl) {
+        mutation.Finish();
         return;
     }
     const bool read = True(perm & MemoryPermission::Read);
     const bool write = True(perm & MemoryPermission::Write);
     const bool execute = True(perm & MemoryPermission::Execute);
     impl->Protect(virtual_offset + virtual_base_offset, length, read, write, execute);
+    mutation.Protect(virtual_offset, length, static_cast<u32>(perm));
+    mutation.Finish();
 }
 
 void HostMemory::ClearBackingRegion(size_t physical_offset, size_t length, u32 fill_value) {
-    EnsureBackingRange(physical_offset, length);
+    auto mutation = mapping_domain.BeginMutation();
+    if (physical_offset > backing_size || length > backing_size - physical_offset)
+        throw std::out_of_range("Physical backing access exceeds arena");
+#if defined(__linux__) || defined(__FreeBSD__)
+    impl->EnsureBackingRange(physical_offset, length);
+#endif
     std::memset(backing_base + physical_offset, fill_value, length);
+    mutation.Finish();
 }
 
 void HostMemory::EnsureBackingRange(size_t offset, size_t length) const {
+    auto mutation = mapping_domain.BeginMutation();
     if (offset > backing_size || length > backing_size - offset) {
         throw std::out_of_range("Physical backing access exceeds arena");
     }
 #if defined(__linux__) || defined(__FreeBSD__)
     impl->EnsureBackingRange(offset, length);
 #endif
+    mutation.Finish();
 }
 
 std::optional<PinnedPhysicalMemory> HostMemory::PinPhysicalRange(size_t offset, size_t length) const {
+    auto mutation = mapping_domain.BeginMutation();
+    mapping_domain.ObserveEscape(HostMappingDomain::PhysicalPin);
     if (!impl || length == 0 || offset >= backing_size || length > backing_size - offset) {
+        mutation.Finish();
         return std::nullopt;
     }
     const auto epoch = backing_lifetime.Get();
     if (!epoch || !epoch->alive.load(std::memory_order_acquire)) {
+        mutation.Finish();
         return std::nullopt;
     }
     const auto owner = impl;
 #if defined(__linux__) || defined(__FreeBSD__)
     owner->EnsureBackingRange(offset, length);
 #endif
+    mutation.Finish();
     return PinnedPhysicalMemory{owner, epoch, {owner->backing_base + offset, length}, offset};
 }
 
@@ -1475,10 +1516,13 @@ BackingStats HostMemory::GetBackingStats() const {
 }
 
 void HostMemory::EnableDirectMappedAddress() {
+    auto mutation = mapping_domain.BeginMutation();
+    mutation.Unsupported();
     if (impl) {
         impl->EnableDirectMappedAddress();
         virtual_size += reinterpret_cast<uintptr_t>(virtual_base);
     }
+    mutation.Finish();
 }
 
 } // namespace Common

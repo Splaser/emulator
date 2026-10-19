@@ -266,3 +266,14 @@ No production code was changed or runtime tests/builds dispatched for this docum
 The preceding private-provider Linux CI is historical evidence for private memory,
 not evidence for any of these missing guest-backed properties. F2/F3 remain Open;
 restricted production admission remains blocked.
+
+## Subsequent bounded components
+
+[Managed drainage](M4_F3_MANAGED_PRODUCER_DRAIN.md) now closes the four real
+PhysicalCore entry gates and one controlled Memory owner; this is only a managed
+subset, with Linux acceptance recorded separately. The
+[HostMemory alias/mapping component](M4_F3_HOST_MAPPING_FREEZE.md) subsequently
+adds actual owner-created mapping records and a cold mapping-entry freeze. Its
+Linux acceptance is pending. It does not close outer CPU PTE/device/GPU changes,
+escaped pointers or import/export publication. Those prerequisites above remain
+open; neither component is a truthful general guest exclusion capability.

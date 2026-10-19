@@ -11,6 +11,7 @@
 #include <string_view>
 #include "common/common_funcs.h"
 #include "common/common_types.h"
+#include "common/host_mapping_domain.h"
 #include "common/pinned_physical_memory.h"
 #include "common/physical_cpu_page.h"
 #include "common/published_guest_chunk.h"
@@ -142,6 +143,14 @@ public:
 
     void EnableDirectMappedAddress();
 
+    // Cold CPU-only mapping-entry freeze. Does not close CPU PTE mutation, raw
+    // pointer use, services, imports or GPU execution; never guest admission.
+    // Use only with a stable HostMemory lifecycle and outside cache/PTE locks.
+    // CancelNoEffects explicitly reopens entry; unfinished drop seals it.
+    [[nodiscard]] std::optional<HostMappingDomain::Freeze> TryFreezeMappingEntries() const {
+        return mapping_domain.TryFreeze();
+    }
+
     void ClearBackingRegion(size_t physical_offset, size_t length, u32 fill_value);
 
     // Materialize the complete physical range before exposing a pointer or CPU alias.
@@ -172,16 +181,20 @@ public:
     }
 
     [[nodiscard]] u8* BackingBasePointer() noexcept {
+        mapping_domain.ObserveEscape(HostMappingDomain::CanonicalPointer);
         return backing_base;
     }
     [[nodiscard]] const u8* BackingBasePointer() const noexcept {
+        mapping_domain.ObserveEscape(HostMappingDomain::CanonicalPointer);
         return backing_base;
     }
 
     [[nodiscard]] u8* VirtualBasePointer() noexcept {
+        mapping_domain.ObserveEscape(HostMappingDomain::VirtualPointer);
         return virtual_base;
     }
     [[nodiscard]] const u8* VirtualBasePointer() const noexcept {
+        mapping_domain.ObserveEscape(HostMappingDomain::VirtualPointer);
         return virtual_base;
     }
 
@@ -204,12 +217,14 @@ public:
         if (range.length != size || range.chunk >= driver_fds.size()) {
             return std::nullopt;
         }
+        mapping_domain.ObserveEscape(HostMappingDomain::DriverFd);
         return GuestBackingRange{driver_fds[range.chunk], range.offset, driver_chunk_size};
     }
 
     size_t backing_size{};
 
 private:
+    HostMappingDomain mapping_domain;
     std::vector<int> driver_fds;
     size_t driver_chunk_size{};
     bool driver_direct_importable{};

@@ -760,7 +760,7 @@ gate counter or successful private-domain test cannot substitute. No runtime cod
 changed and no new CI/build/device tests were dispatched for this static audit.
 Planner and ordinary BufferCache remain frozen; authority absent; F2/F3 Open.
 
-## 2026-10-19: managed close-and-drain implementation; CI acceptance pending
+## 2026-10-19: managed close-and-drain implementation; historical pending checkpoint
 
 User requested immediate push/handoff while GitHub workflow runs, to continue on
 another workstation. All implementation is pushed on `codex/issue-372-fixes`:
@@ -796,3 +796,50 @@ unresolved compile/test failures remain. Android skipped by linux-only scope.
 See [implementation, scope and remaining checks](M4_F3_MANAGED_PRODUCER_DRAIN.md).
 Ordinary host/raw aliases, audio/VIC/I/O, mapping and GPU drainage remain outside
 the covered subset. No BufferCache auto-selection or authority; F2/F3 Open.
+
+## 2026-10-19: resumed workstation; managed drainage Linux acceptance closed
+
+Resumed `codex/issue-372-fixes` at `62209d4816`, matching the PR 375 head.
+Origin and upstream remote references were refreshed. No upstream merge or new
+workflow was required for the pending acceptance gate.
+
+[Run 39179992784](https://github.com/Splaser/emulator/actions/runs/39179992784)
+passed at exact implementation/test source
+`7e6996daa317835d76f0b5d4d5ce6a3d884d88bb`; Android was skipped. Artifact
+`12157085513` was downloaded, and all 108 source hash entries in seven manifests
+matched both that Git source and the resumed checkout. Fifteen new assertion
+mutants plus the baseline red control failed as intended; both new fixtures and
+the real Linux omitted-alias counterexample passed three additional repeats.
+Each of three native provenance repeats passed 447 assertions with the four-core
+and controlled Memory-owner drainage marker. All five CTest processes and the
+configured regression suite passed. F2 remains backing77/cache10; F3 still has
+two expected alias failures and fixed-mode exit42. Detailed evidence and scope
+are in [the acceptance record](M4_F3_MANAGED_PRODUCER_DRAIN.md#2026-10-19-linux-acceptance-recovered-and-verified);
+local logs, artifacts and verifier are in `.diagnostics/ci-39179992784/`.
+
+The pending Linux gate above is now closed for this managed subset only. The
+next gate is exhaustive owner/alias enrollment and mapping/permission closure
+from the feasibility audit, followed by retained guest isolation through checked
+GPU completion. No live ARM/NCE stop/resume was proved, no full guest provider
+exists, and no production admission/authority or ordinary routing is enabled.
+Planner/Copy remains frozen; F2/F3 remain Open. No Android compilation was run.
+
+## 2026-10-19: HostMemory mapping enrollment/freeze component
+
+The [HostMemory mapping contract](M4_F3_HOST_MAPPING_FREEZE.md) adds an owner-created
+bounded actual alias ledger and a continuous mapping-entry closure around real
+Map/Unmap/Protect, backing materialization/clear/pin and direct-address mutation.
+Partial interval complements, canonical backing and irreversible raw export-family
+history are retained. External/driver/direct-address/unsupported arenas and census
+overflow refuse. A token can explicitly cancel CPU-only closure; unfinished drop
+seals entry and owner retirement invalidates metadata. No backing pin or GPU lease
+is issued, and guest backing admission always refuses.
+
+Local macOS unit checks pass three repeats and ten assertion mutants, including
+an independent 256-prefix physical-offset/permission byte oracle. Real Linux VMA
+tests, seven actual-wrapper guard mutants and complete regression acceptance are
+pending. The Linux workflow now includes these tests and preserves their evidence.
+No Android build is requested. Do not enable this on a running guest: outer CPU
+PTE changes, services, raw stores and GPU mappings/publications are still unclosed.
+An inner HostMemory refusal cannot undo earlier outer publication. Next compose
+outer entry closure and real owner lifetimes before any guest admission attempt.

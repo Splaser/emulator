@@ -107,6 +107,7 @@ jobs:
       - name: Check native scheduler integration translation units first
         run: |
           cmake --build build-integration --parallel 3 --target \
+            src/common/CMakeFiles/common.dir/host_memory.cpp.o \
             src/tests/CMakeFiles/controlled_cpu_scheduler_tests.dir/core/controlled_cpu_scheduler.cpp.o \
             src/core/CMakeFiles/core.dir/core.cpp.o \
             src/core/CMakeFiles/core.dir/memory.cpp.o \
@@ -187,6 +188,7 @@ jobs:
             > .diagnostics/pr375-pr380/f3-teardown.txt 2>&1
       - name: Exercise real Linux HostMemory and backing import lifetime
         run: |
+          python tools/physical_coherency_tests/run_host_mapping_freeze_tests.py
           python tools/lazy_backing_tests/run_tests.py
           python tools/lazy_backing_tests/run_export_tests.py
           python tools/chunk_import_tests/run_backing_tests.py
@@ -241,6 +243,7 @@ jobs:
             .diagnostics/m4-producer-coverage/*
             .diagnostics/m4-private-guard/*
             .diagnostics/m4-producer-drain/*
+            .diagnostics/m4-host-mapping-freeze/*
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn

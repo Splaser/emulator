@@ -127,7 +127,7 @@ Linux targets and runs the previous native Vulkan, scheduler, backing, coherency
 and lifecycle suites. Original F2/F3 negative witnesses remain intact. Android is
 not requested. Exact source/CI acceptance is recorded after the run completes.
 
-## Checkpoint for continuation on another workstation
+## Checkpoint for continuation on another workstation (historical)
 
 Implementation `827073eab4`, followed by test-peer access fix
 `7e6996daa317835d76f0b5d4d5ce6a3d884d88bb`, is pushed on
@@ -150,3 +150,37 @@ three times, the real Linux alias-bypass counterexample retains Unknown, the
 native four-core/Memory-owner marker appears in each provenance repeat, and all
 original F2/F3 and regression checks remain intact. Match source hashes and record
 the final CI result in this document and WIP handoff. No Android run is requested.
+
+## 2026-10-19: Linux acceptance recovered and verified
+
+Run [39179992784](https://github.com/Splaser/emulator/actions/runs/39179992784)
+completed successfully for exact source
+`7e6996daa317835d76f0b5d4d5ce6a3d884d88bb`. The Linux production job passed;
+Android was skipped. No duplicate workflow or local build was needed to recover
+this result. This supersedes the pending status at the historical checkpoint.
+
+Artifact `12157085513` contains the source stamp, fixture/mutation logs, native
+repeat logs and CTest log. Independent verification compared all 108 SHA-256
+entries across seven extraction manifests against both Git at that source and
+the resumed checkout, including all eleven managed-drain inputs. All matched.
+
+- All fifteen new mutants failed assertions; the separate false-drained baseline
+  also failed its intended assertion. Compiler failures/timeouts were not counted.
+- Both new fixtures passed their initial run and three extra repeats. Every Linux
+  logic repeat observed the real omitted writable memfd alias store and retained
+  Unknown; this proves the coverage counterexample, not complete exclusion.
+- Each of three native Vulkan provenance repeats passed 447 assertions and printed
+  the real Kernel four-core/controlled Memory-owner drainage marker. Held entries
+  remain privileged test injection, not ARM/NCE execution or interruption.
+- All five CTest processes and the configured backing/coherency/lifecycle
+  regressions passed. Original F3 repeats still reproduce stale aliases; fixed
+  mode has exactly two failed alias assertions, 36 passing assertions and exit 42.
+  Original F2 remains backing 77/cache 10 with its expected failing fixed mode.
+
+Downloaded evidence, full Linux job log, independent verifier and acceptance
+index are retained under `.diagnostics/ci-39179992784/` (locally ignored).
+Acceptance is restricted to managed entry close-and-drain. Ordinary guest backing
+admission, unmanaged writers, mapping freeze and GPU-lifetime isolation remain
+Unknown; F2/F3 remain Open. The next implementation must address the remaining
+owner/alias and mapping obligations in the feasibility audit without extending
+Planner/Copy or enabling ordinary BufferCache routing on this subset result.
