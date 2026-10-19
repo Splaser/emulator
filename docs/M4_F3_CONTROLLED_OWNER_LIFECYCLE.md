@@ -79,3 +79,11 @@ that dependency's progress, **not GPU ownership of the arena**.
 
 New Linux acceptance is pending. Do not reuse prior HostMemory or private-provider
 CI as acceptance for this owner substage. Android builds are excluded this round.
+
+The first Linux-only attempt [39211644236](https://github.com/Splaser/emulator/actions/runs/39211644236)
+at `603a606f56f3ebf7a79a813796e815c41497881c` stopped in mutation validation:
+ten owner mutants failed assertions, but `closure-drop-reopens` survived. The
+in-flight drop case alone was insufficient: its later entry decrement masked the
+reopening. A separate idle-closure drop control now directly checks Store,
+registration and re-close refusal. This failed attempt supplies no new owner or
+native acceptance. The production implementation is unchanged by this test fix.

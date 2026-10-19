@@ -111,5 +111,12 @@ int main() {
         Arena arena; auto owner = arena.RegisterOwner(); owner.reset();
         assert(Access::Registered(arena) == 0 && !arena.TryClose());
     }
+    { // Idle drop must be tested independently of in-flight entry destruction.
+        Arena arena; auto owner = arena.RegisterOwner();
+        auto close = arena.TryClose(); assert(close);
+        assert(close->Poll() == Result::DrainedSubset);
+        close.reset();
+        assert(!owner->Store(0, 63) && !arena.RegisterOwner() && !arena.TryClose());
+    }
     std::cout << "PASS timeout, retirement, early owner release, exception, drop, capacity and lifetime quarantine; ordinary guest Unknown\n";
 }
