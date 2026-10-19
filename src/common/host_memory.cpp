@@ -628,6 +628,18 @@ public:
         good = true;
     }
 
+    // Published chunks are never replaced within a live arena. A ready range is
+    // therefore a query/cache-hit path, not a new mapping/publication operation.
+    bool BackingRangeReady(size_t offset, size_t length) const {
+        if (!lazy_backing || length == 0) return true;
+        const size_t first = offset / chunk_size;
+        const size_t last = (offset + length - 1) / chunk_size;
+        for (size_t index = first; index <= last; ++index) {
+            if (!ready[index].load(std::memory_order_acquire)) return false;
+        }
+        return true;
+    }
+
     void EnsureBackingRange(size_t offset, size_t length) {
         if (offset > backing_size || length > backing_size - offset) {
             throw std::out_of_range("Physical backing access exceeds arena");
@@ -1467,14 +1479,21 @@ void HostMemory::ClearBackingRegion(size_t physical_offset, size_t length, u32 f
 }
 
 void HostMemory::EnsureBackingRange(size_t offset, size_t length) const {
-    auto mutation = mapping_domain.BeginMutation();
     if (offset > backing_size || length > backing_size - offset) {
         throw std::out_of_range("Physical backing access exceeds arena");
     }
 #if defined(__linux__) || defined(__FreeBSD__)
+    // Preserve the existing hot ready-chunk path: no new global mutex/shared_ptr
+    // operation for every DeviceMemory pointer lookup. Only cold publication joins
+    // the mutation domain. Ready chunks cannot be replaced while this owner lives.
+    if (impl->BackingRangeReady(offset, length)) {
+        impl->EnsureBackingRange(offset, length);
+        return;
+    }
+    auto mutation = mapping_domain.BeginMutation();
     impl->EnsureBackingRange(offset, length);
-#endif
     mutation.Finish();
+#endif
 }
 
 std::optional<PinnedPhysicalMemory> HostMemory::PinPhysicalRange(size_t offset, size_t length) const {

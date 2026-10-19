@@ -53,6 +53,7 @@ int main() {
             Refused([&] { arena.EnableDirectMappedAddress(); });
         });
         attempts.join();
+        arena.EnsureBackingRange(0, page); // Ready lookup has no new mapping effect.
         assert(arena.GetBackingStats().chunks_created == before);
         assert(canonical[0] == 10 && aliases[0] == 10 && aliases[page * 4] == 10);
         // Real protection is unchanged by a refused unprotect, not just metadata.

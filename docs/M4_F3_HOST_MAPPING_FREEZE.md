@@ -41,6 +41,13 @@ same transaction. There is no recursive mapping lock and no lock is added to an
 NCE signal handler. Protection failure propagates even in assertion-disabled builds
 and leaves the census incomplete instead of publishing successful permissions.
 
+Already-published ready chunks retain the existing lock-free materialization-query
+path (and cache-hit telemetry); they cannot be replaced within a live arena.
+EnsureBackingRange joins the mapping transaction only for cold publication, so an
+ordinary ready-range pointer lookup does not acquire a new global mutex or copy a
+shared owner on every access. A ready-range query can still succeed while frozen;
+like raw pointer getters, that grants no owner/write exclusion.
+
 TryFreezeMappingEntries uses a single try-lock and refuses an in-progress operation,
 an incomplete census, another freeze or a retired owner. On success it closes new
 mapping entry under the same mutex that covers the complete actual mutation and
