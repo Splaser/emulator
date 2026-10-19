@@ -2,9 +2,12 @@
 
 Follow-up: the [CPU preparation lifetime audit](M4_F3_CPU_PREPARATION_LIFETIME.md)
 identifies ordinary-guest owner/publication blockers and closes the empty-visit
-gap in explicit scalar request preparation. Its new source requires separate
-Linux validation; the accepted CPU-only arena evidence below remains scoped to
-`a36bae493c`. No ordinary guest admission is enabled.
+gap in explicit scalar request preparation. Source `9d50526fd5` passed separate
+[Linux validation 39251597638](https://github.com/Splaser/emulator/actions/runs/39251597638),
+including three preparation assertion mutants/repeats and 479 assertions in each
+native provenance process. Exact artifact/source checks are in the linked record.
+The earlier CPU-only arena evidence below remains scoped to `a36bae493c`.
+No ordinary guest admission is enabled.
 
 ## Scope and enforcement
 

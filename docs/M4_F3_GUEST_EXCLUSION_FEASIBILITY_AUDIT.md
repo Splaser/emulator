@@ -3,7 +3,11 @@
 2026-10-19 continuation: see the
 [CPU preparation lifetime audit](M4_F3_CPU_PREPARATION_LIFETIME.md) for the current
 owner matrix and minimal repair of an empty readiness visit in the controlled
-scalar request API. It does not close the outer PTE/service/backend/GPU gates or
+scalar request API. Exact source `9d50526fd5` passed Linux-only
+[39251597638](https://github.com/Splaser/emulator/actions/runs/39251597638), with
+independently verified artifact hashes, three preparation mutation controls/repeats
+and 479 assertions in each native provenance process; Android was skipped.
+It does not close the outer PTE/service/backend/GPU gates or
 authorize ordinary guest admission; F2/F3 remain Open.
 
 Audited 2026-10-19 at `0ea2b9a5c85197753861d34341e755fbf386e055`

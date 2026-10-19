@@ -1,5 +1,29 @@
 # M3B production integration progress
 
+## Controlled CPU preparation lifetime repair — 2026-10-19
+
+Ordinary guest owner/lifecycle audit found an empty readiness visit before actual
+scalar request preparation. `9d50526fd5` keeps the existing managed owner entry
+through cold snapshot/pinning, immutable request construction and registry
+publication, with the owner shared lock held through Memory/PTE access and released
+before the exclusive registry lock. Close may refuse the registry-only tail;
+pre-effect exceptions unwind without a published request. Initial System/process
+lifetime remains the caller's obligation. No ordinary Write/bulk, DMA, NCE,
+Texture Cache, mapping or automatic game routing was expanded.
+
+[Linux-only 39251597638](https://github.com/Splaser/emulator/actions/runs/39251597638)
+passed at exact source `9d50526fd500267fb1c1d7a81078903a28365010`: full production
+build/regressions, five CTest processes, three extra 479-assertion provenance
+processes with the real-process preparation/pin marker, three new preparation
+assertion mutants and three positive repeats. Artifact `12187957923` has a verified
+ZIP digest and 131 matching source hashes across ten manifests. Android was skipped.
+Original F2 backing77/cache10 and F3's two fixed-mode alias failures remain.
+
+The [audit and acceptance record](../../docs/M4_F3_CPU_PREPARATION_LIFETIME.md)
+separates this CPU-only repair from the remaining outer PTE/permission publication,
+full process/backend/service/raw/GPU owner exclusion and retained Unknown lifetime
+gates. Ordinary guest admission remains blocked; **F2/F3 remain Open**.
+
 ## Isolated submission-linked write provenance
 
 Full [Linux/Android run 38984914456](https://github.com/Splaser/emulator/actions/runs/38984914456)

@@ -9,7 +9,7 @@ Cache, physical content authority or automatic ordinary write routing.
 | Boundary | Actual enforcement | Remaining gap |
 | --- | --- | --- |
 | Controlled CPU owner | `CpuWriteOwner::TryVisit` retains an entry and shared owner lock around actual bounded store/publication; Close seals entry and takes the exclusive lock before process PTE finalization. | Request preparation previously used an empty visit, then touched Memory/PTE/backing outside it. This slice repairs that narrower gap. |
-| Initial API/object entry | Callers retain the process/Memory and obtain its current controlled owner. | A raw `Memory*` and shared gate state are not a process lifetime pin. Concurrent object destruction/reset before initial owner acquisition remains unsupported. |
+| Initial API/object entry | Callers retain System/DeviceMemory and process/Memory during the borrowed API call and obtain its current controlled owner. | A raw `Memory*` and shared gate state are not a process or System lifetime pin. Concurrent object destruction/reset before initial owner acquisition remains unsupported. |
 | Raw page preparation | `PrepareControlledCpuPage` qualifies context/PTE generation and retains physical storage. | Its public cold API still requires the caller to retain process/PTE owners. A prepared pin is not a blanket execution or guest exclusion lease. |
 | CPU PTE/native mapping publication | Actual `MapMemoryRegion`/`UnmapRegion` call MapPages before HostMemory Map/Unmap; cache/debug permission restoration has separate paths. | Inner HostMemory refusal cannot roll back already-published outer PTEs. PageTable public entries/fastmem pointers lack an all-owner publication closure. No outer freeze is issued. |
 | Host mapping cohort | Accepted fresh controlled arenas reuse their actual HostMappingDomain after owner drainage. | Ordinary DeviceMemory remains default-off; existing aliases, escaped raw pointers, mutable spans/fds and export history cannot be adopted as a closed cohort. |
@@ -45,12 +45,21 @@ Ordering and lifetime:
    Before-effects exceptions unwind both locks/entry without publishing a request.
 
 Close/Reset/Finalize already seal the old owner before replacing Memory state or
-finalizing process mappings. They now join this entered cold CPU preparation as
-well as entered store visits. This is a CPU-only lifecycle join, not a bounded
+finalizing process mappings. Their exclusive owner lock now joins the cold
+factory's Memory/PTE accesses as well as entered store callbacks. The registry-only
+tail may subsequently finish by refusing against the closed retained owner; it
+does not keep using Memory/PTEs. Only the managed closure's zero-entry Poll proves
+that the full preparation/registration entry has exited. This is a CPU-only
+lifecycle join, not a bounded
 wall-clock/preemption guarantee or GPU completion join. Close must not be invoked
 reentrantly from the factory. Callers still keep the original object alive at
 initial entry; the factory is trusted implementation code, not an arbitrary guest
 callback or a new general preparation/export interface.
+Call Close outside context/PTE/HostMemory mutation locks. Current production
+mutators do not invoke it while holding those metadata guards, and KProcess closes
+the owner before PTE finalization. Future outer freeze orchestration must enforce
+that same order rather than close an owner while holding a lock its preparation
+needs. No general all-caller lock-order proof is inferred from this narrow audit.
 
 ## Validation and exact limits
 
@@ -80,9 +89,43 @@ Local Windows checks have passed the focused three assertion controls and three
 positive repeats, plus ten repetitions of both existing first-registration
 orderings and their original negative controls. The existing managed-drain
 unit/body fixtures and all assertion controls also passed. Linux native/full
-regression validation for this changed
-source is pending; earlier `a36bae493c` acceptance does not accept these changes.
+regression validation for this changed source is verified below; earlier
+`a36bae493c` acceptance alone was not used to accept these changes.
 Android is on demand and no local Android build is used.
+
+## Verified Linux acceptance
+
+[Run 39251597638](https://github.com/Splaser/emulator/actions/runs/39251597638)
+passed at exact production/test source
+`9d50526fd500267fb1c1d7a81078903a28365010`. Linux job `118056473944` passed in full;
+Android job `118056475633` was skipped. Subsequent evidence updates are docs only.
+
+Independent artifact verification confirms:
+
+- Artifact `12187957923` matches its published ZIP SHA-256
+  `b5e8874b1c24500019bdcbbfa8d27523f903bc0e47890316ccf7308fdd340825`.
+  Its source stamp and all 131 hashes across ten manifests match Git at the exact
+  source and resumed HEAD. Windows worktree comparisons match after configured
+  CRLF normalization, with no source-content exception.
+- All three new preparation mutants failed assertions, and the positive actual
+  preparation scenario passed three repeats. These execute extracted actual Memory
+  preparation bodies and real HostMemory/PageTable with fixture System services.
+- All five CTest processes passed: 130 ordinary cases (3,966,703 assertions),
+  scheduler 1,708 assertions, F3 witness 38, admitted transfer 88 and provenance
+  **479**. Each of three additional provenance processes also passed 479 assertions
+  with the new real-process preparation/pin closure and exception-cleanup marker.
+  This native pause is a test-peer factory, not automatic game-CPU enrollment.
+- Existing eleven owner and nineteen mapping assertion mutants, their three real
+  repeats, full synchronization/content boundary suite, production builds,
+  HostMemory/import, coherency/lifecycle/fault regressions all passed. Both 77
+  registration interleavings and the original GPU-dirty complement checks remain.
+- F3's fixed-mode control retains exactly two alias failures, 36 passing
+  assertions and exit 42; F2 still produces backing77/cache10 and fixed-mode exit 1.
+  No repaired ordinary-game coherency witness is claimed.
+
+Downloaded metadata/artifact, full job log, independent verifier and acceptance
+summary are retained in ignored `.diagnostics/ci-39251597638/`. This accepts the
+controlled preparation lifecycle fix only. **F2/F3 remain Open.**
 
 Next ordinary-guest gate is still outer PTE/process/host-service producer closure
 with proven lifetime retention and publication ordering, followed by device/GPU
