@@ -22,7 +22,7 @@ unit_path = 'tools/physical_coherency_tests/host_mapping_domain_tests.cpp'
 real_path = 'tools/physical_coherency_tests/host_mapping_freeze_tests.cpp'
 header = (root / header_path).read_text().replace('#pragma once', '')
 unit = (root / unit_path).read_text()
-common = [args.cxx, '-std=c++23', '-O1', '-pthread', '-I', str(root / 'src')]
+common = [args.cxx, '-std=c++23', '-O1', '-pthread']
 if args.boost_include:
     common += ['-I', str(args.boost_include)]
 
@@ -32,7 +32,8 @@ def execute(name, sources, *, mutant=False, production=False):
     flags = ['-Werror=reorder'] if production else ['-Wall', '-Wextra', '-Wshadow', '-Werror']
     if production:
         flags += ['-I', str(out / 'stubs')]
-    subprocess.run(common + flags + [str(p) for p in sources] + ['-o', str(exe)], check=True)
+    subprocess.run(common + flags + ['-I', str(root / 'src')] +
+                   [str(p) for p in sources] + ['-o', str(exe)], check=True)
     for repeat in range(1, 2 if mutant else 4):
         result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
         log = result.stdout + result.stderr

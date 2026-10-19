@@ -850,3 +850,9 @@ lookups free of the new cold mapping mutex. Current Linux-only acceptance run is
 [39187373524](https://github.com/Splaser/emulator/actions/runs/39187373524), with
 the real mapping suite before native integration compilation. Android is skipped;
 superseded runs `39187093671`/`39187016054` are cancelled. Acceptance remains pending.
+
+Run `39187373524` subsequently failed in the standalone production fixture link:
+the harness's source include path preceded its logging/assert stubs. The ten
+primitive mutants passed, but no production/native acceptance is inferred. The
+test include order is corrected for the next Linux-only run. Production source
+is unchanged by this harness repair; complete Linux acceptance remains pending.
