@@ -759,3 +759,40 @@ retained guest-wide Unknown isolation. A single VMA mprotect, generation check,
 gate counter or successful private-domain test cannot substitute. No runtime code
 changed and no new CI/build/device tests were dispatched for this static audit.
 Planner and ordinary BufferCache remain frozen; authority absent; F2/F3 Open.
+
+## 2026-10-19: managed close-and-drain implementation; CI acceptance pending
+
+User requested immediate push/handoff while GitHub workflow runs, to continue on
+another workstation. All implementation is pushed on `codex/issue-372-fixes`:
+`827073eab4` plus Memory test-peer access fix
+`7e6996daa317835d76f0b5d4d5ce6a3d884d88bb`.
+
+New bounded ProducerDrain closes actual PhysicalCore::RunThread entry and existing
+CpuWriteOwner::TryVisit. Kernel factory always collects all four core gates;
+Memory endpoint closes only its own controlled owner. A counted call/callback must
+return before DrainedSubset; early resume is refused. Polls have a fixed call budget,
+no writer wait, forced NCE interrupt, GPU callback or signal-handler integration.
+Drop/timeout/retirement seals further entry. Existing in-flight code can still be
+running after Unknown: this is NOT safe physical backing isolation. No backing or
+native pin, alias census, mapping freeze or asynchronous GPU lease is supplied.
+GuestBackingAdmission always Unknown. Do not claim full guest suspension or resume
+after possible GPU effects via these CPU-only no-effects cancellation endpoints.
+
+Local Windows g++ units and extracted-body integration passed three repeats and
+15 assertion mutants. Extracted backend execution is mocked; native integration
+uses privileged held-entry injection, not actual ARM/NCE execution. Linux has a
+real two-MAP_SHARED-alias counterexample; it has not run locally. Native tests add
+actual Kernel/PhysicalCore/Memory-owner closure/drainage to the existing Vulkan
+case. Linux workflow now compiles kernel.cpp/physical_core.cpp early and preserves
+`.diagnostics/m4-producer-drain/*`. Original F2/F3 witnesses are unchanged.
+
+Current [Linux run 39179992784](https://github.com/Splaser/emulator/actions/runs/39179992784)
+is for exact source `7e6996daa317835d76f0b5d4d5ce6a3d884d88bb`, pending at handoff.
+Do not treat local results or the superseded 39179956771 run as its acceptance.
+Next read this run's first real error/result; avoid duplicate dispatch. Download
+artifacts, verify new mutant/repeat/native markers and original witnesses, match
+hashes, then record acceptance separately. Do not extend implementation while
+unresolved compile/test failures remain. Android skipped by linux-only scope.
+See [implementation, scope and remaining checks](M4_F3_MANAGED_PRODUCER_DRAIN.md).
+Ordinary host/raw aliases, audio/VIC/I/O, mapping and GPU drainage remain outside
+the covered subset. No BufferCache auto-selection or authority; F2/F3 Open.

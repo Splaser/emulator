@@ -126,3 +126,27 @@ the changed kernel.cpp and physical_core.cpp early, then builds the full normal
 Linux targets and runs the previous native Vulkan, scheduler, backing, coherency
 and lifecycle suites. Original F2/F3 negative witnesses remain intact. Android is
 not requested. Exact source/CI acceptance is recorded after the run completes.
+
+## Checkpoint for continuation on another workstation
+
+Implementation `827073eab4`, followed by test-peer access fix
+`7e6996daa317835d76f0b5d4d5ce6a3d884d88bb`, is pushed on
+`codex/issue-372-fixes`. Local Windows g++ compiled the real managed-thread unit
+and extracted-body fixture; both passed three repeats and all fifteen mutants
+failed assertions. Linux-only memfd alias probes were not executed locally.
+These local results are not Linux/ARM/NCE or complete guest-quiescence acceptance.
+
+[Linux-only run 39179992784](https://github.com/Splaser/emulator/actions/runs/39179992784)
+targets exact source `7e6996daa317835d76f0b5d4d5ce6a3d884d88bb`; it was **pending**
+when the user requested immediate handoff rather than waiting. Acceptance remains
+unfinished. The preceding run 39179956771 targets the superseded source lacking
+the Memory test peer's explicit friendship and must not be used for acceptance.
+Read the current run's first real compiler/assertion error before changing code;
+do not dispatch another identical run if this one already supplies the evidence.
+Download its artifact after completion to obtain kernel/fixture/mutation logs.
+
+Next verify all fifteen new mutants fail assertions, both new fixtures repeat
+three times, the real Linux alias-bypass counterexample retains Unknown, the
+native four-core/Memory-owner marker appears in each provenance repeat, and all
+original F2/F3 and regression checks remain intact. Match source hashes and record
+the final CI result in this document and WIP handoff. No Android run is requested.
