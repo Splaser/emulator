@@ -508,7 +508,7 @@ try:
 finally:
     (stubs / 'common/physical_registration_bundle.h').write_text(instrumented_bundle)
 print('PASS negative control: missing observation exclusion permits a tracked store during snapshot (75)')
-for path in ['src/common/physical_page_gate.h', 'src/common/physical_range_admission.h',
+for path in ['src/common/producer_drain.h','src/common/physical_page_gate.h', 'src/common/physical_range_admission.h',
              'src/core/controlled_cpu_page.h', 'src/common/host_memory.cpp',
              'src/common/page_table.cpp', 'src/video_core/buffer_cache/memory_tracker_base.h',
              'src/video_core/buffer_cache/word_manager.h']:

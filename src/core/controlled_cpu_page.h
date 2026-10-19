@@ -6,6 +6,7 @@
 #include "common/page_table.h"
 #include "common/physical_cpu_page.h"
 #include "common/physical_registration_bundle.h"
+#include "common/producer_drain.h"
 
 namespace VideoCommon {
 template <class P> class BufferCache;
@@ -22,6 +23,8 @@ struct CpuWriteOwner {
     explicit CpuWriteOwner(Memory* memory_) : memory{memory_} {}
     template <typename Visit>
     bool TryVisit(Visit&& visit) const {
+        const auto execution=managed_stores.TryEnter();
+        if(!execution) return false;
         std::shared_lock lock{mutex, std::try_to_lock};
         if (!lock.owns_lock() || !memory) return false;
         visit(*memory); // Only bounded CPU store/publication; no GPU polling/wait here.
@@ -30,7 +33,11 @@ struct CpuWriteOwner {
     [[nodiscard]] bool Track(const std::shared_ptr<ControlledCpuWriteRequest>& request);
     [[nodiscard]] bool TryAccept(const std::shared_ptr<ControlledCpuWriteRequest>& request);
     void Close();
+    [[nodiscard]] auto TryCloseManagedStores(u32 poll_budget=64) const {
+        return managed_stores.TryClose(poll_budget);
+    }
 private:
+    Common::ProducerDrain managed_stores;
     mutable std::shared_mutex mutex;
     Memory* memory;
     std::array<std::weak_ptr<ControlledCpuWriteRequest>, 256> requests;
@@ -303,6 +310,7 @@ inline bool CpuWriteOwner::TryAccept(const ControlledCpuWriteRequestPtr& request
 }
 
 inline void CpuWriteOwner::Close() {
+    managed_stores.Seal();
     std::unique_lock lock{mutex};
     memory = nullptr;
     for (size_t i = 0; i < requests.size(); ++i) {

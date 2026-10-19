@@ -1327,6 +1327,17 @@ void KernelCore::SuspendEmulation(bool suspended) {
     }
 }
 
+std::optional<GuestExecutionDrain> KernelCore::TryCloseGuestExecution(u32 poll_budget) {
+    GuestExecutionDrain drain;
+    for(size_t i=0;i<drain.cores.size();++i) {
+        if(!impl->cores[i]) return std::nullopt;
+        auto closure=impl->cores[i]->TryCloseGuestExecution(poll_budget);
+        if(!closure) return std::nullopt; // Acquired subset stays closed/Unknown.
+        drain.cores[i].emplace(std::move(*closure));
+    }
+    return drain;
+}
+
 void KernelCore::ShutdownCores() {
     impl->TerminateAllProcesses();
 

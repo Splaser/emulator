@@ -126,6 +126,11 @@ public:
     /// Owner teardown only, before process PTE finalization or Memory reset/destruction.
     /// Closes short CPU execution visits, without waiting for GPU requests to finish.
     void SealControlledCpuWrites();
+    // Only existing owner-bound controlled visits; ordinary Memory::Write/bulk,
+    // escaped pointers, services and native stores are NOT enrolled by this API.
+    [[nodiscard]] auto TryCloseControlledStores(u32 poll_budget=64) const {
+        return controlled_owner->TryCloseManagedStores(poll_budget);
+    }
     /// KProcess slab finalization does not invoke Memory's destructor. Call after closing
     /// execution and finalizing process mappings, to release the context/owner explicitly.
     void Finalize();

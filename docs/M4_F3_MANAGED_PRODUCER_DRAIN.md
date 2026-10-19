@@ -1,0 +1,128 @@
+# M4-F3 bounded managed entry close-and-drain prototype
+
+This implements the first execution-entry component of the
+[guest exclusion design](M4_F3_GUEST_EXCLUSION_FEASIBILITY_AUDIT.md), not a full
+guest-backed exclusion provider. Ordinary guest admission remains **Unknown**.
+There is no GPU recording/admission endpoint, authority publication or BufferCache
+automatic routing. No signal handler, NCE fault emulation or legacy pause code is
+changed. Cross queue remains Unknown; F2/F3 remain Open.
+
+## Real enforcement points and stop evidence
+
+`PhysicalCore::RunThread` obtains an owned `ProducerDrain::Entry` **before** backend
+initialization/execution. Entry persists until the complete function returns,
+including backend execution and its host handling. Closing atomically rejects
+subsequent entries; already entered execution must return before its release count
+can acknowledge drainage. Neither an interrupt request nor a caller-provided bool
+is a stop acknowledgement.
+
+`KernelCore::TryCloseGuestExecution` enumerates the fixed four actual PhysicalCore
+objects, never a caller-selected subset. Missing/uninitialized cores or failed
+close return no operation; already acquired closures become sticky Unknown and
+stay closed. A complete request polls each core and returns Pending until every
+entry has exited. Any Unknown seals all held core closures. The API does not
+suspend service fibers or certify all guest activity has stopped.
+
+Existing `CpuWriteOwner::TryVisit` similarly holds an entry around its real bounded
+controlled-store callback. `Memory::TryCloseControlledStores` closes that particular
+existing owner's visits. Memory teardown seals the gate before its old execution
+mutex/teardown. A queued callback reaching TryVisit after closure is refused; no
+legacy fallback is added. Ordinary Memory::Write, bulk/exclusive calls outside the
+controlled owner, raw pointer users, audio, VIC and mapping mutators are not newly
+enrolled. Closing one Memory owner never implies all process/host owners closed.
+
+The shared gate owns a packed atomic entry count/Closed/Unknown state. Entry uses
+one CAS attempt; contention refuses entry. Close and each Poll have finite work,
+without taking cache/PTE/scheduler/core-context locks or waiting for a writer.
+Poll budgets are 1-4096 calls (default 64), **not wall-clock or preemption claims**.
+Remaining active entries at budget exhaustion make the closure sticky Unknown.
+If the caller itself owns an active entry, it gets Pending/Unknown rather than
+waiting on itself. The gates require lock-free 64-bit atomics.
+
+No new forced interruption or host parking is introduced. Backend exit is
+cooperative: a running NCE/JIT backend can remain active indefinitely, and a
+blocked SVC can prevent drainage. That is a refusal/Unknown outcome. Closed
+entry does not erase in-flight execution. In current CPU loops, refusal returns
+without executing another backend attempt; this prototype does not add a sleep
+or promise low CPU use while held. Keep diagnostics brief. Real ARM64 stop/resume
+and integration with an acknowledged scheduler park are still required before
+enabling this for live gameplay.
+
+## Lifetime, cancellation and Unknown
+
+Closures are move-only, single-orchestration-thread objects. Callers keep Kernel
+and Memory lifetimes valid; shared gate state is not a pin on those objects or
+guest physical memory. A closure cannot resume a counted in-flight writer.
+`ResumeNoEffects` / guest `CancelNoEffects` release only a known drained subset;
+these are cancellation endpoints for this **CPU-only prototype**, not completion
+certificates for GPU effects. There is deliberately no API to attach a submission,
+claim effects finished, resume after Unknown or manufacture an asynchronous lease.
+After no-effects cancellation an old closure cannot release another close.
+
+Dropping an unfinished closure, owner retirement, or poll-budget exhaustion leaves
+entry permanently closed and Unknown; later writer exit does not reopen it. This
+enforces *no new managed entry*. It does **not** mean already-running code has
+stopped, nor that backing is isolated from unmanaged aliases. Do not label it
+safe guest quarantine. No arbitrary guest operation may be recorded based on this
+result. Session lifecycle remains responsible for joining/terminating execution;
+no resource can be freed merely because the poll budget expired. A future GPU
+provider still needs backing/native pins and retained all-owner isolation through
+checked completion or safe teardown.
+
+Cancel only after a fully successful collective Poll and while owner lifecycle is
+stable. This is not an atomic multi-owner effects transaction: unsupported
+concurrent teardown/partial close is Unknown, not a rollback or GPU recovery path.
+Do not use legacy Run/Unstall to bypass an active closure: those calls do not clear
+these execution gates. Normal prototype cancellation does not alter the existing
+user pause state, System suspension flags or saved guest permissions.
+
+## Owner/alias coverage is deliberately incomplete
+
+| Covered actual entry | Acknowledgement | Not covered |
+| --- | --- | --- |
+| All four PhysicalCore::RunThread gates | Last counted call returned | Host service fibers; backend not yet returned; other writer threads |
+| One actual CpuWriteOwner::TryVisit gate | Last counted callback returned | Other Memory owners; ordinary writes and escaped pointers |
+| Shared gate ownership/lifetime | Closed/Unknown state retained | Backing/native pin, VMA permission or mapping lease |
+
+Both APIs expose only `DrainedSubset`; `GuestBackingAdmission()` remains Unknown
+unconditionally. This is a type boundary, not a successful alias census.
+There is no owner/alias list accepted as a certificate and no second producer
+authority system. Existing coverage/current-content machinery is not relaxed.
+
+The Linux negative creates **two real MAP_SHARED views of one memfd**. After the
+managed subset drains and one view becomes read-only, another thread writes
+through the omitted writable view, and the first view observes 99. Thus a truthful
+managed drain plus one mprotect still permits an omitted-alias store. This is a
+counterexample which must retain Unknown, not a successful guest exclusion test.
+All-alias mapping/export closure, audio/VIC/I/O joins, CPU/guest backing pins,
+mapping freeze, device/GPU pre-work drainage and retained guest isolation remain
+missing. Remap/native retirement do not become eligible through this prototype.
+
+## Tests and evidence classes
+
+Deterministic controls precede acceptance:
+
+- Managed writer holds a real entry while a competing caller closes it; the store
+  completes before post-join/acquire drainage succeeds. New entry and early resume
+  are refused. Self-dependency hits a finite poll budget without waiting. Drop,
+  timeout, owner retirement, duplicate/stale closure and Unknown remain closed.
+- Ten gate/type-boundary assertion mutants cover those checks, including the
+  false guest certificate. A deliberately false-drained implementation is tested
+  red before the real implementation. Compile errors/timeouts are not killed mutants.
+- Extracted actual kernel factory, actual PhysicalCore entry prefix and complete
+  CpuWriteOwner visitor run against a **mock backend**. Five assertion mutants
+  bypass backend/visitor closure, omit a core, bypass collective early-cancel
+  validation or omit Unknown fan-out. These do not execute ARM/NCE or the rest of
+  PhysicalCore::RunThread.
+- The native Linux integration uses real Kernel/PhysicalCore/Memory owners and
+  real host threads, with privileged held-entry injection to model an already
+  running backend/visit. It checks all-core closure, Pending versus drained,
+  early cancellation and real controlled-owner drainage. It is **not** an ARM64
+  execution, live NCE interruption or complete guest suspension test. The existing
+  real Vulkan provenance/readback tests continue separately.
+
+The new unit/integration fixtures each run three repeats. Linux CI now compiles
+the changed kernel.cpp and physical_core.cpp early, then builds the full normal
+Linux targets and runs the previous native Vulkan, scheduler, backing, coherency
+and lifecycle suites. Original F2/F3 negative witnesses remain intact. Android is
+not requested. Exact source/CI acceptance is recorded after the run completes.

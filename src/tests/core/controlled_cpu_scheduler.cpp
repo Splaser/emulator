@@ -1007,6 +1007,38 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         while (!self.IsTerminationRequested())
             (void)self.Sleep(kernel.HardwareTimer().GetTick() + 1'000'000);
     });
+    { // Real objects; privileged entries model a backend/visit already in flight.
+        using Drain=Common::ProducerDrain;
+        auto entry=Access::EnterGuestExecution(system.Kernel().PhysicalCore(3));
+        REQUIRE(entry.has_value());
+        auto stop=system.Kernel().TryCloseGuestExecution(8);
+        REQUIRE(stop.has_value());
+        REQUIRE(stop->Poll()==Drain::Result::Pending);
+        REQUIRE_FALSE(stop->CancelNoEffects());
+        REQUIRE_FALSE(Access::EnterGuestExecution(system.Kernel().PhysicalCore(0)).has_value());
+        REQUIRE_FALSE(Access::EnterGuestExecution(system.Kernel().PhysicalCore(3)).has_value());
+        entry.reset();
+        REQUIRE(stop->Poll()==Drain::Result::DrainedSubset);
+        REQUIRE(stop->GuestBackingAdmission()==Drain::Result::Unknown);
+        REQUIRE(stop->CancelNoEffects());
+        std::promise<void> entered,finish;
+        auto wait=finish.get_future();bool visited=false;
+        std::thread writer([&] {visited=Access::VisitManagedMemory(memory,[&](auto&) {
+            entered.set_value();wait.wait();
+        });});
+        entered.get_future().wait();
+        auto host=memory.TryCloseControlledStores(8);
+        REQUIRE(host.has_value());
+        const auto pending=host->Poll();const bool early=host->ResumeNoEffects();
+        const bool bypass=Access::VisitManagedMemory(memory,[](auto&) {});
+        finish.set_value();writer.join(); // Always join before any throwing assertion.
+        REQUIRE(visited);REQUIRE(pending==Drain::Result::Pending);
+        REQUIRE_FALSE(early);REQUIRE_FALSE(bypass);
+        REQUIRE(host->Poll()==Drain::Result::DrainedSubset);
+        REQUIRE(host->ResumeNoEffects());
+        REQUIRE(Access::VisitManagedMemory(memory,[](auto&) {}));
+        std::cout<<"PASS native kernel four-core entry closure and controlled Memory owner drainage; privileged in-flight entries, no ARM/NCE execution; guest backing Unknown\n";
+    }
     constexpr DAddr A = 0x1000000, B = 0x2000000, C = 0x4000000, D = 0x5000000, E = 0x6000000;
     constexpr u32 Page = 4096;
     std::vector<u8> initial(2 * Footprint, 10);

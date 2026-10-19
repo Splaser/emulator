@@ -22,6 +22,8 @@ PhysicalCore::PhysicalCore(KernelCore& kernel, std::size_t core_index)
 PhysicalCore::~PhysicalCore() = default;
 
 void PhysicalCore::RunThread(Kernel::KThread* thread) {
+    const auto execution=guest_execution.TryEnter();
+    if(!execution) return; // Re-enter only after explicit no-effects cancellation.
     auto* process = thread->GetOwnerProcess();
     auto& system = m_kernel.System();
     auto* interface = process->GetArmInterface(m_core_index);

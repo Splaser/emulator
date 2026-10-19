@@ -9,12 +9,14 @@
 #include <mutex>
 
 #include "core/arm/arm_interface.h"
+#include "common/producer_drain.h"
 
 namespace Kernel {
 class KernelCore;
 } // namespace Kernel
 
 namespace Core {
+struct SchedulerTestAccess;
 class ExclusiveMonitor;
 class System;
 } // namespace Core
@@ -31,6 +33,10 @@ public:
 
     // Execute guest code running on the given thread.
     void RunThread(KThread* thread);
+
+    // Managed execution subset only. A stuck backend remains Pending/Unknown;
+    // this request never waits on m_guard or invokes a signal/interrupt callback.
+    auto TryCloseGuestExecution(u32 poll_budget=64) {return guest_execution.TryClose(poll_budget);}
 
     // Copy context from thread to current core.
     void LoadContext(const KThread* thread);
@@ -63,6 +69,8 @@ public:
     }
 
 private:
+    friend struct Core::SchedulerTestAccess;
+    Common::ProducerDrain guest_execution;
     KernelCore& m_kernel;
     const std::size_t m_core_index;
 

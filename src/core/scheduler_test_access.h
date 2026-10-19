@@ -14,11 +14,16 @@
 #include "core/scheduler_system_test_access.h"
 #include "core/memory.h"
 #include "core/hle/kernel/k_process.h"
+#include "core/hle/kernel/physical_core.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
 namespace Core {
 struct SchedulerTestAccess : SystemTestAccess {
+    static auto EnterGuestExecution(Kernel::PhysicalCore& core) {return core.guest_execution.TryEnter();}
+    static bool VisitManagedMemory(Memory::Memory& memory, const std::function<void(Memory::Memory&)>& visit) {
+        return memory.controlled_owner->TryVisit(visit);
+    }
     static auto& Cache(Vulkan::RasterizerVulkan& rasterizer) { return rasterizer.buffer_cache; }
     static auto& CounterGuard(Tegra::MaxwellDeviceMemoryManager& memory) {
         return memory.counter_guard;

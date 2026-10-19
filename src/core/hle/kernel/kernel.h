@@ -17,6 +17,7 @@
 #include "core/hle/kernel/k_slab_heap.h"
 #include "core/hle/kernel/k_typed_address.h"
 #include "core/hle/kernel/svc_common.h"
+#include "core/hle/kernel/guest_execution_drain.h"
 
 namespace Core {
 class ExclusiveMonitor;
@@ -262,6 +263,10 @@ public:
 
     /// Suspend/unsuspend emulated processes.
     void SuspendEmulation(bool suspend);
+
+    // Prototype: closes real backend entry on every core, polls without waiting.
+    // No automatic interrupt, host-producer closure or guest-backed permission.
+    [[nodiscard]] std::optional<GuestExecutionDrain> TryCloseGuestExecution(u32 poll_budget=64);
 
     /// Exceptional exit application process.
     void ExceptionalExitApplication();

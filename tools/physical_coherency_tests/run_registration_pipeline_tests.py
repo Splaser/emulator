@@ -784,7 +784,8 @@ negative = subprocess.run([str(coverage_exe)], capture_output=True, text=True, t
 (out / 'storage-coverage-negative.txt').write_text(negative.stdout + negative.stderr)
 assert negative.returncode != 0 and 'CompletedPhysicalIdentity(write)' in negative.stderr
 print('PASS negative physical coverage control: ignoring shared coverage admits an overflowing prefix')
-inputs.update(['src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
+inputs.update(['src/common/producer_drain.h','src/video_core/renderer_vulkan/vk_private_producer_guard.h',
+               'src/common/physical_registration_bundle.h', 'src/core/controlled_cpu_page.h',
                'src/video_core/buffer_cache/controlled_conflict.h', 'src/common/range_sets.inc',
                'src/video_core/gpu_thread.cpp','src/video_core/gpu_thread.h',
                'src/core/hle/kernel/k_process.cpp','src/core/memory.h',
