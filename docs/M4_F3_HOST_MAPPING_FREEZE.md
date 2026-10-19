@@ -141,6 +141,15 @@ only explicit enrollment; its new defaults/negatives need a fresh Linux-only run
 Android was skipped. These earlier focused results do not accept the final source
 or certify full native guest exclusion.
 
+Current Linux-only run
+[39205308506](https://github.com/Splaser/emulator/actions/runs/39205308506) targets
+exact constructor-only enrollment source
+`a080cc5a2ac61263c5014b94cf25836bd87ddb50`. It is in progress; Android is skipped.
+Acceptance now requires all eleven primitive, seven wrapper and one real
+constructor-default assertion mutants (nineteen total), three positive repeats,
+the NDEBUG failure control and the complete original Linux regression suite.
+Do not reuse the cancelled default-on run's results for this final component.
+
 ## Remaining gates
 
 1. Enroll lifetime-scoped owner/borrow use, or stop/join the complete audited owner

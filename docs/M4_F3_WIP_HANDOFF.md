@@ -884,3 +884,10 @@ legacy-domain-enrollment negative. The real Linux suite additionally mutates the
 HostMemory public constructor default and expects ordinary-arena refusal; it still
 has seven actual wrapper guard mutants. Final Linux-only acceptance is pending;
 Android remains unrequested. No NCE runtime stop/resume or fault recovery is claimed.
+
+Current final-source acceptance attempt:
+[39205308506](https://github.com/Splaser/emulator/actions/runs/39205308506), exact
+source `a080cc5a2ac61263c5014b94cf25836bd87ddb50`. It verifies constructor-only
+enrollment: eleven primitive + seven wrapper + one public-constructor assertion
+mutants, three positive repeats and full original Linux regressions. It is in
+progress with Android skipped. Recover this run before another dispatch.
