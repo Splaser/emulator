@@ -33,6 +33,7 @@
 #include "video_core/vulkan_common/vulkan_instance.h"
 #include "video_core/vulkan_common/vulkan_library.h"
 #include "../../../tools/physical_coherency_tests/private_producer_test_access.inc"
+#include "../../../tools/physical_coherency_tests/controlled_guest_arena_test_access.inc"
 #if defined(__linux__) && !defined(__ANDROID__)
 #include <sys/uio.h>
 #include <unistd.h>
@@ -1078,6 +1079,32 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         on_gpu([&] { write = Access::CheckedOrdinaryFill(rasterizer, address, Page, value, std::move(emit)); });
         return write;
     };
+    {
+        Common::ControlledGuestArena arena;
+        auto host_owner = arena.RegisterOwner();
+        REQUIRE(host_owner);
+        auto paused = Common::ControlledGuestArenaTestAccess::Begin(*host_owner);
+        REQUIRE(paused);
+        auto close = arena.TryClose(32);
+        REQUIRE(close);
+        REQUIRE(close->Poll() == Common::ProducerDrain::Result::Pending);
+        bool refused_before_data_lock{};
+        auto completion_control = fill(A, 0x0a0a0a0a, [&] {
+            refused_before_data_lock = !host_owner->Store(0, 99) && !host_owner->Load(0);
+            return true;
+        });
+        REQUIRE(completion_control);
+        finish(completion_control, State::Complete);
+        REQUIRE(refused_before_data_lock);
+        REQUIRE(read(A) == std::vector<u8>(Page, 10));
+        REQUIRE(paused->Store(71));
+        paused.reset();
+        REQUIRE(close->Poll() == Common::ProducerDrain::Result::DrainedSubset);
+        REQUIRE(close->TryFreezeHostMappings());
+        REQUIRE(close->GuestBackingAdmission() == Common::ProducerDrain::Result::Unknown);
+        REQUIRE(close->CancelNoEffects());
+        std::cout << "PASS native Vulkan completion progresses while controlled owner holds resolved pointer; GPU backing enrollment Unknown\n";
+    }
     REQUIRE(read(A) == std::vector<u8>(Page, 10));
     REQUIRE(read(B) == std::vector<u8>(Page, 10));
     auto plan = Tegra::PhysicalAccessPlan::BuildDeviceRange(device_memory, A, Page);

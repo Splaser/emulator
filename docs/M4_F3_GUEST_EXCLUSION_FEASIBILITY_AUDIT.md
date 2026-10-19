@@ -282,3 +282,10 @@ bounded Linux acceptance passed at `a080cc5a2a` in
 It does not close outer CPU PTE/device/GPU changes,
 escaped pointers or import/export publication. Those prerequisites above remain
 open; neither component is a truthful general guest exclusion capability.
+
+The next [controlled owner lifecycle substage](M4_F3_CONTROLLED_OWNER_LIFECYCLE.md)
+adds a sealed fresh CPU-only backing cohort with actual admission/drain and retained
+lifetimes. It reuses the accepted HostMappingDomain after drainage. Its new Linux
+acceptance is pending; it does not supply outer CPU PTE, NCE/Dynarmic, raw/service
+or GPU owner completeness. The documented publication/lifecycle blockers require
+stopping at this owner substage, rather than asserting a general guest lease.

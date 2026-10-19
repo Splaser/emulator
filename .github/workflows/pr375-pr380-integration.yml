@@ -106,6 +106,8 @@ jobs:
             -DCITRON_ROOM=OFF -DCITRON_TESTS=ON -DCITRON_CRASH_DUMPS=OFF
       - name: Verify HostMemory mapping freeze and omitted-owner controls
         run: python tools/physical_coherency_tests/run_host_mapping_freeze_tests.py
+      - name: Verify real controlled arena owner admission and quarantine
+        run: python tools/physical_coherency_tests/run_controlled_guest_arena_tests.py
       - name: Check native scheduler integration translation units first
         run: |
           cmake --build build-integration --parallel 3 --target \
@@ -245,6 +247,7 @@ jobs:
             .diagnostics/m4-private-guard/*
             .diagnostics/m4-producer-drain/*
             .diagnostics/m4-host-mapping-freeze/*
+            .diagnostics/m4-controlled-owner/*
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn

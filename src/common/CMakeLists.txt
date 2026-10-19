@@ -34,6 +34,7 @@ add_library(common STATIC
     common_precompiled_headers.h
     common_types.h
     concepts.h
+    controlled_guest_arena.h
     container_hash.h
     demangle.cpp
     demangle.h

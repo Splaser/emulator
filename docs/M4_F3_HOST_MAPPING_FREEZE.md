@@ -173,6 +173,12 @@ asynchronous GPU isolation or content authority from this acceptance.
 
 ## Remaining gates
 
+The subsequent [controlled owner lifecycle](M4_F3_CONTROLLED_OWNER_LIFECYCLE.md)
+substage creates a closed CPU-only backing cohort and composes its owned entry
+drain with this same HostMappingDomain. New acceptance is pending. It deliberately
+stops before outer CPU PTE publication: real PageTable/process/backend/service/GPU
+owners are not enrolled, and ordinary guest admission remains Unknown.
+
 1. Enroll lifetime-scoped owner/borrow use, or stop/join the complete audited owner
    set. Raw-pointer observation alone cannot account for outstanding uses.
 2. Close CPU PTE, device/GPU mapping, permission restoration and import/export
