@@ -41,6 +41,14 @@ target_link_libraries(tests PRIVATE common core input_common)
 target_link_libraries(tests PRIVATE Vulkan::Headers)
 target_link_libraries(tests PRIVATE ${PLATFORM_LIBRARIES} Catch2::Catch2WithMain Threads::Threads)
 
+if (TARGET dynarmic)
+    get_target_property(_pinned_container_compat dynarmic CITRON_PINNED_CONTAINER_COMPAT)
+    if (_pinned_container_compat)
+        target_sources(tests PRIVATE common/dynarmic_containers.cpp)
+        target_link_libraries(tests PRIVATE dynarmic::dynarmic)
+    endif()
+endif()
+
 add_test(NAME tests COMMAND tests)
 
 # Full native owners and software Vulkan; separate from portable unit tests so a missing

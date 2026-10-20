@@ -1,5 +1,34 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: pinned Dynarmic tuple hashing after include recovery
+
+Linux run `39421826300` at `ac3fa60a6841d345a53e1fbf37fc5fefdd808b54`
+passed the early native translation units, all owner/process-stop prerequisites
+and synchronization/mutation controls. Complete production compilation then exposed
+two restored Dynarmic default-hash key shapes: tuple<bool, unsigned long, int, int>
+and tuple<IR::LocationDescriptor, unsigned>. std::hash is unavailable for tuples;
+no native execution-stop CTest ran. The include bridge repaired the first blocker,
+not full build acceptance.
+
+Static build-only compatibility headers now select Common::TupleHash only for
+standard tuple/pair keys and preserve std::hash for ordinary keys and explicit
+caller hashers. Their include priority propagates from the actual pinned target
+so backend and consumer TUs use one alias definition. The submodule sources and
+pin are unchanged, and CPM's independent provider is unaffected. Do not globally
+switch to boost::hash: LocationDescriptor has its own std::hash specialization.
+
+A production Catch2 case checks actual Boost map/set aliases with descriptor,
+callback tuple, descriptor tuple/pair and explicit colliding hasher keys. It is
+compiled only for this compatibility target. A Windows smoke using the actual
+hash selector and real pinned LocationDescriptor passed against standard test
+containers; this is not native Boost-container or Linux runtime acceptance.
+
+The complete native build now precedes the long synchronization-mutant batch,
+but that batch still precedes native execution. This changes validation order
+only, permitting another compiler failure to surface before repeating those
+unchanged sensitivity checks. Recover the new exact-source Linux run before
+extending M4. Android remains skipped; F2/F3 and guest admission remain Open.
+
 ## 2026-10-20: home-machine resume and restored Dynarmic include boundary
 
 Both paused Linux runs have completed unsuccessfully: `39391213895` at
