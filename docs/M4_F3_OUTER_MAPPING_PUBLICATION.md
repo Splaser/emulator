@@ -107,6 +107,10 @@ not acceptance. The script now explicitly requires Linux for runtime checks and
 provides --compile-only for a compiler probe. Linux remote acceptance is pending.
 This iteration requests linux-only scope; no Android build or device test is run.
 
+Pending remote run:
+[39380436500](https://github.com/Splaser/emulator/actions/runs/39380436500) at
+`3576ea32bd`. Acceptance has not yet been recorded; do not duplicate the run.
+
 The next roadmap gate remains process/PTE ownership and all relevant host/service
 publication closure with retained lifetimes, followed by device/GPU enrollment
 and retained Unknown isolation. This component alone cannot satisfy that gate.

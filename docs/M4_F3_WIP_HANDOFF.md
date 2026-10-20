@@ -19,6 +19,12 @@ Memory::Reset lifetime join; the paused entry is privileged test orchestration.
 Local Windows fixture compilation succeeded; the Linux-specific runtime checks
 and full Linux acceptance remain pending. Android is explicitly not requested.
 
+Current Linux-only acceptance run:
+[39380436500](https://github.com/Splaser/emulator/actions/runs/39380436500), exact
+production/test source `3576ea32bd`. Android is skipped. Recover this run's first
+actual result and artifact before another dispatch or further runtime changes;
+the local compile-only probe is not runtime or mutation acceptance.
+
 This closes no all-owner table freeze or general guest exclusion gate. Raw PTE
 writes, another Memory, services, frame/device/GPU owners and retained Unknown
 isolation remain unclosed. No ordinary routing or physical content authority is
