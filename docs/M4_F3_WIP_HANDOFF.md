@@ -1,5 +1,22 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: process-owned execution-stop prerequisite
+
+Continue the user's four-step M4 sequence in the
+[process guest exclusion implementation record](M4_F3_PROCESS_GUEST_EXCLUSION.md).
+The first component retains a real KProcess and binds its PageTable/backing
+identity while closing all real backend entries and requesting actual halt.
+The physical execution scope ends after backend/context unlock, before potentially
+suspended SVC fibers; the successful omitted-SVC-writer control prevents confusing
+backend acknowledgement with complete guest exclusion. NCE remains unsupported.
+Process/API/service closure, GPU drainage/retained isolation and the actual
+guest-backed Vulkan admission witness are still Open, with no ordinary activation.
+
+Linux actual-body repeats and assertion mutants pass locally. A native Dynarmic
+store-loop CTest is added and awaits remote compilation/execution. The predecessor
+merge-recovery run 39391213895 at 5a6eee7b58 has passed early native translation
+units and is still running; it does not accept this new execution-stop source.
+
 ## 2026-10-20: upstream #403 conflict resolution
 
 Upstream e672babee8 reverts #376/#380/#401 for re-landing as individual subjects.

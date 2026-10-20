@@ -37,6 +37,10 @@ public:
     // Managed execution subset only. A stuck backend remains Pending/Unknown;
     // this request never waits on m_guard or invokes a signal/interrupt callback.
     auto TryCloseGuestExecution(u32 poll_budget=64) {return guest_execution.TryClose(poll_budget);}
+    enum class StopRequest { Requested, Contended, Unsupported };
+    // Normal owner context only, after ALL execution entries have been closed.
+    // No wait on m_guard; unsupported platform handshakes do not run here.
+    StopRequest TryRequestGuestStop();
 
     // Copy context from thread to current core.
     void LoadContext(const KThread* thread);

@@ -341,6 +341,8 @@ add_library(core STATIC
     hle/kernel/memory_types.h
     hle/kernel/message_buffer.h
     hle/kernel/physical_core.cpp
+    hle/kernel/process_execution_stop.cpp
+    hle/kernel/process_execution_stop.h
     hle/kernel/physical_core.h
     hle/kernel/physical_memory.h
     hle/kernel/slab_helpers.h

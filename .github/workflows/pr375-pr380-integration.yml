@@ -120,6 +120,8 @@ jobs:
         run: python tools/physical_coherency_tests/run_cross_call_ownership_audit.py
       - name: Verify owner teardown entries and retained TLS cleanup
         run: python tools/physical_coherency_tests/run_process_teardown_tests.py
+      - name: Verify process-owned backend stop and omitted service writer control
+        run: python tools/physical_coherency_tests/run_process_execution_stop_tests.py
       - name: Verify HostMemory mapping freeze and omitted-owner controls
         run: python tools/physical_coherency_tests/run_host_mapping_freeze_tests.py
       - name: Verify real controlled arena owner admission and quarantine
@@ -138,6 +140,9 @@ jobs:
             src/core/CMakeFiles/core.dir/hle/kernel/k_memory_block_manager.cpp.o \
             src/core/CMakeFiles/core.dir/hle/kernel/k_process.cpp.o \
             src/core/CMakeFiles/core.dir/hle/kernel/k_thread_local_page.cpp.o \
+            src/core/CMakeFiles/core.dir/hle/kernel/process_execution_stop.cpp.o \
+            src/core/CMakeFiles/core.dir/arm/dynarmic/arm_dynarmic_32.cpp.o \
+            src/core/CMakeFiles/core.dir/arm/dynarmic/arm_dynarmic_64.cpp.o \
             src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/present/window_adapt_pass.cpp.o \
             src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/vk_scheduler.cpp.o \
             src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/vk_rasterizer.cpp.o \
@@ -279,6 +284,7 @@ jobs:
             .diagnostics/m4-process-unmap/*
             .diagnostics/m4-cross-call-audit/*
             .diagnostics/m4-process-teardown/*
+            .diagnostics/m4-process-execution-stop/*
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn

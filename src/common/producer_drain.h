@@ -42,6 +42,7 @@ public:
         ~Closure(){if(state && !released) Quarantine();}
         // Budget counts polls, not a promise to interrupt a stuck backend.
         Result Poll() noexcept {
+            if(!state) return Result::Unknown;
             const auto value=state->value.load(std::memory_order_acquire);
             if(released || (value & Unknown)) return Result::Unknown;
             if(!(value & Count)) return Result::DrainedSubset;
@@ -51,12 +52,13 @@ public:
         // This prototype cannot record GPU work or certify completion. Cancellation
         // resumes only a known, fully drained subset, never an uncertain operation.
         bool ResumeNoEffects() noexcept {
+            if(!state) return false;
             if(released) return false;
             u64 expected=Closed;
             if(!state->value.compare_exchange_strong(expected,0,std::memory_order_acq_rel)) return false;
             released=true;return true;
         }
-        void Quarantine() noexcept {if(!released) state->value.fetch_or(Closed|Unknown,std::memory_order_acq_rel);}
+        void Quarantine() noexcept {if(state && !released) state->value.fetch_or(Closed|Unknown,std::memory_order_acq_rel);}
     };
     ProducerDrain()=default;
     ProducerDrain(const ProducerDrain&)=delete;

@@ -1,0 +1,199 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <functional>
+#include <future>
+#include <iostream>
+#include <thread>
+#include "common/scope_exit.h"
+#include "core/hle/kernel/process_execution_stop.h"
+using namespace std::chrono_literals;
+namespace Common {struct PageTable {};struct GuestBackingEpoch {std::atomic<bool> alive{true};};}
+namespace Core {
+struct Debugger {
+    template<class... T> void NotifyThreadStopped(T&&...) {}
+    template<class... T> void NotifyThreadWatchpoint(T&&...) {}
+};
+class System {
+public:
+    struct Device {
+        struct Buffer {
+            std::shared_ptr<const Common::GuestBackingEpoch> epoch=std::make_shared<Common::GuestBackingEpoch>();
+            auto BackingEpoch() {return epoch;}
+        } buffer;
+    } device;
+    Debugger debugger;
+    bool DebuggerEnabled() {return false;}
+    Debugger& GetDebugger() {return debugger;}
+    Device& DeviceMemory() {return device;}
+};
+struct SchedulerTestAccess {
+    static auto HoldCore( Kernel::PhysicalCore& core) {return std::unique_lock{core.m_guard};}
+    static bool Running(Kernel::PhysicalCore& core) {
+        std::scoped_lock lock{core.m_guard};return core.m_arm_interface!=nullptr;
+    }
+};
+}
+struct Backend final : Core::ArmInterface {
+    std::atomic<unsigned> runs{},stores{},locks{},unlocks{},initializations{},requests{};
+    std::atomic<bool> halt{},running{};
+    bool supported=true,svc=false,throws=false;
+    std::promise<void>* unlock_entered{};
+    std::shared_future<void> unlock_release;
+    void Initialize() override {++initializations;}
+    void LockThread(Kernel::KThread*) override {++locks;}
+    void UnlockThread(Kernel::KThread*) override {
+        ++unlocks;
+        if(unlock_entered) {unlock_entered->set_value();unlock_release.wait();}
+    }
+    Core::HaltReason RunThread(Kernel::KThread*) override {
+        ++runs;running=true;++stores;
+        if(throws) throw std::runtime_error("injected backend exception");
+        if(svc) return Core::HaltReason::SupervisorCall;
+        while(!halt.load()) std::this_thread::yield();
+        ++stores; // A final store after halt REQUEST, before acknowledgement.
+        return Core::HaltReason::BreakLoop;
+    }
+    Core::HaltReason StepThread(Kernel::KThread* thread) override {return RunThread(thread);}
+    void SignalInterrupt(Kernel::KThread*) override {halt=true;}
+    bool RequestNonblockingGuestStop(Kernel::KThread* thread) override {
+        ++requests;if(!supported) return false;SignalInterrupt(thread);return true;
+    }
+};
+namespace Kernel {
+class KernelCore {
+public:
+    struct Impl {std::array<std::unique_ptr<Kernel::PhysicalCore>,Core::Hardware::NUM_CPU_CORES> cores;};
+    Core::System system;
+    std::unique_ptr<Impl> impl=std::make_unique<Impl>();
+    KernelCore() {for(size_t i=0;i<impl->cores.size();++i) impl->cores[i]=std::make_unique<Kernel::PhysicalCore>(*this,i);}
+    bool IsMulticore() {return true;}
+    Core::System& System() {return system;}
+    Kernel::PhysicalCore& PhysicalCore(size_t index) {return *impl->cores.at(index);}
+    std::optional<GuestExecutionDrain> TryCloseGuestExecution(u32 poll_budget) @CLOSE@
+};
+struct PageTable {
+    Common::PageTable table;
+    Common::PageTable& GetImpl() {return table;}
+    Common::PageTable& GetImpl() const {return const_cast<Common::PageTable&>(table);}
+};
+class KProcess {
+public:
+    enum class State {Running,Terminated};
+    KernelCore& m_kernel;PageTable m_page_table;Backend backend;
+    std::atomic<unsigned> refs{1};bool initialized=true;State state=State::Running;
+    explicit KProcess(KernelCore& kernel):m_kernel{kernel} {}
+    bool Open() {++refs;return true;}
+    void Close() {--refs;}
+    bool IsInitialized() const {return initialized;}
+    State GetState() const {return state;}
+    PageTable& GetPageTable() {return m_page_table;}
+    const PageTable& GetPageTable() const {return m_page_table;}
+    Core::ArmInterface* GetArmInterface(size_t) {return &backend;}
+    std::optional<ProcessExecutionStop> TryStopGuestExecution(u32 poll_budget=64);
+};
+enum class StepState {None,StepPending,StepPerformed};
+enum class SuspendType {Debug};
+class KThread {
+public:
+    KProcess& process;StepState step{};
+    explicit KThread(KProcess& owner):process{owner} {}
+    KProcess* GetOwnerProcess() {return &process;}
+    bool HasDpc() {return false;}
+    bool IsTerminationRequested() {return false;}
+    [[noreturn]] void Exit() {std::abort();}
+    StepState GetStepState() {return step;}
+    void SetStepState(StepState value) {step=value;}
+    void RequestSuspend(SuspendType) {}
+};
+namespace Svc {
+inline std::function<void()> callback;
+void Call(Core::System&,unsigned) {if(callback) callback();}
+}
+PhysicalCore::PhysicalCore(KernelCore& kernel,size_t index):m_kernel{kernel},m_core_index{index} {}
+PhysicalCore::~PhysicalCore()=default;
+// @RUN@
+// @INTERRUPT@
+// @REQUEST@
+// @FACTORY@
+// @STOP_METHODS@
+}
+template<class Predicate> void Until(Predicate predicate) {
+    const auto end=std::chrono::steady_clock::now()+2s;
+    while(!predicate()) {assert(std::chrono::steady_clock::now()<end);std::this_thread::yield();}
+}
+int main() {
+    using R=Kernel::ProcessExecutionStop::Result;
+    for(bool step:{false,true}) { // Actual Run/Step: request is not acknowledgement.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};Kernel::KThread thread{process};
+        thread.step=step ? Kernel::StepState::StepPending : Kernel::StepState::None;
+        auto& core=kernel.PhysicalCore(0);
+        std::promise<void> unlocking,release;process.backend.unlock_entered=&unlocking;
+        process.backend.unlock_release=release.get_future().share();
+        std::thread cpu{[&] {core.RunThread(&thread);}};
+        Until([&] {return process.backend.running.load();});
+        auto stop=process.TryStopGuestExecution(4096);assert(stop && process.refs==2);
+        assert(stop->Poll()==R::Pending && "halt request must not acknowledge running backend");
+        unlocking.get_future().wait();
+        assert(stop->Poll()==R::Pending && "backend scope must retain through UnlockThread");
+        release.set_value();cpu.join();
+        assert(stop->Poll()==R::BackendsStopped && !Core::SchedulerTestAccess::Running(core));
+        assert(process.backend.stores==2 && process.backend.locks==1 && process.backend.unlocks==1);
+        const auto inits=process.backend.initializations.load();core.RunThread(&thread);
+        assert(process.backend.runs==1 && process.backend.initializations==inits);
+        assert(stop->GuestBackingAdmission()==Common::ProducerDrain::Result::Unknown);
+        assert(stop->CancelNoEffects());
+        auto next=process.TryStopGuestExecution();assert(next);
+        assert(!stop->CancelNoEffects());
+        assert(next->Poll()==R::BackendsStopped && next->CancelNoEffects());
+    }
+    { // Actual SVC callback remains a writer AFTER real backend exit: mandatory negative control.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};Kernel::KThread thread{process};
+        process.backend.svc=true;std::promise<void> in_svc,release;auto wait=release.get_future();
+        unsigned service_writes=0;
+        Kernel::Svc::callback=[&] {in_svc.set_value();wait.wait();++service_writes;};
+        std::thread cpu{[&] {kernel.PhysicalCore(0).RunThread(&thread);}};
+        in_svc.get_future().wait();auto stop=process.TryStopGuestExecution();assert(stop);
+        assert(stop->Poll()==R::BackendsStopped &&
+               "backend acknowledgement must not count a suspended SVC fiber");
+        assert(stop->GuestBackingAdmission()==Common::ProducerDrain::Result::Unknown);
+        release.set_value();cpu.join();assert(service_writes==1);
+        assert(stop->CancelNoEffects());Kernel::Svc::callback={};
+    }
+    { // Unsupported (e.g. blocking NCE signal handshake) is sticky Unknown, never synthetic success.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};Kernel::KThread thread{process};
+        process.backend.supported=false;
+        std::thread cpu{[&] {kernel.PhysicalCore(0).RunThread(&thread);}};
+        Until([&] {return process.backend.running.load();});
+        auto stop=process.TryStopGuestExecution();assert(stop);
+        assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
+        kernel.PhysicalCore(0).Interrupt();cpu.join();
+        assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
+    }
+    { // No wait on a core lock; budget exhaustion keeps closure quarantined.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};
+        auto stop=process.TryStopGuestExecution(1);assert(stop);
+        auto lock=Core::SchedulerTestAccess::HoldCore(kernel.PhysicalCore(2));
+        assert(stop->Poll()==R::Pending);assert(stop->Poll()==R::Unknown);
+        lock.unlock();assert(!stop->CancelNoEffects());
+    }
+    { // Moved-from and backing retirement cannot release another operation's closure.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};
+        auto original=process.TryStopGuestExecution();assert(original);
+        auto moved=std::move(*original);
+        assert(original->Poll()==R::Unknown && !original->CancelNoEffects());
+        assert(moved.Poll()==R::BackendsStopped);
+        kernel.system.device.buffer.epoch=std::make_shared<Common::GuestBackingEpoch>();
+        assert(moved.Poll()==R::Unknown && !moved.CancelNoEffects());
+    }
+    { // Exception still clears context and releases execution scope, never content admission.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};Kernel::KThread thread{process};
+        process.backend.throws=true;bool threw=false;
+        try {kernel.PhysicalCore(0).RunThread(&thread);} catch(const std::runtime_error&) {threw=true;}
+        assert(threw && !Core::SchedulerTestAccess::Running(kernel.PhysicalCore(0)));
+        assert(process.backend.unlocks==1);auto stop=process.TryStopGuestExecution();assert(stop);
+        assert(stop->Poll()==R::BackendsStopped && stop->CancelNoEffects());
+    }
+    std::cout<<"PASS actual backend scope, real stop entry/request bodies, SVC omitted-writer control, process retention and sticky uncertainty; injected backend, no native ARM proof\n";
+}

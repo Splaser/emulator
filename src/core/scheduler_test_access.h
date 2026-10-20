@@ -25,6 +25,10 @@ struct SchedulerTestAccess : SystemTestAccess {
         return memory.mapping_publications.Begin();
     }
     static auto EnterGuestExecution(Kernel::PhysicalCore& core) {return core.guest_execution.TryEnter();}
+    static bool BackendRunning(Kernel::PhysicalCore& core) {
+        std::scoped_lock lock{core.m_guard};
+        return core.m_arm_interface != nullptr;
+    }
     static bool VisitManagedMemory(Memory::Memory& memory, const std::function<void(Memory::Memory&)>& visit) {
         return memory.controlled_owner->TryVisit(visit);
     }

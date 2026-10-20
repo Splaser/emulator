@@ -17,6 +17,7 @@
 #include "core/hle/kernel/k_system_resource.h"
 #include "core/hle/kernel/k_thread.h"
 #include "core/hle/kernel/k_thread_local_page.h"
+#include "core/hle/kernel/process_execution_stop.h"
 #include "core/memory.h"
 
 namespace Kernel {
@@ -512,6 +513,9 @@ public:
     Core::Memory::Memory& GetMemory() {
         return m_memory;
     }
+    // Close all backend entry domains before requesting actual execution halt.
+    // Host services, raw aliases and mappings are separate, still-open prerequisites.
+    [[nodiscard]] std::optional<ProcessExecutionStop> TryStopGuestExecution(u32 poll_budget = 64);
 
     Core::ExclusiveMonitor& GetExclusiveMonitor() const {
         return *m_exclusive_monitor;

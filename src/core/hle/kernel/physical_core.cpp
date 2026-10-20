@@ -23,13 +23,15 @@ PhysicalCore::PhysicalCore(KernelCore& kernel, std::size_t core_index)
 PhysicalCore::~PhysicalCore() = default;
 
 void PhysicalCore::RunThread(Kernel::KThread* thread) {
-    const auto execution=guest_execution.TryEnter();
-    if(!execution) return; // Re-enter only after explicit no-effects cancellation.
     auto* process = thread->GetOwnerProcess();
     auto& system = m_kernel.System();
     auto* interface = process->GetArmInterface(m_core_index);
 
-    interface->Initialize();
+    {
+        const auto initialization = guest_execution.TryEnter();
+        if (!initialization) return;
+        interface->Initialize();
+    }
 
     const auto EnterContext = [&]() {
         // Lock the core context.
@@ -80,10 +82,16 @@ void PhysicalCore::RunThread(Kernel::KThread* thread) {
         // Otherwise, run the thread.
         Core::HaltReason hr{};
         {
+            // Count actual backend execution, including Lock/UnlockThread. A SVC
+            // can yield its fiber indefinitely after this scope and is a separate
+            // CPU/service producer; it must not masquerade as a running backend.
+            const auto execution = guest_execution.TryEnter();
+            if (!execution) return;
             // If we were interrupted, exit immediately.
             if (!EnterContext()) {
                 return;
             }
+            const auto exit_context = SCOPE_GUARD { ExitContext(); };
 
             if (thread->GetStepState() == StepState::StepPending) {
                 hr = interface->StepThread(thread);
@@ -96,7 +104,6 @@ void PhysicalCore::RunThread(Kernel::KThread* thread) {
                 hr = interface->RunThread(thread);
             }
 
-            ExitContext();
         }
 
         // Determine why we stopped.
@@ -245,6 +252,16 @@ void PhysicalCore::Interrupt() {
 
     // Interrupt the CPU.
     arm_interface->SignalInterrupt(thread);
+}
+
+PhysicalCore::StopRequest PhysicalCore::TryRequestGuestStop() {
+    std::unique_lock lock{m_guard, std::try_to_lock};
+    if (!lock.owns_lock()) return StopRequest::Contended;
+    m_is_interrupted = true;
+    m_on_interrupt.notify_one();
+    if (m_arm_interface == nullptr) return StopRequest::Requested;
+    return m_arm_interface->RequestNonblockingGuestStop(m_current_thread)
+        ? StopRequest::Requested : StopRequest::Unsupported;
 }
 
 void PhysicalCore::ClearInterrupt() {

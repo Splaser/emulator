@@ -59,6 +59,11 @@ add_test(NAME native_f3_transfer COMMAND controlled_cpu_scheduler_tests "[f3-tra
 set_tests_properties(native_f3_transfer PROPERTIES TIMEOUT 30)
 add_test(NAME native_f3_provenance COMMAND controlled_cpu_scheduler_tests "[f3-provenance]")
 set_tests_properties(native_f3_provenance PROPERTIES TIMEOUT 30)
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND ARCHITECTURE_x86_64)
+    add_test(NAME native_process_execution_stop
+             COMMAND controlled_cpu_scheduler_tests "[process-execution-stop]")
+    set_tests_properties(native_process_execution_stop PROPERTIES TIMEOUT 45)
+endif()
 
 if (CITRON_USE_PRECOMPILED_HEADERS)
     target_precompile_headers(tests PRIVATE precompiled_headers.h)

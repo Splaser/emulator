@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include "core/hle/kernel/process_execution_stop.h"
+
+#include "common/published_guest_chunk.h"
+#include "core/core.h"
+#include "core/device_memory.h"
+#include "core/hle/kernel/k_process.h"
+#include "core/hle/kernel/kernel.h"
+
+namespace Kernel {
+ProcessExecutionStop::ProcessExecutionStop(
+    KScopedAutoObject<KProcess>&& process_, KernelCore& kernel_, Common::PageTable* table_,
+    std::shared_ptr<const Common::GuestBackingEpoch> backing_,
+    GuestExecutionDrain&& execution_, u32 budget)
+    : process{std::move(process_)}, kernel{kernel_}, page_table{table_},
+      backing{std::move(backing_)}, execution{std::move(execution_)}, remaining{budget} {}
+
+ProcessExecutionStop::ProcessExecutionStop(ProcessExecutionStop&&) = default;
+ProcessExecutionStop::~ProcessExecutionStop() = default;
+
+bool ProcessExecutionStop::OwnerCurrent() const {
+    const auto* owner = process.GetPointerUnsafe();
+    return owner && !released && owner_thread == std::this_thread::get_id() &&
+           owner->IsInitialized() &&
+           backing && backing->alive.load(std::memory_order_acquire) &&
+           kernel.System().DeviceMemory().buffer.BackingEpoch() == backing &&
+           std::addressof(owner->GetPageTable().GetImpl()) == page_table;
+}
+
+ProcessExecutionStop::Result ProcessExecutionStop::Poll() {
+    if (unknown || !OwnerCurrent()) {
+        Quarantine();
+        return Result::Unknown;
+    }
+    if (stopped) return Result::BackendsStopped;
+    if (!remaining) {
+        Quarantine();
+        return Result::Unknown;
+    }
+    --remaining;
+    bool pending = false;
+    for (size_t i = 0; i < requested.size(); ++i) {
+        if (requested[i]) continue;
+        const auto result = kernel.PhysicalCore(i).TryRequestGuestStop();
+        if (result == PhysicalCore::StopRequest::Unsupported) {
+            Quarantine();
+            return Result::Unknown;
+        }
+        requested[i] = result == PhysicalCore::StopRequest::Requested;
+        pending |= !requested[i];
+    }
+    const auto drained = execution.Poll();
+    if (drained == Common::ProducerDrain::Result::Unknown) {
+        Quarantine();
+        return Result::Unknown;
+    }
+    if (pending || drained == Common::ProducerDrain::Result::Pending) return Result::Pending;
+    stopped = true;
+    return Result::BackendsStopped;
+}
+
+bool ProcessExecutionStop::CancelNoEffects() {
+    if (unknown || !OwnerCurrent() || Poll() != Result::BackendsStopped) return false;
+    if (!execution.CancelNoEffects()) {
+        Quarantine();
+        return false;
+    }
+    released = true;
+    return true;
+}
+
+void ProcessExecutionStop::Quarantine() noexcept {
+    unknown = true;
+    execution.Quarantine();
+}
+} // namespace Kernel

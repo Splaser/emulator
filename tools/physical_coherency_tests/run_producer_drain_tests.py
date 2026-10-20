@@ -50,14 +50,15 @@ def body(path,marker):
         depth+=(text[end]=='{')-(text[end]=='}');end+=1
     return text[start:end]
 entry=body('src/core/hle/kernel/physical_core.cpp','void PhysicalCore::RunThread(')
-entry=entry[1:entry.index('auto* process =')]
+start=entry.index('const auto execution = guest_execution.TryEnter();')
+entry=entry[start:entry.index('// If we were interrupted, exit immediately.',start)]
 factory=body('src/core/hle/kernel/kernel.cpp','KernelCore::TryCloseGuestExecution(')
 visit=body('src/core/controlled_cpu_page.h','bool TryVisit(Visit&& visit) const')
 fixture=(root/'tools/physical_coherency_tests/producer_drain_integration.cpp.in').read_text()
 fixture=fixture.replace('@GUEST_ENTRY@',entry).replace('@KERNEL_BODY@',factory).replace('@VISIT_BODY@',visit)
 run('integration',fixture,True)
 integration_mutants=[
- ('backend-bypasses-close','if(!execution) return;',''),
+ ('backend-bypasses-close','if (!execution) return;',''),
  ('host-bypasses-close','if(!execution) return false;',''),
  ('omitted-core','i<drain.cores.size()','i+1<drain.cores.size()'),
  ('early-guest-cancel','if(Poll()!=Result::DrainedSubset) return false;','if(Poll()==Result::Unknown) return false;'),

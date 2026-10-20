@@ -154,6 +154,98 @@ void EndThread(Kernel::KThread* thread) {
     thread->Close();
 }
 
+TEST_CASE("Process stop acknowledges an actual Dynarmic store loop",
+          "[.][process-execution-stop]") {
+#if defined(__linux__) && defined(ARCHITECTURE_x86_64)
+    Settings::values.use_multi_core.SetValue(true);
+    Settings::values.use_asynchronous_gpu_emulation.SetValue(true);
+    Settings::values.use_uma_zero_copy.SetValue(false);
+    Settings::values.cpu_debug_mode.SetValue(false);
+    Core::System system;
+    Window window;
+    system.Initialize();
+    Access::Initialize(system, window, [&](Core::System& initialized) {
+        return std::make_unique<TransferRenderer>(window, initialized);
+    });
+    SCOPE_EXIT { system.ShutdownMainProcess(); };
+    Process owner{system};
+    auto* process = owner.process;
+    process->InitializeInterfaces();
+    auto& memory = process->GetMemory();
+    const auto code = owner.heap + 4096;
+    const auto data = owner.heap + 8192;
+    // str w1,[x0]; add w1,w1,#1; b -8. Real AArch64 instructions executed by Dynarmic.
+    memory.Write32(code, 0xb9000001);
+    memory.Write32(code + 4, 0x11000421);
+    memory.Write32(code + 8, 0x17fffffe);
+    memory.Write32(data, 0);
+    auto* thread = Kernel::KThread::Create(system.Kernel());
+    REQUIRE(thread);
+    Kernel::KScopedResourceReservation reservation{process, Kernel::Svc::LimitableResource::ThreadCountMax};
+    REQUIRE(reservation.Succeeded());
+    REQUIRE(R_SUCCEEDED(Kernel::KThread::InitializeServiceThread(
+        system, thread, [] {}, 16, 0, process)));
+    Kernel::KThread::Register(system.Kernel(), thread);
+    reservation.Commit();
+    // Do not dispatch this KThread on a scheduler fiber. Run its real backend on
+    // a dedicated host thread so the test can orchestrate the external stop.
+    SCOPE_EXIT { EndThread(thread); };
+    Kernel::Svc::ThreadContext context{};
+    context.pc = GetInteger(code);
+    context.r[0] = GetInteger(data);
+    context.r[1] = 1;
+    context.sp = GetInteger(owner.heap + 65536);
+    process->GetArmInterface(0)->SetContext(context);
+    auto& core = system.Kernel().PhysicalCore(0);
+    core.ClearInterrupt();
+    std::exception_ptr error;
+    std::thread backend{[&] {
+        try { core.RunThread(thread); } catch (...) { error = std::current_exception(); }
+    }};
+    SCOPE_EXIT { core.Interrupt(); if (backend.joinable()) backend.join(); };
+    // Kernel-mediated observation avoids using a host C++ load racing the JIT's
+    // native store as the progress witness. This pointer is not an exclusion lease.
+    u32 progress{};
+    iovec local{&progress, sizeof(progress)};
+    iovec remote{memory.GetPointer(data), sizeof(progress)};
+    REQUIRE(Until([&] {
+        return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) ==
+                   static_cast<ssize_t>(sizeof(progress)) && progress != 0;
+    }));
+    REQUIRE(Access::BackendRunning(core));
+    const auto refs = process->GetReferenceCount();
+    auto stop = process->TryStopGuestExecution(4096);
+    REQUIRE(stop.has_value());
+    REQUIRE(process->GetReferenceCount() >= refs + 1);
+    Kernel::ProcessExecutionStop::Result result{};
+    REQUIRE(Until([&] {
+        result = stop->Poll();
+        return result != Kernel::ProcessExecutionStop::Result::Pending;
+    }));
+    REQUIRE(result == Kernel::ProcessExecutionStop::Result::BackendsStopped);
+    backend.join();
+    if (error) std::rethrow_exception(error);
+    REQUIRE_FALSE(Access::BackendRunning(core));
+    const auto value = memory.Read32(data);
+    REQUIRE(value != 0);
+    std::this_thread::sleep_for(10ms);
+    REQUIRE(memory.Read32(data) == value);
+    REQUIRE(stop->GuestBackingAdmission() == Common::ProducerDrain::Result::Unknown);
+    core.RunThread(thread); // Closed real entry cannot restart the store loop.
+    REQUIRE(memory.Read32(data) == value);
+    REQUIRE(stop->CancelNoEffects());
+    auto next = process->TryStopGuestExecution(64);
+    REQUIRE(next.has_value());
+    REQUIRE_FALSE(stop->CancelNoEffects()); // Old operation cannot reopen the new domain.
+    REQUIRE(next->Poll() == Kernel::ProcessExecutionStop::Result::BackendsStopped);
+    REQUIRE(next->CancelNoEffects());
+    std::cout << "PASS native process-owned Dynarmic execution halt/exit, stable real guest backing, "
+                 "closed re-entry and stale-cancel isolation; service/GPU exclusion remains Unknown\n";
+#else
+    FAIL("Native execution-stop witness requires Linux x86-64 Dynarmic");
+#endif
+}
+
 TEST_CASE("Controlled writes cross real guest fibers and process finalization",
           "[controlled-cpu][native]") {
     Settings::values.use_multi_core.SetValue(true);

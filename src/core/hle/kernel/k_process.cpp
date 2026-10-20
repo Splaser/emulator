@@ -9,6 +9,7 @@
 #include "core/arm/dynarmic/arm_dynarmic.h"
 #include "core/arm/dynarmic/dynarmic_exclusive_monitor.h"
 #include "core/core.h"
+#include "core/device_memory.h"
 #include "core/gpu_dirty_memory_manager.h"
 #include "core/hle/kernel/k_process.h"
 #include "core/hle/kernel/k_scoped_resource_reservation.h"
@@ -25,6 +26,19 @@
 #endif
 
 namespace Kernel {
+
+std::optional<ProcessExecutionStop> KProcess::TryStopGuestExecution(u32 poll_budget) {
+    if (!IsInitialized() || !poll_budget || poll_budget > 4096)
+        return std::nullopt;
+    auto backing = m_kernel.System().DeviceMemory().buffer.BackingEpoch();
+    if (!backing || !backing->alive.load(std::memory_order_acquire)) return std::nullopt;
+    KScopedAutoObject<KProcess> owner{this};
+    auto* table = std::addressof(m_page_table.GetImpl());
+    auto execution = m_kernel.TryCloseGuestExecution(poll_budget);
+    if (!execution) return std::nullopt;
+    return ProcessExecutionStop{std::move(owner), m_kernel, table, std::move(backing),
+                                 std::move(*execution), poll_budget};
+}
 
 namespace {
 

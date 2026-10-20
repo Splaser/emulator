@@ -34,6 +34,13 @@ int main(){
     {Gate g;auto first=g.TryClose();assert(first&&first->ResumeNoEffects());auto second=g.TryClose();assert(second);
      assert(!first->ResumeNoEffects());assert(!g.TryEnter());assert(second->ResumeNoEffects());}
     assert(Gate::GuestBackingAdmission()==R::Unknown); // No owner/alias declaration is a certificate.
+    {Gate g;auto original=g.TryClose();assert(original);
+     auto moved=std::move(*original);
+     assert(original->Poll()==R::Unknown);assert(!original->ResumeNoEffects());
+     original->Quarantine();assert(moved.Poll()==R::DrainedSubset);
+     assert(moved.ResumeNoEffects());auto next=g.TryClose();assert(next);
+     original->Quarantine();assert(!original->ResumeNoEffects());
+     assert(!g.TryEnter());assert(next->ResumeNoEffects());}
 #if defined(__linux__)
     { // Actual missed-alias counterexample, NOT a successful exclusion experiment.
      const int fd=memfd_create("drain-alias-negative",MFD_CLOEXEC);assert(fd>=0);assert(ftruncate(fd,4096)==0);
