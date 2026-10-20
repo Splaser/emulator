@@ -1,5 +1,39 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: cross-platform compilation recovery
+
+After syncing upstream `598b700884`, source `d67743a8c7` fixes a missing direct
+`vulkan_device.h` dependency in `vk_scheduler.h`. The inline reconciliation
+template calls `Device::GetGraphicsQueue()` on a non-dependent `Device` object;
+a forward declaration is insufficient even when that template is not instantiated.
+`present/window_adapt_pass.cpp` reaches this header before the Device definition.
+
+Historical PR build logs at `857e8eadc9` confirm this exact compiler failure in
+Android run `39274857043` (both variants), Linux run `39274852319` (three variants)
+and the Clangtron job of Windows run `39274847896`. These are compile failures,
+not F2/F3 runtime failures. The earlier Linux GCC-only acceptance did not certify
+these Clang translation units. The fix supplies the definition directly without
+changing the planner's queue check, admission or content semantics.
+
+The integration workflow now compiles that presentation translation unit early
+in both jobs. The Android configuration explicitly disables PCH, so the Clang
+check cannot rely on a precompiled Device definition. Full Linux/Android run
+[39352517047](https://github.com/Splaser/emulator/actions/runs/39352517047) targets
+exact source `d67743a8c7`; acceptance is pending. Recover its actual results before
+another dispatch or further runtime implementation. No local full build was run.
+
+Other historical failures need separate disposition: the native Windows clang-cl
+job in `39274847896` rejects an unused `/std:c++latest` alongside
+`/clang:-std=c++23`; macOS run `39274861951` fails during Qt setup because its
+selected Python has no `aqt` module. This header repair does not certify either
+of those jobs. Raw failed-job logs are retained under ignored
+`.diagnostics/pr375-build-repair/`.
+
+The next ordinary-guest gate remains outer PTE/process/host-service publication
+closure and lifetime retention, then device/GPU owner completeness, as described
+in `M4_F3_CPU_PREPARATION_LIFETIME.md`. No ordinary routing, production guest
+admission or physical latest-writer authority is enabled; F2/F3 remain Open.
+
 Initial checkpoint date: 2026-10-16, at the user's requested 5-hour usage
 threshold. Evening continuation established a stable native F3 reproduction.
 This is a continuation checkpoint, not M4 acceptance or a production F3 fix.
