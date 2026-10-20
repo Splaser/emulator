@@ -1,5 +1,27 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: home-machine resume and restored Dynarmic include boundary
+
+Both paused Linux runs have completed unsuccessfully: `39391213895` at
+`5a6eee7b58` and `39394434521` at `a2365189ec`. Their first native build failure
+is the same missing `common/x64/xbyak.h` include in the restored pinned Dynarmic
+`backend/x64/block_of_code.h`. The newer run's complete failed-build log contains
+no other distinct compiler diagnostic. Neither run accepts process execution stop.
+
+A forwarding compatibility header restores that legacy include path while reusing
+`dynarmic_xbyak_abi.h` and its existing ABI/util split. It introduces no second
+Common::X64 definitions, changes no container macros, and leaves both dependency
+provider choices and the Dynarmic gitlink unchanged. The native store-loop CTest
+and the existing full Linux gate are the required validation. A local Windows
+syntax probe was stopped by unavailable Boost development headers; it is not a
+successful compiler check. No local Android build is requested.
+
+Continue recovering the exact new Linux source/run before extending the four
+M4 gates below. NCE, service/raw/GPU exclusion, guest-backed admission and F2/F3
+remain Open; this is build recovery only. Local main was separately fast-forwarded
+to `b6a2ce9488`; the active PR worktree was fast-forwarded to `c41887b314` before
+this repair. No newer upstream changes are merged by this resumption.
+
 ## 2026-10-20: pause checkpoint for quota reset
 
 Source and workflow changes are committed and pushed on
