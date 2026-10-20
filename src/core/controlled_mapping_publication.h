@@ -23,6 +23,10 @@ class ControlledMappingPublication {
     std::shared_ptr<State> state;
 
 public:
+    class Refused : public std::runtime_error {
+    public:
+        using std::runtime_error::runtime_error;
+    };
     class Entry {
         friend class ControlledMappingPublication;
         // Release the lifetime lock before the counted entry and retained state.
@@ -58,10 +62,10 @@ public:
     [[nodiscard]] Entry Begin() const {
         if (!state) return {};
         auto counted = state->entries.TryEnter();
-        if (!counted) throw std::runtime_error("controlled mapping publication closed");
+        if (!counted) throw Refused("controlled mapping publication closed");
         std::shared_lock lifetime{state->lifetime, std::try_to_lock};
         if (!lifetime.owns_lock() || state->retired)
-            throw std::runtime_error("controlled mapping publication retired or contended");
+            throw Refused("controlled mapping publication retired or contended");
         return Entry{state, std::move(*counted), std::move(lifetime)};
     }
     [[nodiscard]] auto TryClose(u32 poll_budget = 64) const {

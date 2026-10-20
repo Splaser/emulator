@@ -532,6 +532,7 @@ void KPageTableBase::Finalize() {
     // Finalize memory blocks.
     {
         KScopedLightLock lk(m_general_lock);
+        this->FinalizeIncompleteMapGroups();
         m_memory_block_manager.Finalize(m_memory_block_slab_manager, std::move(BlockCallback));
     }
 
@@ -558,6 +559,20 @@ void KPageTableBase::Finalize() {
 
     // Close the backing page table, as the destructor is not called for guest objects.
     m_impl.reset();
+}
+
+void KPageTableBase::FinalizeIncompleteMapGroups() {
+    assert(this->IsLockedByCurrentThread());
+    while (m_incomplete_map_groups) {
+        auto& pending = *m_incomplete_map_groups;
+        // No post-success block metadata was published for this group. Detach its
+        // complete range before the normal metadata walk can rediscover its PTEs.
+        m_memory->UnmapRegion(*m_impl, pending.address, pending.num_pages * PageSize,
+                              pending.separate_heap);
+        pending.pages.CloseAndReset();
+        auto next = std::move(pending.next);
+        m_incomplete_map_groups = std::move(next);
+    }
 }
 
 KProcessAddress KPageTableBase::GetRegionAddress(Svc::MemoryState state) const {
@@ -6037,6 +6052,9 @@ Result KPageTableBase::Operate(PageLinkedList* page_list, KProcessAddress virt_a
                                const KPageProperties properties, OperationType operation,
                                bool reuse_ll) {
     assert(this->IsLockedByCurrentThread());
+    if (m_incomplete_map_groups) {
+        throw std::runtime_error("page table has an incomplete mapping transaction");
+    }
     assert(num_pages > 0);
     assert(Common::IsAligned(GetInteger(virt_addr), PageSize));
     assert(this->ContainsPages(virt_addr, num_pages));
@@ -6098,6 +6116,9 @@ Result KPageTableBase::Operate(PageLinkedList* page_list, KProcessAddress virt_a
                                const KPageProperties properties, OperationType operation,
                                bool reuse_ll) {
     assert(this->IsLockedByCurrentThread());
+    if (m_incomplete_map_groups) {
+        throw std::runtime_error("page table has an incomplete mapping transaction");
+    }
     assert(Common::IsAligned(GetInteger(virt_addr), PageSize));
     assert(num_pages > 0);
     assert(num_pages == page_group.GetNumPages());
@@ -6113,15 +6134,39 @@ Result KPageTableBase::Operate(PageLinkedList* page_list, KProcessAddress virt_a
 
         // We want to maintain a new reference to every page in the group.
         KScopedPageGroup spg(page_group, operation == OperationType::MapGroup);
-
+        // Prepare durable recovery bookkeeping before the first mapping effect.
+        auto pending = std::make_unique<IncompleteMapGroup>(
+            m_kernel, m_block_info_manager, virt_addr, num_pages, separate_heap);
         for (const auto& node : page_group) {
-            const size_t size{node.GetNumPages() * PageSize};
+            R_TRY(pending->pages.AddBlock(node.GetAddress(), node.GetNumPages()));
+        }
+        size_t completed_nodes = 0;
+        auto retain = [&] {
+            spg.CancelClose();
+            pending->next = std::move(m_incomplete_map_groups);
+            m_incomplete_map_groups = std::move(pending);
+        };
+        try {
+            for (const auto& node : page_group) {
+                const size_t size{node.GetNumPages() * PageSize};
 
-            // Map the pages.
-            m_memory->MapMemoryRegion(*m_impl, virt_addr, size, node.GetAddress(),
-                                      ConvertToMemoryPermission(properties.perm), separate_heap);
+                // Map the pages.
+                m_memory->MapMemoryRegion(*m_impl, virt_addr, size, node.GetAddress(),
+                                          ConvertToMemoryPermission(properties.perm), separate_heap);
 
-            virt_addr += size;
+                virt_addr += size;
+                ++completed_nodes;
+            }
+        } catch (const Core::Memory::ControlledMappingPublication::Refused&) {
+            // A known first-entry refusal has no effects. A published prefix
+            // still owns its references and must be detached by teardown.
+            if (completed_nodes != 0) retain();
+            throw;
+        } catch (...) {
+            // Unknown effects include the attempted node; retain the whole group,
+            // including untouched suffix references, under explicit table ownership.
+            retain();
+            throw;
         }
 
         // We succeeded! We want to persist the reference to the pages.

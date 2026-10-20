@@ -15,6 +15,7 @@
 #include "core/hle/kernel/k_memory_block_manager.h"
 #include "core/hle/kernel/k_memory_layout.h"
 #include "core/hle/kernel/k_memory_manager.h"
+#include "core/hle/kernel/k_page_group.h"
 #include "core/hle/kernel/k_typed_address.h"
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/result.h"
@@ -254,6 +255,19 @@ private:
     mutable KLightLock m_map_physical_memory_lock;
     KLightLock m_device_map_lock;
     std::unique_ptr<Common::PageTable> m_impl{};
+    struct IncompleteMapGroup {
+        KProcessAddress address;
+        size_t num_pages;
+        bool separate_heap;
+        KPageGroup pages;
+        std::unique_ptr<IncompleteMapGroup> next;
+        IncompleteMapGroup(KernelCore& kernel, KBlockInfoManager* manager,
+                           KProcessAddress address_, size_t num_pages_, bool separate_heap_)
+            : address{address_}, num_pages{num_pages_}, separate_heap{separate_heap_},
+              pages{kernel, manager} {}
+    };
+    std::unique_ptr<IncompleteMapGroup> m_incomplete_map_groups;
+    void FinalizeIncompleteMapGroups();
     Core::Memory::Memory* m_memory{};
     KMemoryBlockManager m_memory_block_manager{};
     u32 m_allocate_option{};

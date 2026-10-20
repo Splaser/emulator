@@ -125,6 +125,7 @@ struct KPageTableBase {
     Core::Memory::Memory* m_memory;
     KBlockInfoManager blocks;
     bool non_heap{};
+    bool m_incomplete_map_groups{};
     bool IsLockedByCurrentThread() const {return true;}
     bool ContainsPages(u64 address,size_t count) const {return address==4096 && count==1;}
     auto* GetBlockInfoManager() {return &blocks;}

@@ -1,5 +1,16 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: MapGroup ownership transaction
+
+See the [resource disposition table and teardown design](M4_F3_MAPPING_OWNERSHIP_TRANSACTIONS.md).
+Failed group publication now has a PageTable-owned copied descriptor record and
+retained operation references. A known refusal before any effects still closes
+references. Prefix success or Unknown quarantines further Operate calls; cleanup
+detaches the full range before closing references and normal block finalization.
+Linux extracted-body repeats, descriptor-failure control, pending-cleanup control
+and reference-release mutant pass. Controlled cleanup is the next separate commit;
+ordinary process enrollment and full owner completeness remain disabled.
+
 ## 2026-10-20: Finalize bookkeeping repair
 
 KMemoryBlockManager now commits record removal only after its cleanup callback

@@ -19,6 +19,7 @@ paths = ['src/core/hle/kernel/k_page_table_base.cpp',
          'src/core/controlled_mapping_publication.h', 'src/common/producer_drain.h',
          'src/core/hle/kernel/k_memory_block_manager.cpp',
          'tools/physical_coherency_tests/run_cross_call_ownership_audit.py']
+paths.append('src/core/hle/kernel/k_page_table_base.h')
 
 
 def extract(path, marker):
@@ -36,6 +37,9 @@ operate = extract(paths[0], 'Result KPageTableBase::Operate(PageLinkedList* page
 scoped = extract(paths[1], 'class KScopedPageGroup {') + ';'
 wrapper = extract(paths[2], 'void Memory::MapMemoryRegion(')
 finalize = extract(paths[5], 'void KMemoryBlockManager::Finalize(')
+pending = extract(paths[7], 'struct IncompleteMapGroup {') + ';'
+cleanup = extract(paths[0], 'void KPageTableBase::FinalizeIncompleteMapGroups(')
+unmap = extract(paths[2], 'void Memory::UnmapRegion(')
 source = r'''
 #include <array>
 #include <cassert>
@@ -51,6 +55,7 @@ using Result=int;
 constexpr u64 PageSize=4096;
 constexpr u64 GetInteger(u64 value) {return value;}
 #define R_SUCCEED() return 0
+#define R_TRY(expr) do {const auto result=(expr);if(result) return result;} while(false)
 namespace Common {
 using ProcessAddress=u64;
 using PhysicalAddress=u64;
@@ -60,6 +65,7 @@ struct PageTable {std::array<bool,2> mapped{};};
 struct Impl {
     unsigned calls{};
     bool throw_after_effect{};
+    void UnmapRegion(Common::PageTable& table,u64,u64,bool) {table.mapped={false,false};}
     void MapMemoryRegion(Common::PageTable& table,u64,u64,u64 phys,
                          Common::MemoryPermission,bool) {
         ++calls;table.mapped.at(phys/PageSize)=true;
@@ -73,8 +79,10 @@ struct Memory {
     Memory(Impl* target,bool controlled):impl{target},mapping_publications{controlled} {}
     void MapMemoryRegion(Common::PageTable&,Common::ProcessAddress,u64,u64,
                          Common::MemoryPermission,bool);
+    void UnmapRegion(Common::PageTable&,Common::ProcessAddress,u64,bool);
 };
 // @WRAPPER@
+// @UNMAP@
 }
 namespace Kernel {
 using KProcessAddress=u64;
@@ -85,32 +93,52 @@ Common::MemoryPermission ConvertToMemoryPermission(unsigned) {return Common::Mem
 struct Node {
     unsigned index;
     Core::Memory::ControlledMappingPublication* close_before{};
+    unsigned* calls{};
     size_t GetNumPages() const {
         // Deterministic closure BETWEEN completed Memory calls; no shared-lock recursion.
-        if(close_before) close_before->Retire();
+        if(close_before && calls && *calls) close_before->Retire();
         return 1;
     }
     u64 GetAddress() const {return index*PageSize;}
 };
+struct KernelCore {};
+struct KBlockInfoManager {};
+static std::array<unsigned,2> physical_refs;
+static unsigned opens,first_opens,closes;
+static bool fail_descriptor;
 struct KPageGroup {
-    std::array<Node,2> nodes{{{0, nullptr},{1, nullptr}}};
-    mutable std::array<unsigned,2> refs{};
-    mutable unsigned opens{},first_opens{},closes{};
+    std::vector<Node> nodes{{0, nullptr, nullptr},{1, nullptr, nullptr}};
+    std::array<unsigned,2>& refs=physical_refs;
+    unsigned &opens=Kernel::opens, &first_opens=Kernel::first_opens, &closes=Kernel::closes;
+    KPageGroup() {physical_refs={};opens=first_opens=closes=0;}
+    KPageGroup(KernelCore&,KBlockInfoManager*) {nodes.clear();}
     size_t GetNumPages() const {return 2;}
     auto begin() const {return nodes.begin();}
     auto end() const {return nodes.end();}
-    void Open() const {++opens;for(auto& ref:refs) ++ref;}
-    void OpenFirst() const {++first_opens;for(auto& ref:refs) {assert(ref==0);++ref;}}
-    void Close() const {++closes;for(auto& ref:refs) {assert(ref);--ref;}}
+    void Open() const {++opens;for(auto& node:nodes) ++refs[node.index];}
+    void OpenFirst() const {++first_opens;for(auto& node:nodes) {assert(refs[node.index]==0);++refs[node.index];}}
+    void Close() const {++closes;for(auto& node:nodes) {assert(refs[node.index]);--refs[node.index];}}
+    void CloseAndReset() {Close();nodes.clear();}
+    Result AddBlock(u64 address,size_t) {
+        if(fail_descriptor && address==PageSize) return 7;
+        nodes.push_back({unsigned(address/PageSize),nullptr,nullptr});return 0;
+    }
 };
 // @SCOPED@
 struct KPageTableBase {
     Common::PageTable* m_impl;
     Core::Memory::Memory* m_memory;
+    KernelCore m_kernel;
+    KBlockInfoManager* m_block_info_manager{};
+    // @PENDING@
+    std::unique_ptr<IncompleteMapGroup> m_incomplete_map_groups;
+    KPageTableBase(Common::PageTable* pte,Core::Memory::Memory* memory):m_impl{pte},m_memory{memory} {}
+    void FinalizeIncompleteMapGroups();
     bool IsLockedByCurrentThread() const {return true;}
     Result Operate(PageLinkedList*,u64,size_t,const KPageGroup&,KPageProperties,OperationType,bool);
 };
 // @OPERATE@
+// @CLEANUP@
 struct KMemoryBlock {
     u64 address;
     u64 GetAddress() const {return address;}
@@ -144,28 +172,47 @@ int main() {
     for(auto operation:{O::MapGroup,O::MapFirstGroup,O::MapFirstGroupPhysical}) {
         // Success, refusal before first node, close between nodes, uncertain first node,
         // and ordinary untracked control.
-        for(unsigned mode=0;mode<5;++mode) {
+        for(unsigned mode=0;mode<7;++mode) {
             Common::PageTable pte;Impl impl;
-            Core::Memory::Memory memory{&impl,mode!=4};
+            Core::Memory::Memory memory{&impl,mode!=4 && mode!=5};
             Kernel::KPageTableBase table{&pte,&memory};Kernel::KPageGroup pg;
             if(mode==1) memory.mapping_publications.Retire();
-            if(mode==2 || mode==4) pg.nodes[1].close_before=&memory.mapping_publications;
-            impl.throw_after_effect=mode==3;
-            bool threw=false;
-            try {assert(table.Operate(nullptr,PageSize,2,pg,{},operation,false)==0);}
+            if(mode==2 || mode==4) {
+                pg.nodes[1].close_before=&memory.mapping_publications;
+                pg.nodes[1].calls=&impl.calls;
+            }
+            impl.throw_after_effect=mode==3 || mode==5;
+            Kernel::fail_descriptor=mode==6;
+            bool threw=false;Result result=-1;
+            try {result=table.Operate(nullptr,PageSize,2,pg,{},operation,false);}
             catch(const std::runtime_error&) {threw=true;}
             assert(pg.opens==(operation==O::MapGroup ? 1u : 0u));
             assert(pg.first_opens==(operation==O::MapGroup ? 0u : 1u));
             if(mode==0 || mode==4) {
-                assert(!threw && impl.calls==2 && pte.mapped[0] && pte.mapped[1]);
+                assert(!threw && result==0 && impl.calls==2 && pte.mapped[0] && pte.mapped[1]);
                 assert(pg.refs[0]==1 && pg.refs[1]==1 && pg.closes==0);
             } else if(mode==1) {
                 assert(threw && impl.calls==0 && !pte.mapped[0] && !pte.mapped[1]);
                 assert(pg.refs[0]==0 && pg.refs[1]==0 && pg.closes==1);
+            } else if(mode==6) {
+                assert(!threw && result==7 && impl.calls==0 && pg.refs[0]==0 &&
+                       pg.refs[1]==0 && pg.closes==1 && !table.m_incomplete_map_groups);
             } else {
                 assert(threw && impl.calls==1 && pte.mapped[0] && !pte.mapped[1]);
-                assert(pg.refs[0]==0 && pg.refs[1]==0 && pg.closes==1 &&
-                       "OPEN defect: published prefix lost group ownership");
+                assert(pg.refs[0]==1 && pg.refs[1]==1 && pg.closes==0 &&
+                       table.m_incomplete_map_groups &&
+                       "failed transaction must retain mapping references and record");
+                bool refused=false;
+                try {table.Operate(nullptr,PageSize,2,pg,{},operation,false);}
+                catch(const std::runtime_error&) {refused=true;}
+                assert(refused && impl.calls==1 && pg.refs[0]==1);
+                refused=false;
+                try {table.FinalizeIncompleteMapGroups();}
+                catch(const Core::Memory::ControlledMappingPublication::Refused&) {refused=true;}
+                if(mode==5) {
+                    assert(!refused && !table.m_incomplete_map_groups && !pte.mapped[0] &&
+                           pg.refs[0]==0 && pg.refs[1]==0 && pg.closes==1);
+                } else assert(refused && table.m_incomplete_map_groups && pg.refs[0]==1);
             }
         }
     }
@@ -196,10 +243,11 @@ int main() {
             assert(slab.freed==2 && effects[0] && effects[1] && manager.m_memory_block_tree.empty());
         } else assert(!threw && callbacks==2 && slab.freed==2 && manager.m_memory_block_tree.empty());
     }
-    std::cout<<"PASS cross-call audit: MapGroup still OPEN, Finalize records retained; injected collaborators only\n";
+    std::cout<<"PASS cross-call audit: MapGroup references and Finalize records retained; injected collaborators only\n";
 }
 '''
-for marker, body in [('WRAPPER', wrapper), ('SCOPED', scoped), ('OPERATE', operate), ('FINALIZE', finalize)]:
+for marker, body in [('WRAPPER', wrapper), ('SCOPED', scoped), ('OPERATE', operate),
+                     ('FINALIZE', finalize), ('PENDING', pending), ('CLEANUP', cleanup), ('UNMAP', unmap)]:
     source = source.replace('// @' + marker + '@', body)
 cpp = out / 'audit.cpp'
 cpp.write_text(source)
@@ -213,18 +261,13 @@ for repeat in range(1, 4):
     assert result.returncode == 0 and 'PASS cross-call audit:' in result.stdout, result
     print(result.stdout.strip(), flush=True)
 # Sensitivity controls are deliberately incomplete counterfactuals, not proposed repairs.
-retained = operate.replace('for (const auto& node : page_group) {',
-                          'size_t completed=0; try { for (const auto& node : page_group) {')
-retained = retained.replace('virt_addr += size;', 'virt_addr += size; ++completed;')
-retained = retained.replace('// We succeeded! We want to persist',
-                            '} catch (...) { if(completed) spg.CancelClose(); throw; }\n'
-                            '        // We succeeded! We want to persist')
+retained = operate.replace('            spg.CancelClose();', '            // mutant: lose mapping references')
 reordered = finalize.replace('        it = m_memory_block_tree.erase(it);\n', '')
 reordered = reordered.replace('        block_callback(block->GetAddress(), block->GetSize());',
                               '        it = m_memory_block_tree.erase(it);\n'
                               '        block_callback(block->GetAddress(), block->GetSize());')
-controls = [('retain-prefix', source.replace(operate, retained),
-             'OPEN defect: published prefix lost group ownership'),
+controls = [('close-retained-prefix', source.replace(operate, retained),
+             'failed transaction must retain mapping references and record'),
             ('erase-before-callback', source.replace(finalize, reordered),
              'Finalize must retain current record during callback')]
 for name, changed, expected in controls:
@@ -239,7 +282,7 @@ for name, changed, expected in controls:
     assert result.returncode != 0 and 'assert' in log.lower() and expected in log, (name, log)
     print('PASS audit sensitivity control: ' + name, flush=True)
 (out / 'extraction.json').write_text(json.dumps({
-    'status': 'mapgroup-open-finalize-bookkeeping-fixed',
+    'status': 'mapping-reference-retention-and-finalize-bookkeeping-fixed',
     'repeats': 3,
     'sensitivity_controls': [name for name, _, _ in controls],
     'sha256': {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths},
