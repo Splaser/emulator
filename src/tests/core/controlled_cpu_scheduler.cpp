@@ -154,8 +154,7 @@ void EndThread(Kernel::KThread* thread) {
     thread->Close();
 }
 
-TEST_CASE("Process stop acknowledges an actual Dynarmic store loop",
-          "[.][process-execution-stop]") {
+void ProcessExecutionStopWitness(bool fast_link) {
 #if defined(__linux__) && defined(ARCHITECTURE_x86_64)
     Settings::values.use_multi_core.SetValue(true);
     Settings::values.use_asynchronous_gpu_emulation.SetValue(true);
@@ -174,10 +173,12 @@ TEST_CASE("Process stop acknowledges an actual Dynarmic store loop",
     auto& memory = process->GetMemory();
     const auto code = owner.heap + 4096;
     const auto data = owner.heap + 8192;
-    // str w1,[x0]; add w1,w1,#1; b -8. Real AArch64 instructions executed by Dynarmic.
-    memory.Write32(code, 0xb9000001);
-    memory.Write32(code + 4, 0x11000421);
-    memory.Write32(code + 8, 0x17fffffe);
+    // Keep the original unchecked B -8 as a refusal witness. The success case
+    // uses TBNZ w1,#0,-8: odd counter +2 remains odd, and this checked branch
+    // gives the pinned JIT a real halt observation point without changing options.
+    memory.Write32(code, 0xb9000001); // str w1,[x0]
+    memory.Write32(code + 4, fast_link ? 0x11000421 : 0x11000821);
+    memory.Write32(code + 8, fast_link ? 0x17fffffe : 0x3707ffc1);
     memory.Write32(data, 0);
     auto* thread = Kernel::KThread::Create(system.Kernel());
     REQUIRE(thread);
@@ -214,14 +215,37 @@ TEST_CASE("Process stop acknowledges an actual Dynarmic store loop",
     }));
     REQUIRE(Access::BackendRunning(core));
     const auto refs = process->GetReferenceCount();
-    auto stop = process->TryStopGuestExecution(4096);
+    auto stop = process->TryStopGuestExecution(fast_link ? 64 : 4096);
     REQUIRE(stop.has_value());
     REQUIRE(process->GetReferenceCount() >= refs + 1);
     Kernel::ProcessExecutionStop::Result result{};
+    unsigned polls = 0;
     REQUIRE(Until([&] {
+        ++polls;
         result = stop->Poll();
         return result != Kernel::ProcessExecutionStop::Result::Pending;
     }));
+    INFO("fast_link=" << fast_link << " polls=" << polls
+         << " backend_running=" << Access::BackendRunning(core));
+    if (fast_link) {
+        REQUIRE(result == Kernel::ProcessExecutionStop::Result::Unknown);
+        REQUIRE(Access::BackendRunning(core));
+        REQUIRE(stop->GuestBackingAdmission() == Common::ProducerDrain::Result::Unknown);
+        REQUIRE_FALSE(stop->CancelNoEffects());
+        REQUIRE_FALSE(Access::EnterGuestExecution(core).has_value());
+        const auto before = progress;
+        REQUIRE(Until([&] {
+            return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) ==
+                       static_cast<ssize_t>(sizeof(progress)) && progress != before;
+        }));
+        // This child deliberately retains an uninterruptible backend and all its
+        // owners. OS process termination is the recovery boundary; never destroy
+        // System/KProcess/backing or join this thread as though drainage succeeded.
+        std::cout << "PASS native unchecked fast-link loop: actual continued stores, sticky Unknown, "
+                     "no guest admission and no in-process owner release; OS termination only"
+                  << std::endl;
+        std::_Exit(EXIT_SUCCESS);
+    }
     REQUIRE(result == Kernel::ProcessExecutionStop::Result::BackendsStopped);
     backend.join();
     if (error) std::rethrow_exception(error);
@@ -239,11 +263,21 @@ TEST_CASE("Process stop acknowledges an actual Dynarmic store loop",
     REQUIRE_FALSE(stop->CancelNoEffects()); // Old operation cannot reopen the new domain.
     REQUIRE(next->Poll() == Kernel::ProcessExecutionStop::Result::BackendsStopped);
     REQUIRE(next->CancelNoEffects());
-    std::cout << "PASS native process-owned Dynarmic execution halt/exit, stable real guest backing, "
+    std::cout << "PASS native process-owned checked-branch Dynarmic execution halt/exit, stable real guest backing, "
                  "closed re-entry and stale-cancel isolation; service/GPU exclusion remains Unknown\n";
 #else
     FAIL("Native execution-stop witness requires Linux x86-64 Dynarmic");
 #endif
+}
+
+TEST_CASE("Process stop acknowledges a checked-branch Dynarmic store loop",
+          "[.][process-execution-stop]") {
+    ProcessExecutionStopWitness(false);
+}
+
+TEST_CASE("Unchecked Dynarmic fast-link loop retains Unknown until process termination",
+          "[.][process-execution-stop-fast-link]") {
+    ProcessExecutionStopWitness(true);
 }
 
 TEST_CASE("Controlled writes cross real guest fibers and process finalization",

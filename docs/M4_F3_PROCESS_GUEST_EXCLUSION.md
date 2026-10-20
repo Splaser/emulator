@@ -73,14 +73,21 @@ backend and kernel collaborators. Three repeats and two assertion-specific mutan
 are required. The SVC writer is a mandatory successful bypass counterexample:
 GuestBackingAdmission remains Unknown even after BackendsStopped.
 
-A separate native CTest runs an actual AArch64 store loop through real Dynarmic,
-KProcess, KThread, PhysicalCore and ordinary guest heap backing on Linux x86-64.
-It observes progress through process_vm_readv, requests the real halt, checks
-backend return and stable bytes, rejects real re-entry while closed and checks
-old cancellation against a new request. Native acceptance is pending. It does
-not execute native ARM/NCE, close services/GPU or prove a complete alias census.
-The thread is intentionally not dispatched as an ARM application by the scheduler;
-the harness drives its real backend on a dedicated host thread.
+Native run `39427948982` compiled all production targets, but the original
+unconditional B -8 store-loop failed to acknowledge and timed out during cleanup.
+The pinned frontend uses LinkBlockFast here; its linked terminal has no halt check.
+The operation correctly becomes Unknown instead of certifying backend exit, but
+ordinary arbitrary-program stop capability is not established.
+
+The original loop now remains an explicit native refusal witness in a separate
+process: continued writes, sticky Unknown, refused cancellation/new execution,
+and retained owners until OS termination. A checked TBNZ loop separately tests
+successful actual Dynarmic/KProcess/KThread/PhysicalCore exit and stable backing.
+The counter stays odd so that loop cannot exit naturally. No global optimization
+change or forced in-process cleanup disguises the original counterexample.
+Both new results are pending native validation. Neither closes services/GPU or
+proves a complete alias census; the harness drives the real backend on a dedicated
+host thread, not as an ARM application dispatched by the scheduler.
 
 ## Next gates (still Open)
 
@@ -92,7 +99,9 @@ the harness drives its real backend on a dedicated host thread.
 2. **Whole-guest quiescence.** Combine the real execution acknowledgement with
    System suspension serialization and actual independent-producer close-and-join.
    Do not reuse today's unbounded suspension wait as a bounded certificate.
-   Prove NCE separately or refuse it. Preserve prior pause state and lock order;
+   Prove NCE separately or refuse it. The pinned unchecked fast-link loop is also
+   an open stop/completion blocker; a halt request alone does not bound its exit.
+   Preserve prior pause state and lock order;
    no owner may be parked holding a lock needed by drainage/completion.
 3. **Device/GPU owners and Unknown.** Close GPU workers, transfer/shader/image
    producers and mapping mutation, including queued-but-unsubmitted commands.

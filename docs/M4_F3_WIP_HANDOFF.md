@@ -1,5 +1,41 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: compiled native run exposes unchecked-loop stop limit
+
+Run `39427948982` at `10e58d6545` compiled/linked the real CLI, shader tool,
+ordinary tests and native scheduler executable. All ownership and synchronization
+fixtures/mutants passed. CTest's four existing native scheduler/F3 processes passed,
+but the ordinary test process failed the retained syncpoint cancellation case,
+and the new unconditional Dynarmic store-loop returned Unknown before cleanup
+hung at its 45-second deadline. There is no full-run/native-stop acceptance.
+
+Syncpoint cancellation was a genuine upstream-revert integration regression: its
+retained test expected stable handles, but the reverted manager returned movable
+vector iterators. `b10519eea5` selectively restores #380's numeric handle repair.
+All three existing case bodies pass locally against actual production manager code.
+No unrelated #380 translation changes are restored by that commit.
+
+The original store loop uses B -8. In the current pin, B_uncond selects
+LinkBlockFast, whose linked path jumps without inspecting halt_reason. Ordinary
+HaltExecution/Interrupt therefore cannot stop this hot loop. Increasing budget or
+changing ordinary JIT settings is not a repair and is not done here.
+
+The original unchecked loop is retained as a separate native negative process:
+actual stores must continue after Poll returns sticky Unknown, cancellation and
+new execution admission must refuse, and all real owners stay alive until OS
+process termination. It deliberately uses _Exit only after those assertions; no
+in-process cleanup, reuse or successful join is inferred. CTest bounds the child.
+A separate checked TBNZ loop (odd counter incremented by two) tests actual halt,
+backend return, stable guest bytes, closed re-entry and stale-cancel behavior under
+the same ordinary JIT settings. This is a supported-subset witness, not satisfaction
+of the original unconditional-loop success expectation. Arbitrary guest execution
+closure remains blocked on the unchecked-link issue, as well as NCE/service/GPU gates.
+
+CTest is now before the long unchanged sensitivity batch so runtime failures
+surface promptly; both still run in the complete Linux workflow. Native execution
+of these revised witnesses and remaining regressions is pending. No production
+stop algorithm or optimization behavior is changed; F2/F3 remain Open.
+
 ## 2026-10-20: compatibility include-order follow-up
 
 Run `39424847488` at `883e7f904b` exposed a missing global namespace qualifier in

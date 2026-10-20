@@ -154,7 +154,9 @@ jobs:
         with:
           path: .ccache
           key: m3b-native-ccache-${{ runner.os }}-${{ github.sha }}
-      - name: Reject unsupported synchronization evidence before native execution
+      - name: Run production unit tests
+        run: ctest --test-dir build-integration --output-on-failure --timeout 180
+      - name: Validate unsupported synchronization evidence and mutation controls
         run: |
           g++ -std=c++23 -Wall -Wextra -Werror -I src -I externals/Vulkan-Headers/include \
             tools/physical_coherency_tests/sync_provenance_tests.cpp \
@@ -176,8 +178,6 @@ jobs:
             -o .diagnostics/pr375-pr380/transfer-content
           .diagnostics/pr375-pr380/transfer-content \
             | tee .diagnostics/pr375-pr380/transfer-content.txt
-      - name: Run production unit tests
-        run: ctest --test-dir build-integration --output-on-failure --timeout 180
       - name: Repeat native F3 witness and reject false fixed acceptance
         run: python tools/physical_coherency_tests/run_native_f3_tests.py --repeat 3
       - name: Repeat admitted native alias transfer adapter
