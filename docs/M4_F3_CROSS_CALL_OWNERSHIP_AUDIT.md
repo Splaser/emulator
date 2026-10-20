@@ -1,5 +1,15 @@
 # M4-F3 cross-call ownership audit
 
+## Implementation checkpoint: Finalize bookkeeping
+
+The block-manager callback now runs while its current record remains linked.
+Only a successful return commits erase and descriptor Free. Linux extracted-body
+tests cover a throw before/after effects on the first/second block, exact remaining
+tree and descriptor counts, and successful completion using an explicitly
+idempotent retry collaborator. Restoring erase-before-callback must fail the
+record-during-callback assertion. This repairs bookkeeping exception safety only;
+unknown callback effects still require an owner-specific recovery protocol.
+
 This source audit follows the per-Memory publication component and the Unmap
 reference repair. It identifies remaining OPEN prerequisites; it does not enroll
 ordinary processes or establish safe teardown, rollback or backing admission.

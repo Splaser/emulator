@@ -169,21 +169,34 @@ int main() {
             }
         }
     }
-    for(bool fail:{false,true}) {
+    for(unsigned failure=0;failure<5;++failure) {
         Kernel::KMemoryBlock a{PageSize},b{2*PageSize};
         Kernel::KMemoryBlockManager manager{{{&a,&b}}};
         Kernel::KMemoryBlockSlabManager slab;unsigned callbacks=0;bool threw=false;
-        try {manager.Finalize(&slab,[&](u64,u64) {
-            ++callbacks;if(fail) throw std::runtime_error("injected unmap failure");
+        std::array<bool,2> effects{};
+        const unsigned fail_at=failure<=2 ? 1 : 2;
+        try {manager.Finalize(&slab,[&](u64 addr,u64) {
+            ++callbacks;
+            assert(manager.m_memory_block_tree.nodes.front()->address==addr &&
+                   "Finalize must retain current record during callback");
+            if(failure && callbacks==fail_at && failure%2==1)
+                throw std::runtime_error("injected before effects");
+            effects.at(addr/PageSize-1)=true;
+            if(failure && callbacks==fail_at)
+                throw std::runtime_error("injected after effects");
         });} catch(const std::runtime_error&) {threw=true;}
-        if(fail) {
-            assert(threw && callbacks==1 && slab.freed==0 &&
-                   manager.m_memory_block_tree.nodes.size()==1 &&
-                   manager.m_memory_block_tree.nodes[0]==&b &&
-                   "OPEN defect: failed callback block already removed, not freed");
+        if(failure) {
+            assert(threw && callbacks==fail_at && slab.freed==fail_at-1 &&
+                   manager.m_memory_block_tree.nodes.size()==3-fail_at &&
+                   manager.m_memory_block_tree.nodes[0]==(fail_at==1 ? &a : &b) &&
+                   "Finalize must retain failed and untouched records");
+            assert(effects.at(fail_at-1)==(failure%2==0));
+            // Explicitly idempotent collaborator: this is NOT arbitrary callback rollback.
+            manager.Finalize(&slab,[&](u64 addr,u64) {effects.at(addr/PageSize-1)=true;});
+            assert(slab.freed==2 && effects[0] && effects[1] && manager.m_memory_block_tree.empty());
         } else assert(!threw && callbacks==2 && slab.freed==2 && manager.m_memory_block_tree.empty());
     }
-    std::cout<<"REPRODUCED OPEN MapGroup ownership and Finalize bookkeeping gaps; controls passed; injected collaborators only\n";
+    std::cout<<"PASS cross-call audit: MapGroup still OPEN, Finalize records retained; injected collaborators only\n";
 }
 '''
 for marker, body in [('WRAPPER', wrapper), ('SCOPED', scoped), ('OPERATE', operate), ('FINALIZE', finalize)]:
@@ -197,7 +210,7 @@ subprocess.run(command + [str(cpp), '-o', str(exe)], check=True)
 for repeat in range(1, 4):
     result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=15)
     (out / f'audit-{repeat}.txt').write_text(result.stdout + result.stderr)
-    assert result.returncode == 0 and 'REPRODUCED OPEN' in result.stdout, result
+    assert result.returncode == 0 and 'PASS cross-call audit:' in result.stdout, result
     print(result.stdout.strip(), flush=True)
 # Sensitivity controls are deliberately incomplete counterfactuals, not proposed repairs.
 retained = operate.replace('for (const auto& node : page_group) {',
@@ -207,13 +220,13 @@ retained = retained.replace('// We succeeded! We want to persist',
                             '} catch (...) { if(completed) spg.CancelClose(); throw; }\n'
                             '        // We succeeded! We want to persist')
 reordered = finalize.replace('        it = m_memory_block_tree.erase(it);\n', '')
-reordered = reordered.replace('        slab_manager->Free(block);',
+reordered = reordered.replace('        block_callback(block->GetAddress(), block->GetSize());',
                               '        it = m_memory_block_tree.erase(it);\n'
-                              '        slab_manager->Free(block);')
+                              '        block_callback(block->GetAddress(), block->GetSize());')
 controls = [('retain-prefix', source.replace(operate, retained),
              'OPEN defect: published prefix lost group ownership'),
-            ('retain-finalize-record', source.replace(finalize, reordered),
-             'OPEN defect: failed callback block already removed, not freed')]
+            ('erase-before-callback', source.replace(finalize, reordered),
+             'Finalize must retain current record during callback')]
 for name, changed, expected in controls:
     assert changed != source, name
     control_cpp = out / (name + '.cpp')
@@ -226,7 +239,7 @@ for name, changed, expected in controls:
     assert result.returncode != 0 and 'assert' in log.lower() and expected in log, (name, log)
     print('PASS audit sensitivity control: ' + name, flush=True)
 (out / 'extraction.json').write_text(json.dumps({
-    'status': 'open-defects-reproduced-not-fixed-acceptance',
+    'status': 'mapgroup-open-finalize-bookkeeping-fixed',
     'repeats': 3,
     'sensitivity_controls': [name for name, _, _ in controls],
     'sha256': {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths},

@@ -1,5 +1,13 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: Finalize bookkeeping repair
+
+KMemoryBlockManager now commits record removal only after its cleanup callback
+returns. The cross-call fixture checks first/second-block throws both before and
+after effects, exact remaining records, descriptor counts and an explicitly
+idempotent retry. Linux WSL passes three repeats and rejects restored premature
+erase. Callback effect rollback is not inferred from retained bookkeeping.
+
 ## 2026-10-20: cross-call ownership audit
 
 The [cross-call ownership audit](M4_F3_CROSS_CALL_OWNERSHIP_AUDIT.md) identifies
