@@ -86,7 +86,7 @@ void DefaultControllerApplet::ReconfigureControllers(ReconfigureCallback callbac
             controller->SetNpadStyleIndex(Core::HID::NpadStyleIndex::Handheld);
             controller->Connect(true);
         } else {
-            assert(false && "Unable to add a new controller based on the given parameters!");
+            ASSERT_MSG(false, "Unable to add a new controller based on the given parameters!");
         }
     }
 

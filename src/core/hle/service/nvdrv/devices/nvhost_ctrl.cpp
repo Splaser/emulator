@@ -301,7 +301,7 @@ Kernel::KEvent* nvhost_ctrl::QueryEvent(u32 event_id) {
     const u32 slot{allocated ? desired_event.partial_slot.Value()
                              : static_cast<u32>(desired_event.slot)};
     if (slot >= MaxNvEvents) {
-        assert(false);
+        ASSERT(false);
         return nullptr;
     }
 
@@ -312,11 +312,11 @@ Kernel::KEvent* nvhost_ctrl::QueryEvent(u32 event_id) {
 
     auto& event = events[slot];
     if (event.registered && event.assigned_syncpt == syncpoint_id) {
-        assert(event.kevent);
+        ASSERT(event.kevent);
         return event.kevent;
     }
     // Is this possible in hardware?
-    assert(false && "Slot:{}, SyncpointID:{}, requested" && (void(slot), void(syncpoint_id), true));
+    ASSERT_MSG(false, "Slot:{}, SyncpointID:{}, requested", slot, syncpoint_id);
     return nullptr;
 }
 
@@ -326,9 +326,9 @@ std::unique_lock<std::mutex> nvhost_ctrl::NvEventsLock() {
 
 void nvhost_ctrl::CreateNvEvent(u32 event_id) {
     auto& event = events[event_id];
-    assert(!event.kevent);
-    assert(!event.registered);
-    assert(!event.IsBeingUsed());
+    ASSERT(!event.kevent);
+    ASSERT(!event.registered);
+    ASSERT(!event.IsBeingUsed());
     event.kevent = events_interface.CreateEvent(fmt::format("NVCTRL::NvEvent_{}", event_id));
     event.status = EventState::Available;
     event.registered = true;
@@ -340,9 +340,9 @@ void nvhost_ctrl::CreateNvEvent(u32 event_id) {
 
 void nvhost_ctrl::FreeNvEvent(u32 event_id) {
     auto& event = events[event_id];
-    assert(event.kevent);
-    assert(event.registered);
-    assert(!event.IsBeingUsed());
+    ASSERT(event.kevent);
+    ASSERT(event.registered);
+    ASSERT(!event.IsBeingUsed());
     events_interface.FreeEvent(event.kevent);
     event.kevent = nullptr;
     event.status = EventState::Available;

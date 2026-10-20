@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <algorithm>
-
 #include "video_core/host1x/syncpoint_manager.h"
 
 namespace Tegra {
@@ -20,30 +18,36 @@ SyncpointManager::ActionHandle SyncpointManager::RegisterAction(std::atomic<u32>
         action();
         return {};
     }
-    const auto it = std::ranges::upper_bound(action_storage, expected_value, {},
-                                             &RegisteredAction::expected_value);
-    const ActionHandle id = ++next_action_id;
-    action_storage.insert(it, RegisteredAction{id, expected_value, std::move(action)});
-    return id;
+    auto it = action_storage.begin();
+    while (it != action_storage.end()) {
+        if (it->expected_value >= expected_value) {
+            break;
+        }
+        ++it;
+    }
+    return action_storage.emplace(it, expected_value, std::move(action));
 }
 
-void SyncpointManager::DeregisterAction(std::vector<RegisteredAction>& action_storage, ActionHandle handle) {
-    if (handle == ActionHandle{}) {
-        return;
-    }
+void SyncpointManager::DeregisterAction(std::vector<RegisteredAction>& action_storage, const ActionHandle& handle) {
     std::unique_lock lk(guard);
-    // Gone already if the action ran
-    const auto it = std::ranges::find(action_storage, handle, &RegisteredAction::id);
-    if (it != action_storage.end()) {
-        action_storage.erase(it);
+
+    // We want to ensure the iterator still exists prior to erasing it
+    // Otherwise, if an invalid iterator was passed in then it could lead to UB
+    // It is important to avoid UB in that case since the deregister isn't called from a locked
+    // context
+    for (auto it = action_storage.begin(); it != action_storage.end(); it++) {
+        if (it == handle) {
+            action_storage.erase(it);
+            return;
+        }
     }
 }
 
-void SyncpointManager::DeregisterGuestAction(u32 syncpoint_id, ActionHandle handle) {
+void SyncpointManager::DeregisterGuestAction(u32 syncpoint_id, const ActionHandle& handle) {
     DeregisterAction(guest_action_storage[syncpoint_id], handle);
 }
 
-void SyncpointManager::DeregisterHostAction(u32 syncpoint_id, ActionHandle handle) {
+void SyncpointManager::DeregisterHostAction(u32 syncpoint_id, const ActionHandle& handle) {
     DeregisterAction(host_action_storage[syncpoint_id], handle);
 }
 

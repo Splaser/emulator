@@ -10,6 +10,7 @@
 #include "common/assert.h"
 #include "common/bit_set.h"
 #include "common/common_types.h"
+#include "common/concepts.h"
 
 namespace Kernel {
 
@@ -18,7 +19,7 @@ class KThread;
 template <typename T>
 concept KPriorityQueueAffinityMask = !
 std::is_reference_v<T>&& requires(T& t) {
-                             { t.GetAffinityMask() } -> std::convertible_to<u64>;
+                             { t.GetAffinityMask() } -> Common::ConvertibleTo<u64>;
                              { t.SetAffinityMask(0) };
 
                              { t.GetAffinity(0) } -> std::same_as<bool>;
@@ -44,9 +45,9 @@ std::is_reference_v<T>&& requires(T& t) {
                                  std::remove_cvref_t<decltype(t.GetAffinityMask())>()
                                  } -> KPriorityQueueAffinityMask;
 
-                             { t.GetActiveCore() } -> std::convertible_to<s32>;
-                             { t.GetPriority() } -> std::convertible_to<s32>;
-                             { t.IsDummyThread() } -> std::convertible_to<bool>;
+                             { t.GetActiveCore() } -> Common::ConvertibleTo<s32>;
+                             { t.GetPriority() } -> Common::ConvertibleTo<s32>;
+                             { t.IsDummyThread() } -> Common::ConvertibleTo<bool>;
                          };
 
 template <typename Member, size_t NumCores_, int LowestPriority, int HighestPriority>
@@ -150,8 +151,8 @@ public:
         constexpr KPriorityQueueImpl() = default;
 
         constexpr void PushBack(s32 priority, s32 core, Member* member) {
-            assert(IsValidCore(core));
-            assert(IsValidPriority(priority));
+            ASSERT(IsValidCore(core));
+            ASSERT(IsValidPriority(priority));
 
             if (priority > LowestPriority) {
                 return;
@@ -163,8 +164,8 @@ public:
         }
 
         constexpr void PushFront(s32 priority, s32 core, Member* member) {
-            assert(IsValidCore(core));
-            assert(IsValidPriority(priority));
+            ASSERT(IsValidCore(core));
+            ASSERT(IsValidPriority(priority));
 
             if (priority > LowestPriority) {
                 return;
@@ -176,8 +177,8 @@ public:
         }
 
         constexpr void Remove(s32 priority, s32 core, Member* member) {
-            assert(IsValidCore(core));
-            assert(IsValidPriority(priority));
+            ASSERT(IsValidCore(core));
+            ASSERT(IsValidPriority(priority));
 
             if (priority > LowestPriority) {
                 return;
@@ -189,7 +190,7 @@ public:
         }
 
         constexpr Member* GetFront(s32 core) const {
-            assert(IsValidCore(core));
+            ASSERT(IsValidCore(core));
 
             const s32 priority = static_cast<s32>(m_available_priorities[core].CountLeadingZero());
             if (priority <= LowestPriority) {
@@ -200,8 +201,8 @@ public:
         }
 
         constexpr Member* GetFront(s32 priority, s32 core) const {
-            assert(IsValidCore(core));
-            assert(IsValidPriority(priority));
+            ASSERT(IsValidCore(core));
+            ASSERT(IsValidPriority(priority));
 
             if (priority <= LowestPriority) {
                 return m_queues[priority].GetFront(core);
@@ -211,7 +212,7 @@ public:
         }
 
         constexpr Member* GetNext(s32 core, const Member* member) const {
-            assert(IsValidCore(core));
+            ASSERT(IsValidCore(core));
 
             Member* next = member->GetPriorityQueueEntry(core).GetNext();
             if (next == nullptr) {
@@ -225,8 +226,8 @@ public:
         }
 
         constexpr void MoveToFront(s32 priority, s32 core, Member* member) {
-            assert(IsValidCore(core));
-            assert(IsValidPriority(priority));
+            ASSERT(IsValidCore(core));
+            ASSERT(IsValidPriority(priority));
 
             if (priority <= LowestPriority) {
                 m_queues[priority].Remove(core, member);
@@ -235,8 +236,8 @@ public:
         }
 
         constexpr Member* MoveToBack(s32 priority, s32 core, Member* member) {
-            assert(IsValidCore(core));
-            assert(IsValidPriority(priority));
+            ASSERT(IsValidCore(core));
+            ASSERT(IsValidPriority(priority));
 
             if (priority <= LowestPriority) {
                 m_queues[priority].Remove(core, member);
@@ -268,7 +269,7 @@ private:
     }
 
     constexpr void PushBack(s32 priority, Member* member) {
-        assert(IsValidPriority(priority));
+        ASSERT(IsValidPriority(priority));
 
         // Push onto the scheduled queue for its core, if we can.
         u64 affinity = member->GetAffinityMask().GetAffinityMask();
@@ -284,7 +285,7 @@ private:
     }
 
     constexpr void PushFront(s32 priority, Member* member) {
-        assert(IsValidPriority(priority));
+        ASSERT(IsValidPriority(priority));
 
         // Push onto the scheduled queue for its core, if we can.
         u64 affinity = member->GetAffinityMask().GetAffinityMask();
@@ -301,7 +302,7 @@ private:
     }
 
     constexpr void Remove(s32 priority, Member* member) {
-        assert(IsValidPriority(priority));
+        ASSERT(IsValidPriority(priority));
 
         // Remove from the scheduled queue for its core.
         u64 affinity = member->GetAffinityMask().GetAffinityMask();
@@ -392,7 +393,7 @@ public:
             return;
         }
 
-        assert(IsValidPriority(prev_priority));
+        ASSERT(IsValidPriority(prev_priority));
 
         // Remove the member from the queues.
         const s32 new_priority = member->GetPriority();

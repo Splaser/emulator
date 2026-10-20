@@ -3,10 +3,6 @@
 
 #pragma once
 
-#include <optional>
-
-#include "shader_recompiler/frontend/ir/attribute.h"
-
 namespace Shader {
 
 // Try to keep entries here to a minimum
@@ -36,6 +32,7 @@ struct HostTranslateInfo {
     /// layer to, for the geometry shader lowered without VK_NV_geometry_shader_passthrough to
     /// pass the layer on (Vulkan has no Layer input in a geometry shader)
     std::optional<IR::Attribute> passthrough_layer_source{};
+
 };
 
 } // namespace Shader

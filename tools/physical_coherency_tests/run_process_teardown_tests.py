@@ -124,7 +124,6 @@ struct Tree {
     }
     void insert(KThreadLocalPage& page) {nodes.push_back(&page);}
     void erase(Iterator it) {nodes.erase(nodes.begin()+it.index);}
-    void erase(KThreadLocalPage& page) {erase(find_key(page.m_virt_addr));}
     bool empty() const {return nodes.empty();}
 };
 struct PageTable {

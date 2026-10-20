@@ -1043,24 +1043,49 @@ void RasterizerVulkan::Clear(u32 layer_count) {
     }
     UpdateViewportsState(regs);
 
-    const VkClearRect clear_rect{
-        .rect = GetClearRect(regs, render_area, up_scale, down_shift),
+    VkRect2D default_scissor;
+    default_scissor.offset.x = 0;
+    default_scissor.offset.y = 0;
+    default_scissor.extent.width = std::numeric_limits<s32>::max();
+    default_scissor.extent.height = std::numeric_limits<s32>::max();
+
+    VkClearRect clear_rect{
+        .rect = regs.clear_control.use_scissor ? GetScissorState(regs, 0, up_scale, down_shift)
+                                               : default_scissor,
         .baseArrayLayer = regs.clear_surface.layer,
         .layerCount = layer_count,
     };
     if (clear_rect.rect.extent.width == 0 || clear_rect.rect.extent.height == 0) {
         return;
     }
+    clear_rect.rect.extent = VkExtent2D{
+        .width = std::min(clear_rect.rect.extent.width, render_area.width),
+        .height = std::min(clear_rect.rect.extent.height, render_area.height),
+    };
 
     const u32 color_attachment = regs.clear_surface.RT;
     if (use_color && framebuffer->HasAspectColorBit(color_attachment)) {
-        // SET_COLOR_CLEAR_VALUE (0x0D80) holds the clear colour as raw 32-bit words in the render
-        // target's type: floats for float and normalized targets, integers for integer targets
-        // (clb197.h; NVK and nouveau pass the words through). VkClearColorValue overlays the
-        // same three types, so the words are copied as they are.
+        const auto format =
+            VideoCore::Surface::PixelFormatFromRenderTargetFormat(regs.rt[color_attachment].format);
+        bool is_integer = IsPixelFormatInteger(format);
+        bool is_signed = IsPixelFormatSignedInteger(format);
+        size_t int_size = PixelComponentSizeBitsInteger(format);
         VkClearValue clear_value{};
-        static_assert(sizeof(clear_value.color) == sizeof(regs.clear_color));
-        std::memcpy(&clear_value.color, regs.clear_color.data(), sizeof(clear_value.color));
+        if (!is_integer) {
+            std::memcpy(clear_value.color.float32, regs.clear_color.data(),
+                        regs.clear_color.size() * sizeof(f32));
+        } else if (!is_signed) {
+            for (size_t i = 0; i < 4; i++) {
+                clear_value.color.uint32[i] = static_cast<u32>(
+                    static_cast<f32>(static_cast<u64>(int_size) << 1U) * regs.clear_color[i]);
+            }
+        } else {
+            for (size_t i = 0; i < 4; i++) {
+                clear_value.color.int32[i] =
+                    static_cast<s32>(static_cast<f32>(static_cast<s64>(int_size - 1) << 1) *
+                                     (regs.clear_color[i] - 0.5f));
+            }
+        }
 
         if (regs.clear_surface.R && regs.clear_surface.G && regs.clear_surface.B &&
             regs.clear_surface.A) {
@@ -1081,14 +1106,7 @@ void RasterizerVulkan::Clear(u32 layer_count) {
                               static_cast<s32>(clear_rect.rect.extent.width),
                          .y = clear_rect.rect.offset.y +
                               static_cast<s32>(clear_rect.rect.extent.height)}};
-            const auto format = VideoCore::Surface::PixelFormatFromRenderTargetFormat(
-                regs.rt[color_attachment].format);
-            const ClearColorType type = !IsPixelFormatInteger(format) ? ClearColorType::Float
-                                        : IsPixelFormatSignedInteger(format)
-                                            ? ClearColorType::Sint
-                                            : ClearColorType::Uint;
-            blit_image.ClearColor(framebuffer, color_attachment, color_mask, type,
-                                  std::bit_cast<std::array<u32, 4>>(regs.clear_color), dst_region);
+            blit_image.ClearColor(framebuffer, color_mask, regs.clear_color, dst_region);
         }
     }
 
@@ -1106,26 +1124,16 @@ void RasterizerVulkan::Clear(u32 layer_count) {
         return;
     }
 
-    // RESPECT_STENCIL_MASK (SET_CLEAR_SURFACE_CONTROL bit 0) applies the stencil write mask to the
-    // clear; without it every stencil bit is cleared (clb197.h).
-    const u8 stencil_mask = regs.clear_control.respect_stencil_mask
-                                ? static_cast<u8>(regs.stencil_front_mask)
-                                : u8{0xFF};
-    if (use_stencil && stencil_mask == 0) {
-        aspect_flags &= ~VK_IMAGE_ASPECT_STENCIL_BIT;
-        if (aspect_flags == 0) {
-            return;
-        }
-    }
-    if ((aspect_flags & VK_IMAGE_ASPECT_STENCIL_BIT) != 0 && stencil_mask != 0xFF) {
+    if (use_stencil && framebuffer->HasAspectStencilBit() && regs.stencil_front_mask != 0xFF &&
+        regs.stencil_front_mask != 0) {
         Region2D dst_region = {
             Offset2D{.x = clear_rect.rect.offset.x, .y = clear_rect.rect.offset.y},
             Offset2D{.x = clear_rect.rect.offset.x + static_cast<s32>(clear_rect.rect.extent.width),
                      .y = clear_rect.rect.offset.y +
                           static_cast<s32>(clear_rect.rect.extent.height)}};
-        blit_image.ClearDepthStencil(framebuffer, use_depth, regs.clear_depth, stencil_mask,
-                                     regs.clear_stencil, regs.stencil_front_func_mask,
-                                     dst_region);
+        blit_image.ClearDepthStencil(framebuffer, use_depth, regs.clear_depth,
+                                     static_cast<u8>(regs.stencil_front_mask), regs.clear_stencil,
+                                     regs.stencil_front_func_mask, dst_region);
     } else {
         scheduler.Record([clear_depth = regs.clear_depth, clear_stencil = regs.clear_stencil,
                           clear_rect, aspect_flags](vk::CommandBuffer cmdbuf) {

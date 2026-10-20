@@ -194,7 +194,7 @@ public:
             }
 
             if (this->AddressChanged() || this->IsDataCopy()) {
-                assert(this->m_span_valid);
+                ASSERT(this->m_span_valid);
                 if constexpr (FLAGS & GuestMemoryFlags::Cached) {
                     this->m_memory.WriteBlockCached(this->m_addr, this->data(), this->size_bytes());
                 } else if constexpr (FLAGS & GuestMemoryFlags::Safe) {

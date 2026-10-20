@@ -126,9 +126,9 @@ KVirtualAddress InitializeSlabHeap(Core::System& system, KMemoryLayout& memory_l
         void* backing_kernel_memory{system.DeviceMemory().GetPointer<void>(
             TranslateSlabAddrToPhysical(memory_layout, start), size)};
 
-        [[maybe_unused]] const KMemoryRegion* region = memory_layout.FindVirtual(start + size - 1);
-        assert(region != nullptr);
-        assert(region->IsDerivedFrom(KMemoryRegionType_KernelSlab));
+        const KMemoryRegion* region = memory_layout.FindVirtual(start + size - 1);
+        ASSERT(region != nullptr);
+        ASSERT(region->IsDerivedFrom(KMemoryRegionType_KernelSlab));
         T::InitializeSlabHeap(system.Kernel(), backing_kernel_memory, size);
     }
 
@@ -256,7 +256,7 @@ void InitializeSlabHeaps(Core::System& system, KMemoryLayout& memory_layout) {
             FOREACH_SLAB_TYPE(INITIALIZE_SLAB_HEAP)
             // If we somehow get an invalid type, abort.
         default:
-            assert(false && "Unknown slab type: {}" && (void(slab_types[i]), true));
+            ASSERT_MSG(false, "Unknown slab type: {}", slab_types[i]);
             break;
         }
 
@@ -280,16 +280,15 @@ void KPageBufferSlabHeap::Initialize(Core::System& system) {
     const size_t slab_size = num_pages * PageSize;
 
     // Reserve memory from the system resource limit.
-    [[maybe_unused]] const auto reserved =
-        kernel.GetSystemResourceLimit()->Reserve(LimitableResource::PhysicalMemoryMax, slab_size);
-    assert(reserved);
+    ASSERT(
+        kernel.GetSystemResourceLimit()->Reserve(LimitableResource::PhysicalMemoryMax, slab_size));
 
     // Allocate memory for the slab.
     constexpr auto AllocateOption = KMemoryManager::EncodeOption(
         KMemoryManager::Pool::System, KMemoryManager::Direction::FromFront);
     const KPhysicalAddress slab_address =
         kernel.MemoryManager().AllocateAndOpenContinuous(num_pages, 1, AllocateOption);
-    assert(slab_address != 0);
+    ASSERT(slab_address != 0);
 
     // Initialize the slabheap.
     KPageBuffer::InitializeSlabHeap(

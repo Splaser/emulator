@@ -1058,17 +1058,17 @@ void Config::WriteSettingGeneric(const Settings::BasicSetting* const setting) {
 
 void Config::BeginGroup(const std::string& group) {
     // You can't begin a group while reading/writing from a config array
-    assert(array_stack.empty());
+    ASSERT(array_stack.empty());
 
     key_stack.push_back(AdjustKey(group));
 }
 
 void Config::EndGroup() {
     // You can't end a group if you haven't started one yet
-    assert(!key_stack.empty());
+    ASSERT(!key_stack.empty());
 
     // You can't end a group when reading/writing from a config array
-    assert(array_stack.empty());
+    ASSERT(array_stack.empty());
 
     key_stack.pop_back();
 }
@@ -1155,7 +1155,7 @@ int Config::BeginArray(const std::string& array) {
 
 void Config::EndArray() {
     // You can't end a config array before starting one
-    assert(!array_stack.empty());
+    ASSERT(!array_stack.empty());
 
     // Set the array size to 0 if the array is ended without changing the index
     int size = 0;
@@ -1177,12 +1177,12 @@ void Config::EndArray() {
 
 void Config::SetArrayIndex(const int index) {
     // You can't set the array index if you haven't started one yet
-    assert(!array_stack.empty());
+    ASSERT(!array_stack.empty());
 
     const int array_index = index + 1;
 
     // You can't exceed the known max size of the array by more than 1
-    assert(array_stack.front().size + 1 >= array_index);
+    ASSERT(array_stack.front().size + 1 >= array_index);
 
     // Change the config array size to the current index since you may want
     // to reduce the number of elements that you read back from the config

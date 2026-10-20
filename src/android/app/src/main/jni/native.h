@@ -3,9 +3,6 @@
 
 #include <android/native_window_jni.h>
 #include <optional>
-#include <mutex>
-#include <string>
-#include <vector>
 #include "common/android/applets/software_keyboard.h"
 #include "common/detached_tasks.h"
 #include "core/core.h"
@@ -50,10 +47,8 @@ public:
     void RunEmulation();
     void ShutdownEmulation();
 
-    Core::PerfStatsResults PerfStats();
+    const Core::PerfStatsResults& PerfStats();
     void ConfigureFilesystemProvider(const std::string& filepath);
-    void ClearExternalContentFiles();
-    void AddExternalContentFile(std::string path);
     void InitializeSystem(bool reload);
     void RefreshContentSystem();
     bool RefreshContentIfIdle(bool keys_loaded);
@@ -73,7 +68,6 @@ public:
 
 private:
     void RefreshContentSystemUnlocked();
-    void ConfigureExternalContent();
     static void LoadDiskCacheProgress(VideoCore::LoadCallbackStage stage, int progress, int max);
     static void OnEmulationStopped(Core::SystemResultStatus result);
     static void ChangeProgram(std::size_t program_index);
@@ -98,9 +92,6 @@ private:
     bool m_network_initialized{};
     Common::Android::SoftwareKeyboard::AndroidKeyboard* m_software_keyboard{};
     std::unique_ptr<FileSys::ManualContentProvider> m_manual_provider;
-    // Update and DLC files found beside the game by the frontend, loaded without being installed.
-    std::vector<std::string> m_external_content_paths;
-    std::mutex m_external_content_mutex;
     std::optional<bool> m_firmware_available;
     bool m_firmware_refresh_performed{};
     int m_applet_id{1};

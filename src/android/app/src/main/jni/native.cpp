@@ -16,7 +16,6 @@
 #include <functional>
 #include <iterator>
 #include <limits>
-#include <chrono>
 #include <mutex>
 #include <regex>
 
@@ -394,21 +393,8 @@ std::unique_lock<std::mutex> EmulationSession::AcquireSessionLock() {
     return std::unique_lock{m_mutex};
 }
 
-Core::PerfStatsResults EmulationSession::PerfStats() {
-    // Reading the stats also resets them, and three overlays read them: two
-    // in EmulationFragment and the one on the second screen. Each was dividing
-    // the frames since the previous reader's reset by however many
-    // milliseconds had passed, so a steady 30 showed up as 0, 15, 20 or 80
-    // depending on who read last. Give every reader the same one-second window.
-    static std::mutex perf_mutex;
-    static std::chrono::steady_clock::time_point last_reset{};
-    std::scoped_lock lock{perf_mutex};
-    const auto now = std::chrono::steady_clock::now();
-    if (now - last_reset >= std::chrono::seconds{1}) {
-        m_perf_stats = m_system.GetAndResetPerfStats();
-        last_reset = now;
-    }
-    // A copy taken under the lock, so a reader never sees the next refresh half written.
+const Core::PerfStatsResults& EmulationSession::PerfStats() {
+    m_perf_stats = m_system.GetAndResetPerfStats();
     return m_perf_stats;
 }
 
@@ -418,39 +404,6 @@ void EmulationSession::SurfaceChanged() {
         return;
     }
     m_window->OnSurfaceChanged(m_native_window);
-}
-
-void EmulationSession::ClearExternalContentFiles() {
-    std::scoped_lock lock(m_external_content_mutex);
-    m_external_content_paths.clear();
-}
-
-void EmulationSession::AddExternalContentFile(std::string path) {
-    std::scoped_lock lock(m_external_content_mutex);
-    m_external_content_paths.push_back(std::move(path));
-}
-
-void EmulationSession::ConfigureExternalContent() {
-    auto* provider = m_system.GetFileSystemController().GetExternalContentProvider();
-    if (provider == nullptr) {
-        return;
-    }
-    std::vector<FileSys::VirtualFile> files;
-    std::size_t wanted = 0;
-    {
-        std::scoped_lock lock(m_external_content_mutex);
-        wanted = m_external_content_paths.size();
-        for (const auto& path : m_external_content_paths) {
-            if (auto file = m_system.GetFilesystem()->OpenFile(path, FileSys::OpenMode::Read)) {
-                files.push_back(std::move(file));
-            }
-        }
-    }
-    if (wanted != 0) {
-        LOG_WARNING(Frontend, "External content: {} of {} update and DLC files opened",
-                    files.size(), wanted);
-    }
-    provider->SetFiles(std::move(files));
 }
 
 void EmulationSession::ConfigureFilesystemProvider(const std::string& filepath) {
@@ -648,7 +601,6 @@ Core::SystemResultStatus EmulationSession::InitializeEmulation(const std::string
 
     // Initialize filesystem.
     ConfigureFilesystemProvider(filepath);
-    ConfigureExternalContent();
 
     // Load the ROM.
     Service::AM::FrontendAppletParameters params{
@@ -1368,13 +1320,8 @@ jstring Java_org_citron_citron_1emu_NativeLibrary_getCpuBackend(JNIEnv* env, jcl
 }
 
 jstring Java_org_citron_citron_1emu_NativeLibrary_getGpuDriver(JNIEnv* env, jobject jobj) {
-    // The second screen asks for this as soon as the activity resumes, which is before the
-    // renderer exists.
-    if (EmulationSession::GetInstance().IsRunning()) {
-        return Common::Android::ToJString(
-            env, EmulationSession::GetInstance().System().GPU().Renderer().GetDeviceVendor());
-    }
-    return Common::Android::ToJString(env, "");
+    return Common::Android::ToJString(
+        env, EmulationSession::GetInstance().System().GPU().Renderer().GetDeviceVendor());
 }
 
 void Java_org_citron_citron_1emu_NativeLibrary_applySettings(JNIEnv* env, jobject jobj) {
@@ -1432,7 +1379,7 @@ void Java_org_citron_citron_1emu_NativeLibrary_initializeEmptyUserDirectory(JNIE
 
     const auto user_id = EmulationSession::GetInstance().System().GetProfileManager().GetUser(
         static_cast<std::size_t>(0));
-    assert(user_id);
+    ASSERT(user_id);
 
     const auto user_save_data_path = FileSys::SaveDataFactory::GetFullPath(
         {}, vfs_nand_dir, FileSys::SaveDataSpaceId::User, FileSys::SaveDataType::Account, 1,
@@ -1832,7 +1779,7 @@ jstring Java_org_citron_citron_1emu_NativeLibrary_getSavePath(JNIEnv* env, jobje
     Service::Account::ProfileManager manager;
     // TODO: Pass in a selected user once we get the relevant UI working
     const auto user_id = manager.GetUser(static_cast<std::size_t>(0));
-    assert(user_id);
+    ASSERT(user_id);
 
     const auto nandDir = Common::FS::GetCitronPath(Common::FS::CitronPath::NANDDir);
     auto vfsNandDir = system.GetFilesystem()->OpenDirectory(Common::FS::PathToUTF8String(nandDir),
@@ -1850,7 +1797,7 @@ jstring Java_org_citron_citron_1emu_NativeLibrary_getDefaultProfileSaveDataRoot(
     Service::Account::ProfileManager manager;
     // TODO: Pass in a selected user once we get the relevant UI working
     const auto user_id = manager.GetUser(static_cast<std::size_t>(0));
-    assert(user_id);
+    ASSERT(user_id);
 
     const auto user_save_data_root =
         FileSys::SaveDataFactory::GetUserGameSaveDataRoot(user_id->AsU128(), jfuture);
@@ -1865,17 +1812,6 @@ void Java_org_citron_citron_1emu_NativeLibrary_addFileToFilesystemProvider(JNIEn
 
 void Java_org_citron_citron_1emu_NativeLibrary_clearFilesystemProvider(JNIEnv* env, jobject jobj) {
     EmulationSession::GetInstance().GetContentProvider()->ClearAllEntries();
-}
-
-void Java_org_citron_citron_1emu_NativeLibrary_clearExternalContentFiles(JNIEnv* env,
-                                                                        jobject jobj) {
-    EmulationSession::GetInstance().ClearExternalContentFiles();
-}
-
-void Java_org_citron_citron_1emu_NativeLibrary_addExternalContentFile(JNIEnv* env, jobject jobj,
-                                                                     jstring jpath) {
-    EmulationSession::GetInstance().AddExternalContentFile(
-        Common::Android::GetJString(env, jpath));
 }
 
 jboolean Java_org_citron_citron_1emu_NativeLibrary_areKeysPresent(JNIEnv* env, jobject jobj) {

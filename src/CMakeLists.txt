@@ -51,7 +51,7 @@ if (MSVC)
         /Zo
         /permissive-
         /EHsc
-        /std:c++latest
+        /std:c++20
         /utf-8
         /volatile:iso
         /Zc:inline

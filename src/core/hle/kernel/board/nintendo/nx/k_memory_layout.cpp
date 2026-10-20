@@ -30,16 +30,14 @@ void InsertPoolPartitionRegionIntoBothTrees(KMemoryLayout& memory_layout, size_t
                                             KMemoryRegionType phys_type,
                                             KMemoryRegionType virt_type, u32& cur_attr) {
     const u32 attr = cur_attr++;
-    [[maybe_unused]] const auto inserted = memory_layout.GetPhysicalMemoryRegionTree().Insert(
-        start, size, static_cast<u32>(phys_type), attr);
-    assert(inserted);
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(start, size,
+                                                              static_cast<u32>(phys_type), attr));
     const KMemoryRegion* phys = memory_layout.GetPhysicalMemoryRegionTree().FindByTypeAndAttribute(
         static_cast<u32>(phys_type), attr);
-    assert(phys != nullptr);
-    assert(phys->GetEndAddress() != 0);
-    [[maybe_unused]] const auto inserted_2 = memory_layout.GetVirtualMemoryRegionTree().Insert(
-        phys->GetPairAddress(), size, static_cast<u32>(virt_type), attr);
-    assert(inserted_2);
+    ASSERT(phys != nullptr);
+    ASSERT(phys->GetEndAddress() != 0);
+    ASSERT(memory_layout.GetVirtualMemoryRegionTree().Insert(phys->GetPairAddress(), size,
+                                                             static_cast<u32>(virt_type), attr));
 }
 
 } // namespace
@@ -47,45 +45,33 @@ void InsertPoolPartitionRegionIntoBothTrees(KMemoryLayout& memory_layout, size_t
 namespace Init {
 
 void SetupDevicePhysicalMemoryRegions(KMemoryLayout& memory_layout) {
-    [[maybe_unused]] const auto setup_result =
-        SetupPowerManagementControllerMemoryRegion(memory_layout);
-    assert(setup_result);
-    [[maybe_unused]] const auto inserted_3 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
-        0x70019000, 0x1000, KMemoryRegionType_MemoryController | KMemoryRegionAttr_NoUserMap);
-    assert(inserted_3);
-    [[maybe_unused]] const auto inserted_4 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
-        0x7001C000, 0x1000, KMemoryRegionType_MemoryController0 | KMemoryRegionAttr_NoUserMap);
-    assert(inserted_4);
-    [[maybe_unused]] const auto inserted_5 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
-        0x7001D000, 0x1000, KMemoryRegionType_MemoryController1 | KMemoryRegionAttr_NoUserMap);
-    assert(inserted_5);
-    [[maybe_unused]] const auto inserted_6 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
-        0x50040000, 0x1000, KMemoryRegionType_None | KMemoryRegionAttr_NoUserMap);
-    assert(inserted_6);
-    [[maybe_unused]] const auto inserted_7 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
+    ASSERT(SetupPowerManagementControllerMemoryRegion(memory_layout));
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
+        0x70019000, 0x1000, KMemoryRegionType_MemoryController | KMemoryRegionAttr_NoUserMap));
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
+        0x7001C000, 0x1000, KMemoryRegionType_MemoryController0 | KMemoryRegionAttr_NoUserMap));
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
+        0x7001D000, 0x1000, KMemoryRegionType_MemoryController1 | KMemoryRegionAttr_NoUserMap));
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
+        0x50040000, 0x1000, KMemoryRegionType_None | KMemoryRegionAttr_NoUserMap));
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
         0x50041000, 0x1000,
-        KMemoryRegionType_InterruptDistributor | KMemoryRegionAttr_ShouldKernelMap);
-    assert(inserted_7);
-    [[maybe_unused]] const auto inserted_8 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
+        KMemoryRegionType_InterruptDistributor | KMemoryRegionAttr_ShouldKernelMap));
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
         0x50042000, 0x1000,
-        KMemoryRegionType_InterruptCpuInterface | KMemoryRegionAttr_ShouldKernelMap);
-    assert(inserted_8);
-    [[maybe_unused]] const auto inserted_9 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
-        0x50043000, 0x1D000, KMemoryRegionType_None | KMemoryRegionAttr_NoUserMap);
-    assert(inserted_9);
+        KMemoryRegionType_InterruptCpuInterface | KMemoryRegionAttr_ShouldKernelMap));
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
+        0x50043000, 0x1D000, KMemoryRegionType_None | KMemoryRegionAttr_NoUserMap));
 
     // Map IRAM unconditionally, to support debug-logging-to-iram build config.
-    [[maybe_unused]] const auto inserted_10 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
-        0x40000000, 0x40000, KMemoryRegionType_LegacyLpsIram | KMemoryRegionAttr_ShouldKernelMap);
-    assert(inserted_10);
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
+        0x40000000, 0x40000, KMemoryRegionType_LegacyLpsIram | KMemoryRegionAttr_ShouldKernelMap));
 
     // Above firmware 2.0.0, prevent mapping the bpmp exception vectors or the ipatch region.
-    [[maybe_unused]] const auto inserted_11 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
-        0x6000F000, 0x1000, KMemoryRegionType_None | KMemoryRegionAttr_NoUserMap);
-    assert(inserted_11);
-    [[maybe_unused]] const auto inserted_12 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
-        0x6001DC00, 0x400, KMemoryRegionType_None | KMemoryRegionAttr_NoUserMap);
-    assert(inserted_12);
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
+        0x6000F000, 0x1000, KMemoryRegionType_None | KMemoryRegionAttr_NoUserMap));
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
+        0x6001DC00, 0x400, KMemoryRegionType_None | KMemoryRegionAttr_NoUserMap));
 }
 
 void SetupDramPhysicalMemoryRegions(KMemoryLayout& memory_layout) {
@@ -94,31 +80,27 @@ void SetupDramPhysicalMemoryRegions(KMemoryLayout& memory_layout) {
         KSystemControl::Init::GetKernelPhysicalBaseAddress(DramPhysicalAddress);
 
     // Insert blocks into the tree.
-    [[maybe_unused]] const auto inserted_13 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
-        GetInteger(physical_memory_base_address), intended_memory_size, KMemoryRegionType_Dram);
-    assert(inserted_13);
-    [[maybe_unused]] const auto inserted_14 = memory_layout.GetPhysicalMemoryRegionTree().Insert(
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
+        GetInteger(physical_memory_base_address), intended_memory_size, KMemoryRegionType_Dram));
+    ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
         GetInteger(physical_memory_base_address), ReservedEarlyDramSize,
-        KMemoryRegionType_DramReservedEarly);
-    assert(inserted_14);
+        KMemoryRegionType_DramReservedEarly));
 
     // Insert the KTrace block at the end of Dram, if KTrace is enabled.
     static_assert(!IsKTraceEnabled || KTraceBufferSize > 0);
     if constexpr (IsKTraceEnabled) {
         const KPhysicalAddress ktrace_buffer_phys_addr =
             physical_memory_base_address + intended_memory_size - KTraceBufferSize;
-        [[maybe_unused]] const auto inserted_15 =
-            memory_layout.GetPhysicalMemoryRegionTree().Insert(GetInteger(ktrace_buffer_phys_addr),
-                                                               KTraceBufferSize,
-                                                               KMemoryRegionType_KernelTraceBuffer);
-        assert(inserted_15);
+        ASSERT(memory_layout.GetPhysicalMemoryRegionTree().Insert(
+            GetInteger(ktrace_buffer_phys_addr), KTraceBufferSize,
+            KMemoryRegionType_KernelTraceBuffer));
     }
 }
 
 void SetupPoolPartitionMemoryRegions(KMemoryLayout& memory_layout) {
     // Start by identifying the extents of the DRAM memory region.
     const auto dram_extents = memory_layout.GetMainMemoryPhysicalExtents();
-    assert(dram_extents.GetEndAddress() != 0);
+    ASSERT(dram_extents.GetEndAddress() != 0);
 
     // Determine the end of the pool region.
     const u64 pool_end = dram_extents.GetEndAddress() - KTraceBufferSize;
@@ -127,16 +109,16 @@ void SetupPoolPartitionMemoryRegions(KMemoryLayout& memory_layout) {
     const KMemoryRegion* kernel_dram_region =
         memory_layout.GetPhysicalMemoryRegionTree().FindFirstDerived(
             KMemoryRegionType_DramKernelBase);
-    assert(kernel_dram_region != nullptr);
+    ASSERT(kernel_dram_region != nullptr);
 
     const u64 kernel_dram_start = kernel_dram_region->GetAddress();
-    assert(Common::IsAligned(kernel_dram_start, CarveoutAlignment));
+    ASSERT(Common::IsAligned(kernel_dram_start, CarveoutAlignment));
 
     // Find the start of the pool partitions region.
     const KMemoryRegion* pool_partitions_region =
         memory_layout.GetPhysicalMemoryRegionTree().FindByTypeAndAttribute(
             KMemoryRegionType_DramPoolPartition, 0);
-    assert(pool_partitions_region != nullptr);
+    ASSERT(pool_partitions_region != nullptr);
     const u64 pool_partitions_start = pool_partitions_region->GetAddress();
 
     // Setup the pool partition layouts.

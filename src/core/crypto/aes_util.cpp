@@ -102,7 +102,7 @@ AESCipher<Key, KeySize>::~AESCipher() = default;
 
 template <typename Key, std::size_t KeySize>
 void AESCipher<Key, KeySize>::SetIV(std::span<const u8> data) {
-    assert(data.size() == 16 && "IV must be exactly 16 bytes");
+    ASSERT_MSG(data.size() == 16, "IV must be exactly 16 bytes");
     std::memcpy(ctx->iv, data.data(), 16);
 }
 
@@ -176,6 +176,7 @@ void AESCipher<Key, KeySize>::Transcode(const u8* src, std::size_t size, u8* des
 #if CITRON_HAS_AES_NI
         assert(ctx->rounds == static_cast<int>(AesNi::kRoundKeys128) &&
                "CTR mode requires AES-128 key schedule");
+
         uint8_t ctr_copy[AesNi::kBlockSize];
         std::memcpy(ctr_copy, ctx->iv, AesNi::kBlockSize);
         AesNi::Ctr128(ctx->ks_enc, src, dest, size, ctr_copy, ctx->raw_key);
@@ -239,7 +240,7 @@ void AESCipher<Key, KeySize>::Transcode(const u8* src, std::size_t size, u8* des
         break;
     }
     default:
-        assert(false && "Unknown AES mode");
+        ASSERT_MSG(false, "Unknown AES mode");
     }
 }
 
@@ -247,7 +248,7 @@ template <typename Key, std::size_t KeySize>
 void AESCipher<Key, KeySize>::XTSTranscode(const u8* src, std::size_t size, u8* dest,
                                            std::size_t sector_id, std::size_t sector_size,
                                            Op op) {
-    assert(size % sector_size == 0 && "XTS size must be a multiple of sector_size");
+    ASSERT_MSG(size % sector_size == 0, "XTS size must be a multiple of sector_size");
     for (std::size_t i = 0; i < size; i += sector_size) {
         SetIV(CalculateNintendoTweak(sector_id++));
         Transcode(src + i, sector_size, dest + i, op);

@@ -8,7 +8,7 @@ namespace Service {
 
 void MultiWaitHolder::LinkToMultiWait(MultiWait* multi_wait) {
     if (m_multi_wait != nullptr) {
-        std::unreachable();
+        UNREACHABLE();
     }
 
     m_multi_wait = multi_wait;

@@ -211,7 +211,7 @@ public:
             case Network::Errno::SUCCESS:
                 offset += actual;
                 if (actual == 0) {
-                    assert(is_read);
+                    ASSERT(is_read);
                     self->got_read_eof = true;
                     return errSecEndOfData;
                 }
@@ -225,7 +225,7 @@ public:
                 return errSecIO;
             }
         }
-        assert(offset == requested_len);
+        ASSERT(offset == requested_len);
         return 0;
     }
 

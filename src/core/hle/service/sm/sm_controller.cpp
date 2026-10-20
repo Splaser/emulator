@@ -17,7 +17,7 @@
 namespace Service::SM {
 
 void Controller::ConvertCurrentObjectToDomain(HLERequestContext& ctx) {
-    assert(!ctx.GetManager()->IsDomain() && "Session is already a domain");
+    ASSERT_MSG(!ctx.GetManager()->IsDomain(), "Session is already a domain");
     LOG_DEBUG(Service, "called, server_session={}", ctx.Session()->GetId());
     ctx.GetManager()->ConvertToDomainOnRequestEnd();
 
@@ -37,11 +37,11 @@ void Controller::CloneCurrentObject(HLERequestContext& ctx) {
     // Reserve a new session from the process resource limit.
     Kernel::KScopedResourceReservation session_reservation(
         Kernel::GetCurrentProcessPointer(kernel), Kernel::LimitableResource::SessionCountMax);
-    assert(session_reservation.Succeeded());
+    ASSERT(session_reservation.Succeeded());
 
     // Create the session.
     Kernel::KSession* session = Kernel::KSession::Create(kernel);
-    assert(session != nullptr);
+    ASSERT(session != nullptr);
 
     // Initialize the session.
     session->Initialize(nullptr, 0);

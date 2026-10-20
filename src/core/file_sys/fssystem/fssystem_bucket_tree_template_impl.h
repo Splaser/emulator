@@ -16,9 +16,9 @@ Result BucketTree::ScanContinuousReading(ContinuousReadingInfo* out_info,
     static_assert(std::is_trivial_v<ContinuousReadingParam<EntryType>>);
 
     // Validate our preconditions.
-    assert(this->IsInitialized());
-    assert(out_info != nullptr);
-    assert(m_entry_size == sizeof(EntryType));
+    ASSERT(this->IsInitialized());
+    ASSERT(out_info != nullptr);
+    ASSERT(m_entry_size == sizeof(EntryType));
 
     // Reset the output.
     out_info->Reset();
@@ -96,12 +96,12 @@ Result BucketTree::ScanContinuousReading(ContinuousReadingInfo* out_info,
 
         // Determine the much data there is.
         const auto data_size = next_entry_offset - cur_offset;
-        assert(data_size > 0);
+        ASSERT(data_size > 0);
 
         // Determine how much data we should read.
         const auto remaining_size = end_offset - cur_offset;
         const size_t read_size = static_cast<size_t>(std::min(data_size, remaining_size));
-        assert(read_size <= param.size);
+        ASSERT(read_size <= param.size);
 
         // Update our merge tracking.
         if (entry.IsFragment()) {
@@ -120,7 +120,7 @@ Result BucketTree::ScanContinuousReading(ContinuousReadingInfo* out_info,
 
             // Add the size to the readable amount.
             readable_size += merge_size + read_size;
-            assert(readable_size <= static_cast<s64>(param.size));
+            ASSERT(readable_size <= static_cast<s64>(param.size));
 
             // Update whether we've merged.
             merged |= merge_size > 0;
@@ -129,7 +129,7 @@ Result BucketTree::ScanContinuousReading(ContinuousReadingInfo* out_info,
 
         // Advance.
         cur_offset += read_size;
-        assert(cur_offset <= end_offset);
+        ASSERT(cur_offset <= end_offset);
 
         phys_offset += next_entry_offset - entry_offset;
         entry = next_entry;
@@ -148,7 +148,7 @@ template <typename EntryType>
 Result BucketTree::Visitor::ScanContinuousReading(ContinuousReadingInfo* out_info, s64 offset,
                                                   size_t size) const {
     static_assert(std::is_trivial_v<EntryType>);
-    assert(this->IsValid());
+    ASSERT(this->IsValid());
 
     // Create our parameters.
     ContinuousReadingParam<EntryType> param = {

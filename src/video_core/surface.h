@@ -272,7 +272,7 @@ constexpr std::array<u8, MaxPixelFormat> BLOCK_WIDTH_TABLE = {{
 }};
 
 constexpr u32 DefaultBlockWidth(PixelFormat format) {
-    assert(static_cast<std::size_t>(format) < BLOCK_WIDTH_TABLE.size());
+    ASSERT(static_cast<std::size_t>(format) < BLOCK_WIDTH_TABLE.size());
     return BLOCK_WIDTH_TABLE[static_cast<std::size_t>(format)];
 }
 
@@ -388,7 +388,7 @@ constexpr std::array<u8, MaxPixelFormat> BLOCK_HEIGHT_TABLE = {{
 }};
 
 constexpr u32 DefaultBlockHeight(PixelFormat format) {
-    assert(static_cast<std::size_t>(format) < BLOCK_HEIGHT_TABLE.size());
+    ASSERT(static_cast<std::size_t>(format) < BLOCK_HEIGHT_TABLE.size());
     return BLOCK_HEIGHT_TABLE[static_cast<std::size_t>(format)];
 }
 
@@ -504,7 +504,7 @@ constexpr std::array<u8, MaxPixelFormat> BITS_PER_BLOCK_TABLE = {{
 }};
 
 constexpr u32 BitsPerBlock(PixelFormat format) {
-    assert(static_cast<std::size_t>(format) < BITS_PER_BLOCK_TABLE.size());
+    ASSERT(static_cast<std::size_t>(format) < BITS_PER_BLOCK_TABLE.size());
     return BITS_PER_BLOCK_TABLE[static_cast<std::size_t>(format)];
 }
 

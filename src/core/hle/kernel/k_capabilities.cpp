@@ -77,13 +77,13 @@ Result KCapabilities::SetCorePriorityCapability(const u32 cap) {
     R_UNLESS(min_prio <= max_prio, ResultInvalidCombination);
     R_UNLESS(max_core < Core::Hardware::NumVirtualCores, ResultInvalidCoreId);
 
-    assert(max_prio < Common::BitSize<u64>());
+    ASSERT(max_prio < Common::BitSize<u64>());
 
     // Set core mask.
     for (auto core_id = min_core; core_id <= max_core; core_id++) {
         m_core_mask |= (1ULL << core_id);
     }
-    assert((m_core_mask & Core::Hardware::VirtualCoreMask) == m_core_mask);
+    ASSERT((m_core_mask & Core::Hardware::VirtualCoreMask) == m_core_mask);
 
     // Set physical core mask.
     m_phys_core_mask = Core::Hardware::ConvertVirtualCoreMaskToPhysical(m_core_mask);

@@ -165,7 +165,7 @@ void ShaderCache::RemovePendingShaders() {
         removed_shaders.push_back(entry->data);
 
         const auto it = lookup_cache.find(entry->addr_start);
-        assert(it != lookup_cache.end());
+        ASSERT(it != lookup_cache.end());
         lookup_cache.erase(it);
     }
     marked_for_removal.clear();
@@ -194,11 +194,11 @@ void ShaderCache::RemoveEntryFromInvalidationCache(const Entry* entry) {
     const u64 page_end = (entry->addr_end + CITRON_PAGESIZE - 1) >> CITRON_PAGEBITS;
     for (u64 page = entry->addr_start >> CITRON_PAGEBITS; page < page_end; ++page) {
         const auto entries_it = invalidation_cache.find(page);
-        assert(entries_it != invalidation_cache.end());
+        ASSERT(entries_it != invalidation_cache.end());
         std::vector<Entry*>& entries = entries_it->second;
 
         const auto entry_it = std::ranges::find(entries, entry);
-        assert(entry_it != entries.end());
+        ASSERT(entry_it != entries.end());
         entries.erase(entry_it);
     }
 }

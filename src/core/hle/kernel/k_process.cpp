@@ -757,7 +757,11 @@ Result KProcess::DeleteThreadLocalRegion(
         R_TRY(page_to_free->Finalize(teardown));
         {
             KScopedSchedulerLock sl(m_kernel);
-            m_finalizing_tlp_tree.erase(*page_to_free);
+            const auto finalizing_it =
+                m_finalizing_tlp_tree.find_key(Common::AlignDown(GetInteger(addr), PageSize));
+            assert(finalizing_it != m_finalizing_tlp_tree.end() &&
+                   std::addressof(*finalizing_it) == page_to_free);
+            m_finalizing_tlp_tree.erase(finalizing_it);
         }
 
         KThreadLocalPage::Free(m_kernel, page_to_free);

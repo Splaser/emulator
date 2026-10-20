@@ -494,13 +494,30 @@ if (NOT TARGET sirit::sirit AND NOT TARGET sirit)
     endif()
 endif()
 
-# ── dynarmic (part of this tree: externals/dynarmic) ─────────────────────────
+# ── dynarmic (xinitrcn1 fork) ─────────────────────────────────────────────────
 if ((ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64) AND NOT (MSVC AND ARCHITECTURE_arm64))
     if (NOT TARGET dynarmic::dynarmic)
-        set(DYNARMIC_USE_PRECOMPILED_HEADERS ${CITRON_USE_PRECOMPILED_HEADERS})
-        set(DYNARMIC_TESTS OFF)
-        add_subdirectory("${CMAKE_SOURCE_DIR}/externals/dynarmic" "${CMAKE_BINARY_DIR}/dynarmic")
-        add_library(dynarmic::dynarmic ALIAS dynarmic)
+        CPMAddPackage(
+            NAME dynarmic
+            GITHUB_REPOSITORY xinitrcn1/dynarmic
+            GIT_TAG 7bec834bcadbb8b7def7c552a08ad4ac189d4397
+            OPTIONS
+                "DYNARMIC_USE_PRECOMPILED_HEADERS ${CITRON_USE_PRECOMPILED_HEADERS}"
+                "DYNARMIC_IGNORE_ASSERTS ON"
+                "DYNARMIC_TESTS OFF"
+        )
+        if (TARGET dynarmic AND NOT TARGET dynarmic::dynarmic)
+            add_library(dynarmic::dynarmic ALIAS dynarmic)
+        endif()
+        if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND dynarmic_ADDED)
+            execute_process(
+                COMMAND git apply --ignore-whitespace
+                        "${CMAKE_SOURCE_DIR}/patches/mcl_clang_template_fix.patch"
+                WORKING_DIRECTORY "${dynarmic_SOURCE_DIR}/externals/mcl"
+                RESULT_VARIABLE _mcl_patch
+                OUTPUT_QUIET ERROR_QUIET
+            )
+        endif()
     endif()
 endif()
 

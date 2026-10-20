@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
-#include <vector>
 
 #include "audio_core/common/fft.h"
 #include "common/logging.h"

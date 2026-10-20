@@ -45,9 +45,7 @@ Result OpusDecoder::Initialize(const OpusParametersEx& params,
     ON_RESULT_FAILURE {
         if (shared_memory_mapped) {
             shared_memory_mapped = false;
-            [[maybe_unused]] const auto unmap_memory_result =
-                hardware_opus.UnmapMemory(shared_buffer.get(), shared_buffer_size);
-            assert(R_SUCCEEDED(unmap_memory_result));
+            ASSERT(R_SUCCEEDED(hardware_opus.UnmapMemory(shared_buffer.get(), shared_buffer_size)));
         }
     };
 
@@ -78,9 +76,7 @@ Result OpusDecoder::Initialize(const OpusMultiStreamParametersEx& params,
     ON_RESULT_FAILURE {
         if (shared_memory_mapped) {
             shared_memory_mapped = false;
-            [[maybe_unused]] const auto unmap_memory_result_2 =
-                hardware_opus.UnmapMemory(shared_buffer.get(), shared_buffer_size);
-            assert(R_SUCCEEDED(unmap_memory_result_2));
+            ASSERT(R_SUCCEEDED(hardware_opus.UnmapMemory(shared_buffer.get(), shared_buffer_size)));
         }
     };
 

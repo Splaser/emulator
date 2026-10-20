@@ -77,7 +77,7 @@ void NpadAbstractLedHandler::SetNpadLedHandlerLedPattern() {
         left_pattern = Core::HID::LedPattern{0, 0, 0, 0};
         break;
     default:
-        assert(false && "Invalid npad id type");
+        ASSERT_MSG(false, "Invalid npad id type");
         break;
     }
 
@@ -111,7 +111,7 @@ void NpadAbstractLedHandler::SetNpadLedHandlerLedPattern() {
         right_pattern = Core::HID::LedPattern{0, 0, 0, 0};
         break;
     default:
-        assert(false && "Invalid npad id type");
+        ASSERT_MSG(false, "Invalid npad id type");
         break;
     }
 }

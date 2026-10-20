@@ -55,16 +55,16 @@ public:
     void Deallocate() {
         // Shrink the buffer to empty.
         this->Shrink(0);
-        assert(m_buffer == nullptr);
+        ASSERT(m_buffer == nullptr);
     }
 
     char* GetBuffer() const {
-        assert(m_buffer != nullptr);
+        ASSERT(m_buffer != nullptr);
         return m_buffer;
     }
 
     size_t GetSize() const {
-        assert(m_buffer != nullptr);
+        ASSERT(m_buffer != nullptr);
         return m_size;
     }
 

@@ -20,7 +20,7 @@ ConsumerBase::ConsumerBase(std::shared_ptr<BufferQueueConsumer> consumer_)
 ConsumerBase::~ConsumerBase() {
     std::scoped_lock lock{mutex};
 
-    assert(is_abandoned && "consumer is not abandoned!");
+    ASSERT_MSG(is_abandoned, "consumer is not abandoned!");
 }
 
 void ConsumerBase::Connect(bool controlled_by_app) {

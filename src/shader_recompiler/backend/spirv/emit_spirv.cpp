@@ -100,9 +100,7 @@ void Invoke(EmitContext& ctx, IR::Inst* inst) {
     }
 }
 
-// The unimplemented emitters only say "SPIR-V Instruction is not implemented"; the opcode is
-// added here so the log names the instruction a failed shader needs.
-void EmitInst(EmitContext& ctx, IR::Inst* inst) try {
+void EmitInst(EmitContext& ctx, IR::Inst* inst) {
     switch (inst->GetOpcode()) {
 #define OPCODE(name, result_type, ...)                                                             \
     case IR::Opcode::name:                                                                         \
@@ -111,9 +109,6 @@ void EmitInst(EmitContext& ctx, IR::Inst* inst) try {
 #undef OPCODE
     }
     throw LogicError("Invalid opcode {}", inst->GetOpcode());
-} catch (Exception& exception) {
-    exception.Append(fmt::format(" (IR opcode {})", inst->GetOpcode()));
-    throw;
 }
 
 Id TypeId(const EmitContext& ctx, IR::Type type) {
@@ -138,7 +133,7 @@ void Traverse(EmitContext& ctx, IR::Program& program) {
             }
             current_block = node.data.block;
             ctx.AddLabel(label);
-            for (IR::Inst& inst : *node.data.block) {
+            for (IR::Inst& inst : node.data.block->Instructions()) {
                 EmitInst(ctx, &inst);
             }
             break;
@@ -480,13 +475,10 @@ void PatchPhiNodes(IR::Program& program, EmitContext& ctx) {
             ++inst;
             if (inst == program.blocks[block_index]->end() ||
                 inst->GetOpcode() != IR::Opcode::Phi) {
-                // Skip to the next block that starts with a phi. A block can be empty, and an
-                // end() iterator must not be dereferenced.
                 do {
                     ++block_index;
                     inst = program.blocks[block_index]->begin();
-                } while (inst == program.blocks[block_index]->end() ||
-                         inst->GetOpcode() != IR::Opcode::Phi);
+                } while (inst->GetOpcode() != IR::Opcode::Phi);
             }
         }
         return ctx.Def(inst->Arg(phi_arg));

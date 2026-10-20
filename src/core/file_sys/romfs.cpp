@@ -152,7 +152,7 @@ VirtualDir ExtractRomFS(VirtualFile file) {
         return root;
     }
 
-    assert(false);
+    ASSERT(false);
     return nullptr;
 }
 

@@ -97,7 +97,7 @@ public:
         citron_path_cache = citron_path / CACHE_DIR;
         citron_path_config = citron_path / CONFIG_DIR;
 #elif ANDROID
-        assert(!citron_path.empty());
+        ASSERT(!citron_path.empty());
         citron_path_cache = citron_path / CACHE_DIR;
         citron_path_config = citron_path / CONFIG_DIR;
 #else

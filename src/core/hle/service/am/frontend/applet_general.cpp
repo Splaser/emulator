@@ -45,9 +45,9 @@ void Auth::Initialize() {
     complete = false;
 
     const std::shared_ptr<IStorage> storage = PopInData();
-    assert(storage != nullptr);
+    ASSERT(storage != nullptr);
     const auto data = storage->GetData();
-    assert(data.size() >= 0xC);
+    ASSERT(data.size() >= 0xC);
 
     struct Arg {
         INSERT_PADDING_BYTES(4);
@@ -73,7 +73,7 @@ Result Auth::GetStatus() const {
 }
 
 void Auth::ExecuteInteractive() {
-    assert(false && "Unexpected interactive applet data.");
+    ASSERT_MSG(false, "Unexpected interactive applet data.");
 }
 
 void Auth::Execute() {
@@ -164,9 +164,9 @@ void PhotoViewer::Initialize() {
     complete = false;
 
     const std::shared_ptr<IStorage> storage = PopInData();
-    assert(storage != nullptr);
+    ASSERT(storage != nullptr);
     const auto data = storage->GetData();
-    assert(!data.empty());
+    ASSERT(!data.empty());
     mode = static_cast<PhotoViewerAppletMode>(data[0]);
 }
 
@@ -175,7 +175,7 @@ Result PhotoViewer::GetStatus() const {
 }
 
 void PhotoViewer::ExecuteInteractive() {
-    assert(false && "Unexpected interactive applet data.");
+    ASSERT_MSG(false, "Unexpected interactive applet data.");
 }
 
 void PhotoViewer::Execute() {

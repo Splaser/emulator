@@ -15,8 +15,7 @@ Mutex::Mutex(Core::System& system) : m_system(system) {
     // Register the event.
     Kernel::KEvent::Register(system.Kernel(), m_event);
 
-    [[maybe_unused]] const auto signal_result = m_event->Signal();
-    assert(R_SUCCEEDED(signal_result));
+    ASSERT(R_SUCCEEDED(m_event->Signal()));
 }
 
 Mutex::~Mutex() {
@@ -32,9 +31,8 @@ void Mutex::lock() {
 
         // The event was already cleared!
         // Wait for it to become signaled again.
-        [[maybe_unused]] const auto wait_result =
-            Kernel::KSynchronizationObject::Wait(m_system.Kernel(), &index, &obj, 1, -1);
-        assert(R_SUCCEEDED(wait_result));
+        ASSERT(R_SUCCEEDED(
+            Kernel::KSynchronizationObject::Wait(m_system.Kernel(), &index, &obj, 1, -1)));
     }
 
     // We successfully cleared the event, and now have exclusive ownership.
@@ -42,8 +40,7 @@ void Mutex::lock() {
 
 void Mutex::unlock() {
     // Unlock.
-    [[maybe_unused]] const auto signal_result_2 = m_event->Signal();
-    assert(R_SUCCEEDED(signal_result_2));
+    ASSERT(R_SUCCEEDED(m_event->Signal()));
 }
 
 } // namespace Service

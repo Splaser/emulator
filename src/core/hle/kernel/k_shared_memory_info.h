@@ -29,11 +29,11 @@ public:
 
     constexpr void Open() {
         ++m_reference_count;
-        assert(m_reference_count > 0);
+        ASSERT(m_reference_count > 0);
     }
 
     constexpr bool Close() {
-        assert(m_reference_count > 0);
+        ASSERT(m_reference_count > 0);
         return (--m_reference_count) == 0;
     }
 

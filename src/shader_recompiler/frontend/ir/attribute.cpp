@@ -9,8 +9,7 @@
 namespace Shader::IR {
 
 bool IsGeneric(Attribute attribute) noexcept {
-    // Generic31W, not Generic31X: the last three components of the last generic are generic too.
-    return attribute >= Attribute::Generic0X && attribute <= Attribute::Generic31W;
+    return attribute >= Attribute::Generic0X && attribute <= Attribute::Generic31X;
 }
 
 u32 GenericAttributeIndex(Attribute attribute) {

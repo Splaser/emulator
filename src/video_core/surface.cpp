@@ -29,7 +29,7 @@ SurfaceTarget SurfaceTargetFromTextureType(Tegra::Texture::TextureType texture_t
         return SurfaceTarget::Texture2DArray;
     default:
         LOG_CRITICAL(HW_GPU, "Unimplemented texture_type={}", texture_type);
-        assert(false);
+        ASSERT(false);
         return SurfaceTarget::Texture2D;
     }
 }
@@ -48,7 +48,7 @@ bool SurfaceTargetIsLayered(SurfaceTarget target) {
         return true;
     default:
         LOG_CRITICAL(HW_GPU, "Unimplemented surface_target={}", target);
-        assert(false);
+        ASSERT(false);
         return false;
     }
 }
@@ -67,7 +67,7 @@ bool SurfaceTargetIsArray(SurfaceTarget target) {
         return true;
     default:
         LOG_CRITICAL(HW_GPU, "Unimplemented surface_target={}", target);
-        assert(false);
+        ASSERT(false);
         return false;
     }
 }
@@ -232,7 +232,7 @@ SurfaceType GetFormatType(PixelFormat pixel_format) {
     }
 
     // TODO(Subv): Implement the other formats
-    assert(false);
+    ASSERT(false);
 
     return SurfaceType::Invalid;
 }

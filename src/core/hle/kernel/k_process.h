@@ -138,16 +138,16 @@ private:
     void FinishTermination();
 
     void PinThread(s32 core_id, KThread* thread) {
-        assert(0 <= core_id && core_id < static_cast<s32>(Core::Hardware::NUM_CPU_CORES));
-        assert(thread != nullptr);
-        assert(m_pinned_threads[core_id] == nullptr);
+        ASSERT(0 <= core_id && core_id < static_cast<s32>(Core::Hardware::NUM_CPU_CORES));
+        ASSERT(thread != nullptr);
+        ASSERT(m_pinned_threads[core_id] == nullptr);
         m_pinned_threads[core_id] = thread;
     }
 
     void UnpinThread(s32 core_id, KThread* thread) {
-        assert(0 <= core_id && core_id < static_cast<s32>(Core::Hardware::NUM_CPU_CORES));
-        assert(thread != nullptr);
-        assert(m_pinned_threads[core_id] == thread);
+        ASSERT(0 <= core_id && core_id < static_cast<s32>(Core::Hardware::NUM_CPU_CORES));
+        ASSERT(thread != nullptr);
+        ASSERT(m_pinned_threads[core_id] == thread);
         m_pinned_threads[core_id] = nullptr;
     }
 
@@ -284,7 +284,7 @@ public:
     bool ReleaseUserException(KThread* thread);
 
     KThread* GetPinnedThread(s32 core_id) const {
-        assert(0 <= core_id && core_id < static_cast<s32>(Core::Hardware::NUM_CPU_CORES));
+        ASSERT(0 <= core_id && core_id < static_cast<s32>(Core::Hardware::NUM_CPU_CORES));
         return m_pinned_threads[core_id];
     }
 
@@ -535,7 +535,7 @@ public:
     }
 
     virtual bool IsSignaled() const override {
-        assert(KScheduler::IsSchedulerLockedByCurrentThread(m_kernel));
+        ASSERT(KScheduler::IsSchedulerLockedByCurrentThread(m_kernel));
         return m_is_signaled;
     }
 

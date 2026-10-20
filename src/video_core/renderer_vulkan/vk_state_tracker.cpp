@@ -93,7 +93,6 @@ void SetupDirtyDepthBias(Tables& tables) {
     table[OFF(depth_bias)] = DepthBias;
     table[OFF(depth_bias_clamp)] = DepthBias;
     table[OFF(slope_scale_depth_bias)] = DepthBias;
-    table[OFF(depth_bias_control)] = DepthBias;
 }
 
 void SetupDirtyBlendConstants(Tables& tables) {
@@ -121,8 +120,6 @@ void SetupDirtyStencilProperties(Tables& tables) {
 void SetupDirtyLineWidth(Tables& tables) {
     tables[0][OFF(line_width_smooth)] = LineWidth;
     tables[0][OFF(line_width_aliased)] = LineWidth;
-    // The width used depends on which mode is on (vk_rasterizer.cpp UpdateLineWidth).
-    tables[0][OFF(line_anti_alias_enable)] = LineWidth;
 }
 
 void SetupDirtyCullMode(Tables& tables) {

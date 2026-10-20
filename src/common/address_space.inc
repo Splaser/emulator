@@ -34,20 +34,19 @@ MAP_MEMBER_CONST()::FlatAddressSpaceMap(VaType va_limit_, std::function<void(VaT
     : va_limit{va_limit_}
     , unmap_callback{std::move(unmap_callback_)}
 {
-    assert(va_limit <= VaMaximum && "Invalid VA limit!");
+    ASSERT(va_limit <= VaMaximum && "Invalid VA limit!");
 }
 
 MAP_MEMBER(void)::MapLocked(VaType virt, PaType phys, VaType size, ExtraBlockInfo extra_info) {
     VaType virt_end{virt + size};
 
-    assert(virt_end <= VaMaximum &&
-           "Trying to map a block past the VA limit: virt_end: 0x{:X}, va_limit: 0x{:X}" &&
-           (void(virt_end), void(va_limit), true));
+    ASSERT_MSG(virt_end <= VaMaximum,
+        "Trying to map a block past the VA limit: virt_end: 0x{:X}, va_limit: 0x{:X}",
+        virt_end, va_limit);
 
     auto block_end_successor{std::lower_bound(blocks.begin(), blocks.end(), virt_end)};
     if (block_end_successor == blocks.begin()) {
-        assert(false && "Trying to map a block before the VA start: virt_end: 0x{:X}" &&
-               (void(virt_end), true));
+        ASSERT_MSG(false, "Trying to map a block before the VA start: virt_end: 0x{:X}", virt_end);
     }
 
     auto block_end_predecessor{std::prev(block_end_successor)};
@@ -122,8 +121,7 @@ MAP_MEMBER(void)::MapLocked(VaType virt, PaType phys, VaType size, ExtraBlockInf
 
     // Check that the start successor is either the end block or something in between
     if (block_start_successor->virt > virt_end) {
-        assert(false && "Unsorted block in AS map: virt: 0x{:X}" &&
-               (void(block_start_successor->virt), true));
+        ASSERT_MSG(false, "Unsorted block in AS map: virt: 0x{:X}", block_start_successor->virt);
     } else if (block_start_successor->virt == virt_end) {
         // We need to create a new block as there are none spare that we would overwrite
         blocks.insert(block_start_successor, Block(virt, phys, extra_info));
@@ -147,14 +145,14 @@ MAP_MEMBER(void)::MapLocked(VaType virt, PaType phys, VaType size, ExtraBlockInf
 MAP_MEMBER(void)::UnmapLocked(VaType virt, VaType size) {
     VaType virt_end{virt + size};
 
-    assert(virt_end <= va_limit &&
-           "Trying to map a block past the VA limit: virt_end: 0x{:X}, va_limit: 0x{:X}" &&
-           (void(virt_end), void(va_limit), true));
+    ASSERT_MSG(virt_end <= va_limit,
+        "Trying to map a block past the VA limit: virt_end: 0x{:X}, va_limit: 0x{:X}",
+        virt_end, va_limit);
 
     auto block_end_successor{std::lower_bound(blocks.begin(), blocks.end(), virt_end)};
     if (block_end_successor == blocks.begin()) {
-        assert(false && "Trying to unmap a block before the VA start: virt_end: 0x{:X}" &&
-               (void(virt_end), true));
+        ASSERT_MSG(false, "Trying to unmap a block before the VA start: virt_end: 0x{:X}",
+                   virt_end);
     }
 
     auto block_end_predecessor{std::prev(block_end_successor)};
@@ -188,7 +186,7 @@ MAP_MEMBER(void)::UnmapLocked(VaType virt, VaType size) {
         if (eraseEnd != blocks.end() &&
             (eraseEnd == block_start_successor ||
              (block_start_predecessor->Unmapped() && eraseEnd->Unmapped()))) {
-            assert(false && "Multiple contiguous unmapped regions are unsupported!");
+            ASSERT_MSG(false, "Multiple contiguous unmapped regions are unsupported!");
         }
 
         blocks.erase(block_start_successor, eraseEnd);
@@ -215,7 +213,7 @@ MAP_MEMBER(void)::UnmapLocked(VaType virt, VaType size) {
         return; // The region is unmapped here and doesn't need splitting, bail out early
     } else if (block_end_successor == blocks.end()) {
         // This should never happen as the end should always follow an unmapped block
-        assert(false && "Unexpected Memory Manager state!");
+        ASSERT_MSG(false, "Unexpected Memory Manager state!");
     } else if (block_end_successor->virt != virt_end) {
         // If one block is directly in front then we don't have to add a tail
 
@@ -254,8 +252,7 @@ MAP_MEMBER(void)::UnmapLocked(VaType virt, VaType size) {
     auto block_start_successor{std::next(block_start_predecessor)};
 
     if (block_start_successor->virt > virt_end) {
-        assert(false && "Unsorted block in AS map: virt: 0x{:X}" &&
-               (void(block_start_successor->virt), true));
+        ASSERT_MSG(false, "Unsorted block in AS map: virt: 0x{:X}", block_start_successor->virt);
     } else if (block_start_successor->virt == virt_end) {
         // There are no blocks between the start and the end that would let us skip inserting a new
         // one for head
@@ -297,7 +294,7 @@ ALLOC_MEMBER(VaType)::Allocate(VaType size) {
         auto alloc_end_successor{
             std::lower_bound(this->blocks.begin(), this->blocks.end(), alloc_end)};
         if (alloc_end_successor == this->blocks.begin()) {
-            assert(false && "First block in AS map is invalid!");
+            ASSERT_MSG(false, "First block in AS map is invalid!");
         }
 
         auto alloc_end_predecessor{std::prev(alloc_end_successor)};
@@ -331,7 +328,7 @@ ALLOC_MEMBER(VaType)::Allocate(VaType size) {
         current_linear_alloc_end = alloc_start + size;
     } else { // If linear allocation overflows the AS then find a gap
         if (this->blocks.size() <= 2) {
-            assert(false && "Unexpected allocator state!");
+            ASSERT_MSG(false, "Unexpected allocator state!");
         }
 
         auto search_predecessor{std::next(this->blocks.begin())};

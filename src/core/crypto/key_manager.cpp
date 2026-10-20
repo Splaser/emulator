@@ -131,7 +131,7 @@ u64 GetSignatureTypeDataSize(SignatureType type) {
     case SignatureType::ECDSA_SHA256:
         return 0x3C;
     }
-    std::unreachable();
+    UNREACHABLE();
 }
 
 u64 GetSignatureTypePaddingSize(SignatureType type) {
@@ -145,7 +145,7 @@ u64 GetSignatureTypePaddingSize(SignatureType type) {
     case SignatureType::ECDSA_SHA256:
         return 0x40;
     }
-    std::unreachable();
+    UNREACHABLE();
 }
 
 bool Ticket::IsValid() const {
@@ -676,7 +676,7 @@ std::optional<Key128> KeyManager::ParseTicketTitleKey(const Ticket& ticket) {
     if (!offset) {
         return std::nullopt;
     }
-    assert(*offset > 0);
+    ASSERT(*offset > 0);
 
     Key128 key_temp{};
     std::memcpy(key_temp.data(), m_2.data() + *offset, key_temp.size());

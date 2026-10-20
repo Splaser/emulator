@@ -51,7 +51,7 @@ private:
                 }
             }
         }
-        std::unreachable();
+        UNREACHABLE();
     }();
 
     template <typename T>

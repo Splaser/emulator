@@ -88,7 +88,7 @@ struct KernelCore::Impl {
         // Initialize the Dynamic Slab Heaps.
         {
             const auto& pt_heap_region = memory_layout->GetPageTableHeapRegion();
-            assert(pt_heap_region.GetEndAddress() != 0);
+            ASSERT(pt_heap_region.GetEndAddress() != 0);
 
             InitializeResourceManagers(kernel, pt_heap_region.GetAddress(),
                                        pt_heap_region.GetSize());
@@ -200,16 +200,12 @@ struct KernelCore::Impl {
 
             auto* main_thread{Kernel::KThread::Create(system.Kernel())};
             main_thread->SetCurrentCore(core);
-            [[maybe_unused]] const auto initialize_main_thread_result =
-                Kernel::KThread::InitializeMainThread(system, main_thread, core);
-            assert(initialize_main_thread_result.IsSuccess());
+            ASSERT(Kernel::KThread::InitializeMainThread(system, main_thread, core).IsSuccess());
             KThread::Register(system.Kernel(), main_thread);
 
             auto* idle_thread{Kernel::KThread::Create(system.Kernel())};
             idle_thread->SetCurrentCore(core);
-            [[maybe_unused]] const auto initialize_idle_thread_result =
-                Kernel::KThread::InitializeIdleThread(system, idle_thread, core);
-            assert(initialize_idle_thread_result.IsSuccess());
+            ASSERT(Kernel::KThread::InitializeIdleThread(system, idle_thread, core).IsSuccess());
             KThread::Register(system.Kernel(), idle_thread);
 
             schedulers[i]->Initialize(main_thread, idle_thread, core);
@@ -228,28 +224,23 @@ struct KernelCore::Impl {
         const auto kernel_size{sizes.second};
 
         // If setting the default system values fails, then something seriously wrong has occurred.
-        [[maybe_unused]] const auto set_limit_value_result =
-            system_resource_limit->SetLimitValue(LimitableResource::PhysicalMemoryMax, total_size);
-        assert(set_limit_value_result.IsSuccess());
-        [[maybe_unused]] const auto set_limit_value_result_2 =
-            system_resource_limit->SetLimitValue(LimitableResource::ThreadCountMax, 800);
-        assert(set_limit_value_result_2.IsSuccess());
-        [[maybe_unused]] const auto set_limit_value_result_3 =
-            system_resource_limit->SetLimitValue(LimitableResource::EventCountMax, 900);
-        assert(set_limit_value_result_3.IsSuccess());
-        [[maybe_unused]] const auto set_limit_value_result_4 =
-            system_resource_limit->SetLimitValue(LimitableResource::TransferMemoryCountMax, 200);
-        assert(set_limit_value_result_4.IsSuccess());
-        [[maybe_unused]] const auto set_limit_value_result_5 =
-            system_resource_limit->SetLimitValue(LimitableResource::SessionCountMax, 1133);
-        assert(set_limit_value_result_5.IsSuccess());
+        ASSERT(
+            system_resource_limit->SetLimitValue(LimitableResource::PhysicalMemoryMax, total_size)
+                .IsSuccess());
+        ASSERT(system_resource_limit->SetLimitValue(LimitableResource::ThreadCountMax, 800)
+                   .IsSuccess());
+        ASSERT(system_resource_limit->SetLimitValue(LimitableResource::EventCountMax, 900)
+                   .IsSuccess());
+        ASSERT(system_resource_limit->SetLimitValue(LimitableResource::TransferMemoryCountMax, 200)
+                   .IsSuccess());
+        ASSERT(system_resource_limit->SetLimitValue(LimitableResource::SessionCountMax, 1133)
+                   .IsSuccess());
         system_resource_limit->Reserve(LimitableResource::PhysicalMemoryMax, kernel_size);
 
         // Reserve secure applet memory, introduced in firmware 5.0.0
         constexpr u64 secure_applet_memory_size{4_MiB};
-        [[maybe_unused]] const auto reserved = system_resource_limit->Reserve(
-            LimitableResource::PhysicalMemoryMax, secure_applet_memory_size);
-        assert(reserved);
+        ASSERT(system_resource_limit->Reserve(LimitableResource::PhysicalMemoryMax,
+                                              secure_applet_memory_size));
     }
 
     void InitializePreemption(KernelCore& kernel) {
@@ -270,13 +261,13 @@ struct KernelCore::Impl {
 
     void InitializeResourceManagers(KernelCore& kernel, KVirtualAddress address, size_t size) {
         // Ensure that the buffer is suitable for our use.
-        assert(Common::IsAligned(GetInteger(address), PageSize));
-        assert(Common::IsAligned(size, PageSize));
+        ASSERT(Common::IsAligned(GetInteger(address), PageSize));
+        ASSERT(Common::IsAligned(size, PageSize));
 
         // Ensure that we have space for our reference counts.
         const size_t rc_size =
             Common::AlignUp(KPageTableSlabHeap::CalculateReferenceCountSize(size), PageSize);
-        assert(rc_size < size);
+        ASSERT(rc_size < size);
         size -= rc_size;
 
         // Initialize the resource managers' shared page manager.
@@ -331,7 +322,7 @@ struct KernelCore::Impl {
         sys_page_table_manager->Initialize(sys_dynamic_page_manager, page_table_heap.get());
 
         // Check that we have the correct number of dynamic pages available.
-        assert(resource_manager_page_manager->GetCount() -
+        ASSERT(resource_manager_page_manager->GetCount() -
                    resource_manager_page_manager->GetUsed() ==
                ReservedDynamicPageCount);
 
@@ -351,10 +342,9 @@ struct KernelCore::Impl {
     void InitializeShutdownThreads() {
         for (u32 core_id = 0; core_id < Core::Hardware::NUM_CPU_CORES; core_id++) {
             shutdown_threads[core_id] = KThread::Create(system.Kernel());
-            [[maybe_unused]] const auto initialize_high_priority_thread_result =
-                KThread::InitializeHighPriorityThread(system, shutdown_threads[core_id], {}, {},
-                                                      core_id);
-            assert(initialize_high_priority_thread_result.IsSuccess());
+            ASSERT(KThread::InitializeHighPriorityThread(system, shutdown_threads[core_id], {}, {},
+                                                         core_id)
+                       .IsSuccess());
             KThread::Register(system.Kernel(), shutdown_threads[core_id]);
         }
     }
@@ -373,10 +363,10 @@ struct KernelCore::Impl {
     /// Sets the host thread ID for the caller.
     LTO_NOINLINE u32 SetHostThreadId(std::size_t core_id) {
         // This should only be called during core init.
-        assert(host_thread_id == UINT8_MAX);
+        ASSERT(host_thread_id == UINT8_MAX);
 
         // The first four slots are reserved for CPU core threads
-        assert(core_id < Core::Hardware::NUM_CPU_CORES);
+        ASSERT(core_id < Core::Hardware::NUM_CPU_CORES);
         host_thread_id = static_cast<u8>(core_id);
         return host_thread_id;
     }
@@ -389,9 +379,7 @@ struct KernelCore::Impl {
     // Gets the dummy KThread for the caller, allocating a new one if this is the first time
     LTO_NOINLINE KThread* GetHostDummyThread(KThread* existing_thread) {
         const auto initialize{[](KThread* thread) LTO_NOINLINE {
-            [[maybe_unused]] const auto initialize_dummy_thread_result =
-                KThread::InitializeDummyThread(thread, nullptr);
-            assert(initialize_dummy_thread_result.IsSuccess());
+            ASSERT(KThread::InitializeDummyThread(thread, nullptr).IsSuccess());
             return thread;
         }};
 
@@ -402,7 +390,7 @@ struct KernelCore::Impl {
 
     /// Registers a CPU core thread by allocating a host thread ID for it
     void RegisterCoreThread(std::size_t core_id) {
-        assert(core_id < Core::Hardware::NUM_CPU_CORES);
+        ASSERT(core_id < Core::Hardware::NUM_CPU_CORES);
         const auto this_id = SetHostThreadId(core_id);
         if (!is_multicore) {
             single_core_thread_id = this_id;
@@ -429,7 +417,7 @@ struct KernelCore::Impl {
     }
 
     LTO_NOINLINE void SetIsPhantomModeForSingleCore(bool value) {
-        assert(!is_multicore);
+        ASSERT(!is_multicore);
         is_phantom_mode_for_singlecore = value;
     }
 
@@ -478,9 +466,8 @@ struct KernelCore::Impl {
         if (!(kernel_region_start + KernelRegionSize - 1 <= KernelVirtualAddressSpaceLast)) {
             kernel_region_size = KernelVirtualAddressSpaceEnd - GetInteger(kernel_region_start);
         }
-        [[maybe_unused]] const auto inserted = memory_layout->GetVirtualMemoryRegionTree().Insert(
-            GetInteger(kernel_region_start), kernel_region_size, KMemoryRegionType_Kernel);
-        assert(inserted);
+        ASSERT(memory_layout->GetVirtualMemoryRegionTree().Insert(
+            GetInteger(kernel_region_start), kernel_region_size, KMemoryRegionType_Kernel));
 
         // Setup the code region.
         constexpr size_t CodeRegionAlign = PageSize;
@@ -489,9 +476,8 @@ struct KernelCore::Impl {
         constexpr KVirtualAddress code_region_end =
             Common::AlignUp(GetInteger(code_end_virt_addr), CodeRegionAlign);
         constexpr size_t code_region_size = code_region_end - code_region_start;
-        [[maybe_unused]] const auto inserted_2 = memory_layout->GetVirtualMemoryRegionTree().Insert(
-            GetInteger(code_region_start), code_region_size, KMemoryRegionType_KernelCode);
-        assert(inserted_2);
+        ASSERT(memory_layout->GetVirtualMemoryRegionTree().Insert(
+            GetInteger(code_region_start), code_region_size, KMemoryRegionType_KernelCode));
 
         // Setup board-specific device physical regions.
         Init::SetupDevicePhysicalMemoryRegions(*memory_layout);
@@ -506,7 +492,7 @@ struct KernelCore::Impl {
             for (const auto& region : memory_layout->GetPhysicalMemoryRegionTree()) {
                 if (region.HasTypeAttribute(KMemoryRegionAttr_ShouldKernelMap)) {
                     // Check that the region is valid.
-                    assert(region.GetEndAddress() != 0);
+                    ASSERT(region.GetEndAddress() != 0);
 
                     // Account for the region.
                     misc_region_needed_size +=
@@ -524,15 +510,14 @@ struct KernelCore::Impl {
         constexpr size_t MiscRegionMinimumSize = 32_MiB;
         const size_t misc_region_size = Common::AlignUp(
             std::max(misc_region_needed_size, MiscRegionMinimumSize), MiscRegionAlign);
-        assert(misc_region_size > 0);
+        ASSERT(misc_region_size > 0);
 
         // Setup the misc region.
         const KVirtualAddress misc_region_start =
             memory_layout->GetVirtualMemoryRegionTree().GetRandomAlignedRegion(
                 misc_region_size, MiscRegionAlign, KMemoryRegionType_Kernel);
-        [[maybe_unused]] const auto inserted_3 = memory_layout->GetVirtualMemoryRegionTree().Insert(
-            GetInteger(misc_region_start), misc_region_size, KMemoryRegionType_KernelMisc);
-        assert(inserted_3);
+        ASSERT(memory_layout->GetVirtualMemoryRegionTree().Insert(
+            GetInteger(misc_region_start), misc_region_size, KMemoryRegionType_KernelMisc));
 
         // Determine if we'll use extra thread resources.
         const bool use_extra_resources = KSystemControl::Init::ShouldIncreaseThreadResourceLimit();
@@ -543,9 +528,8 @@ struct KernelCore::Impl {
         const KVirtualAddress stack_region_start =
             memory_layout->GetVirtualMemoryRegionTree().GetRandomAlignedRegion(
                 StackRegionSize, StackRegionAlign, KMemoryRegionType_Kernel);
-        [[maybe_unused]] const auto inserted_4 = memory_layout->GetVirtualMemoryRegionTree().Insert(
-            GetInteger(stack_region_start), StackRegionSize, KMemoryRegionType_KernelStack);
-        assert(inserted_4);
+        ASSERT(memory_layout->GetVirtualMemoryRegionTree().Insert(
+            GetInteger(stack_region_start), StackRegionSize, KMemoryRegionType_KernelStack));
 
         // Determine the size of the resource region.
         const size_t resource_region_size =
@@ -554,7 +538,7 @@ struct KernelCore::Impl {
         // Determine the size of the slab region.
         const size_t slab_region_size =
             Common::AlignUp(Init::CalculateTotalSlabHeapSize(system.Kernel()), PageSize);
-        assert(slab_region_size <= resource_region_size);
+        ASSERT(slab_region_size <= resource_region_size);
 
         // Setup the slab region.
         const KPhysicalAddress code_start_phys_addr = KernelPhysicalAddressCodeBase;
@@ -569,9 +553,8 @@ struct KernelCore::Impl {
             memory_layout->GetVirtualMemoryRegionTree().GetRandomAlignedRegion(
                 slab_region_needed_size, SlabRegionAlign, KMemoryRegionType_Kernel) +
             (GetInteger(code_end_phys_addr) % SlabRegionAlign);
-        [[maybe_unused]] const auto inserted_5 = memory_layout->GetVirtualMemoryRegionTree().Insert(
-            GetInteger(slab_region_start), slab_region_size, KMemoryRegionType_KernelSlab);
-        assert(inserted_5);
+        ASSERT(memory_layout->GetVirtualMemoryRegionTree().Insert(
+            GetInteger(slab_region_start), slab_region_size, KMemoryRegionType_KernelSlab));
 
         // Setup the temp region.
         constexpr size_t TempRegionSize = 128_MiB;
@@ -579,9 +562,8 @@ struct KernelCore::Impl {
         const KVirtualAddress temp_region_start =
             memory_layout->GetVirtualMemoryRegionTree().GetRandomAlignedRegion(
                 TempRegionSize, TempRegionAlign, KMemoryRegionType_Kernel);
-        [[maybe_unused]] const auto inserted_6 = memory_layout->GetVirtualMemoryRegionTree().Insert(
-            GetInteger(temp_region_start), TempRegionSize, KMemoryRegionType_KernelTemp);
-        assert(inserted_6);
+        ASSERT(memory_layout->GetVirtualMemoryRegionTree().Insert(
+            GetInteger(temp_region_start), TempRegionSize, KMemoryRegionType_KernelTemp));
 
         // Automatically map in devices that have auto-map attributes.
         for (auto& region : memory_layout->GetPhysicalMemoryRegionTree()) {
@@ -601,7 +583,7 @@ struct KernelCore::Impl {
             }
 
             // Check that the region is valid.
-            assert(region.GetEndAddress() != 0);
+            ASSERT(region.GetEndAddress() != 0);
 
             // Set the attribute to note we've mapped this region.
             region.SetTypeAttribute(KMemoryRegionAttr_DidKernelMap);
@@ -613,10 +595,8 @@ struct KernelCore::Impl {
             const KVirtualAddress map_virt_addr =
                 memory_layout->GetVirtualMemoryRegionTree().GetRandomAlignedRegionWithGuard(
                     map_size, PageSize, KMemoryRegionType_KernelMisc, PageSize);
-            [[maybe_unused]] const auto inserted_7 =
-                memory_layout->GetVirtualMemoryRegionTree().Insert(
-                    GetInteger(map_virt_addr), map_size, KMemoryRegionType_KernelMiscMappedDevice);
-            assert(inserted_7);
+            ASSERT(memory_layout->GetVirtualMemoryRegionTree().Insert(
+                GetInteger(map_virt_addr), map_size, KMemoryRegionType_KernelMiscMappedDevice));
             region.SetPairAddress(GetInteger(map_virt_addr) + region.GetAddress() -
                                   GetInteger(map_phys_addr));
         }
@@ -624,28 +604,20 @@ struct KernelCore::Impl {
         Init::SetupDramPhysicalMemoryRegions(*memory_layout);
 
         // Insert a physical region for the kernel code region.
-        [[maybe_unused]] const auto inserted_8 =
-            memory_layout->GetPhysicalMemoryRegionTree().Insert(GetInteger(code_start_phys_addr),
-                                                                code_region_size,
-                                                                KMemoryRegionType_DramKernelCode);
-        assert(inserted_8);
+        ASSERT(memory_layout->GetPhysicalMemoryRegionTree().Insert(
+            GetInteger(code_start_phys_addr), code_region_size, KMemoryRegionType_DramKernelCode));
 
         // Insert a physical region for the kernel slab region.
-        [[maybe_unused]] const auto inserted_9 =
-            memory_layout->GetPhysicalMemoryRegionTree().Insert(GetInteger(slab_start_phys_addr),
-                                                                slab_region_size,
-                                                                KMemoryRegionType_DramKernelSlab);
-        assert(inserted_9);
+        ASSERT(memory_layout->GetPhysicalMemoryRegionTree().Insert(
+            GetInteger(slab_start_phys_addr), slab_region_size, KMemoryRegionType_DramKernelSlab));
 
         // Insert a physical region for the secure applet memory.
         const auto secure_applet_end_phys_addr =
             slab_end_phys_addr + KSystemControl::SecureAppletMemorySize;
         if constexpr (KSystemControl::SecureAppletMemorySize > 0) {
-            [[maybe_unused]] const auto inserted_10 =
-                memory_layout->GetPhysicalMemoryRegionTree().Insert(
-                    GetInteger(slab_end_phys_addr), KSystemControl::SecureAppletMemorySize,
-                    KMemoryRegionType_DramKernelSecureAppletMemory);
-            assert(inserted_10);
+            ASSERT(memory_layout->GetPhysicalMemoryRegionTree().Insert(
+                GetInteger(slab_end_phys_addr), KSystemControl::SecureAppletMemorySize,
+                KMemoryRegionType_DramKernelSecureAppletMemory));
         }
 
         // Insert a physical region for the unknown debug2 region.
@@ -653,31 +625,27 @@ struct KernelCore::Impl {
         const size_t secure_unknown_size = SecureUnknownRegionSize;
         const auto secure_unknown_end_phys_addr = secure_applet_end_phys_addr + secure_unknown_size;
         if constexpr (SecureUnknownRegionSize > 0) {
-            [[maybe_unused]] const auto inserted_11 =
-                memory_layout->GetPhysicalMemoryRegionTree().Insert(
-                    GetInteger(secure_applet_end_phys_addr), secure_unknown_size,
-                    KMemoryRegionType_DramKernelSecureUnknown);
-            assert(inserted_11);
+            ASSERT(memory_layout->GetPhysicalMemoryRegionTree().Insert(
+                GetInteger(secure_applet_end_phys_addr), secure_unknown_size,
+                KMemoryRegionType_DramKernelSecureUnknown));
         }
 
         // Determine size available for kernel page table heaps, requiring > 8 MB.
         const KPhysicalAddress resource_end_phys_addr = slab_start_phys_addr + resource_region_size;
         const size_t page_table_heap_size = resource_end_phys_addr - secure_unknown_end_phys_addr;
-        assert(page_table_heap_size / 4_MiB > 2);
+        ASSERT(page_table_heap_size / 4_MiB > 2);
 
         // Insert a physical region for the kernel page table heap region
-        [[maybe_unused]] const auto inserted_12 =
-            memory_layout->GetPhysicalMemoryRegionTree().Insert(
-                GetInteger(secure_unknown_end_phys_addr), page_table_heap_size,
-                KMemoryRegionType_DramKernelPtHeap);
-        assert(inserted_12);
+        ASSERT(memory_layout->GetPhysicalMemoryRegionTree().Insert(
+            GetInteger(secure_unknown_end_phys_addr), page_table_heap_size,
+            KMemoryRegionType_DramKernelPtHeap));
 
         // All DRAM regions that we haven't tagged by this point will be mapped under the linear
         // mapping. Tag them.
         for (auto& region : memory_layout->GetPhysicalMemoryRegionTree()) {
             if (region.GetType() == KMemoryRegionType_Dram) {
                 // Check that the region is valid.
-                assert(region.GetEndAddress() != 0);
+                ASSERT(region.GetEndAddress() != 0);
 
                 // Set the linear map attribute.
                 region.SetTypeAttribute(KMemoryRegionAttr_LinearMapped);
@@ -688,7 +656,7 @@ struct KernelCore::Impl {
         const auto linear_extents =
             memory_layout->GetPhysicalMemoryRegionTree().GetDerivedRegionExtents(
                 KMemoryRegionAttr_LinearMapped);
-        assert(linear_extents.GetEndAddress() != 0);
+        ASSERT(linear_extents.GetEndAddress() != 0);
 
         // Setup the linear mapping region.
         constexpr size_t LinearRegionAlign = 1_GiB;
@@ -713,7 +681,7 @@ struct KernelCore::Impl {
                     continue;
                 }
 
-                assert(region.GetEndAddress() != 0);
+                ASSERT(region.GetEndAddress() != 0);
 
                 if (cur_size == 0) {
                     cur_phys_addr = region.GetAddress();
@@ -727,32 +695,26 @@ struct KernelCore::Impl {
 
                 const KVirtualAddress region_virt_addr =
                     region.GetAddress() + linear_region_phys_to_virt_diff;
-                [[maybe_unused]] const auto inserted_13 =
-                    memory_layout->GetVirtualMemoryRegionTree().Insert(
-                        GetInteger(region_virt_addr), region.GetSize(),
-                        GetTypeForVirtualLinearMapping(region.GetType()));
-                assert(inserted_13);
+                ASSERT(memory_layout->GetVirtualMemoryRegionTree().Insert(
+                    GetInteger(region_virt_addr), region.GetSize(),
+                    GetTypeForVirtualLinearMapping(region.GetType())));
                 region.SetPairAddress(GetInteger(region_virt_addr));
 
                 KMemoryRegion* virt_region =
                     memory_layout->GetVirtualMemoryRegionTree().FindModifiable(
                         GetInteger(region_virt_addr));
-                assert(virt_region != nullptr);
+                ASSERT(virt_region != nullptr);
                 virt_region->SetPairAddress(region.GetAddress());
             }
         }
 
         // Insert regions for the initial page table region.
-        [[maybe_unused]] const auto inserted_14 =
-            memory_layout->GetPhysicalMemoryRegionTree().Insert(GetInteger(resource_end_phys_addr),
-                                                                KernelPageTableHeapSize,
-                                                                KMemoryRegionType_DramKernelInitPt);
-        assert(inserted_14);
-        [[maybe_unused]] const auto inserted_15 =
-            memory_layout->GetVirtualMemoryRegionTree().Insert(
-                GetInteger(resource_end_phys_addr) + linear_region_phys_to_virt_diff,
-                KernelPageTableHeapSize, KMemoryRegionType_VirtualDramKernelInitPt);
-        assert(inserted_15);
+        ASSERT(memory_layout->GetPhysicalMemoryRegionTree().Insert(
+            GetInteger(resource_end_phys_addr), KernelPageTableHeapSize,
+            KMemoryRegionType_DramKernelInitPt));
+        ASSERT(memory_layout->GetVirtualMemoryRegionTree().Insert(
+            GetInteger(resource_end_phys_addr) + linear_region_phys_to_virt_diff,
+            KernelPageTableHeapSize, KMemoryRegionType_VirtualDramKernelInitPt));
 
         // All linear-mapped DRAM regions that we haven't tagged by this point will be allocated to
         // some pool partition. Tag them.
@@ -774,7 +736,7 @@ struct KernelCore::Impl {
         // Initialize the memory manager.
         memory_manager = std::make_unique<KMemoryManager>(system);
         const auto& management_region = memory_layout->GetPoolManagementRegion();
-        assert(management_region.GetEndAddress() != 0);
+        ASSERT(management_region.GetEndAddress() != 0);
         memory_manager->Initialize(management_region.GetAddress(), management_region.GetSize());
     }
 
@@ -886,30 +848,6 @@ struct KernelCore::Impl {
 
     // System context
     Core::System& system;
-};
-
-struct KernelCore::SlabHeapContainer {
-    KSlabHeap<KClientSession> client_session;
-    KSlabHeap<KEvent> event;
-    KSlabHeap<KPort> port;
-    KSlabHeap<KProcess> process;
-    KSlabHeap<KResourceLimit> resource_limit;
-    KSlabHeap<KSession> session;
-    KSlabHeap<KLightSession> light_session;
-    KSlabHeap<KSharedMemory> shared_memory;
-    KSlabHeap<KSharedMemoryInfo> shared_memory_info;
-    KSlabHeap<KThread> thread;
-    KSlabHeap<KTransferMemory> transfer_memory;
-    KSlabHeap<KCodeMemory> code_memory;
-    KSlabHeap<KDeviceAddressSpace> device_address_space;
-    KSlabHeap<KPageBuffer> page_buffer;
-    KSlabHeap<KThreadLocalPage> thread_local_page;
-    KSlabHeap<KObjectName> object_name;
-    KSlabHeap<KSessionRequest> session_request;
-    KSlabHeap<KSecureSystemResource> secure_system_resource;
-    KSlabHeap<KThread::LockWithPriorityInheritanceInfo> lock_info;
-    KSlabHeap<KEventInfo> event_info;
-    KSlabHeap<KDebug> debug;
 };
 
 KernelCore::KernelCore(Core::System& system) : impl{std::make_unique<Impl>(system, *this)} {}
@@ -1103,7 +1041,7 @@ void KernelCore::RegisterHostThread(KThread* existing_thread) {
     impl->RegisterHostThread(existing_thread);
 
     if (existing_thread != nullptr) {
-        assert(GetCurrentEmuThread() == existing_thread);
+        ASSERT(GetCurrentEmuThread() == existing_thread);
     }
 }
 
@@ -1111,13 +1049,11 @@ static std::jthread RunHostThreadFunc(KernelCore& kernel, KProcess* process,
                                       std::string&& thread_name, std::function<void()>&& func) {
     // Reserve a new thread from the process resource limit.
     KScopedResourceReservation thread_reservation(process, LimitableResource::ThreadCountMax);
-    assert(thread_reservation.Succeeded());
+    ASSERT(thread_reservation.Succeeded());
 
     // Initialize the thread.
     KThread* thread = KThread::Create(kernel);
-    [[maybe_unused]] const auto initialize_dummy_thread_result_2 =
-        KThread::InitializeDummyThread(thread, process);
-    assert(R_SUCCEEDED(initialize_dummy_thread_result_2));
+    ASSERT(R_SUCCEEDED(KThread::InitializeDummyThread(thread, process)));
 
     // Commit the thread reservation.
     thread_reservation.Commit();
@@ -1146,9 +1082,8 @@ std::jthread KernelCore::RunOnHostCoreProcess(std::string&& process_name,
                                               std::function<void()> func) {
     // Make a new process.
     KProcess* process = KProcess::Create(*this);
-    [[maybe_unused]] const auto initialize_result =
-        process->Initialize(Svc::CreateProcessParameter{}, GetSystemResourceLimit(), false);
-    assert(R_SUCCEEDED(initialize_result));
+    ASSERT(R_SUCCEEDED(
+        process->Initialize(Svc::CreateProcessParameter{}, GetSystemResourceLimit(), false)));
 
     // Ensure that we don't hold onto any extra references.
     SCOPE_EXIT {
@@ -1177,9 +1112,8 @@ void KernelCore::RunOnGuestCoreProcess(std::string&& process_name, std::function
 
     // Make a new process.
     KProcess* process = KProcess::Create(*this);
-    [[maybe_unused]] const auto initialize_result_2 =
-        process->Initialize(Svc::CreateProcessParameter{}, GetSystemResourceLimit(), false);
-    assert(R_SUCCEEDED(initialize_result_2));
+    ASSERT(R_SUCCEEDED(
+        process->Initialize(Svc::CreateProcessParameter{}, GetSystemResourceLimit(), false)));
 
     // Ensure that we don't hold onto any extra references.
     SCOPE_EXIT {
@@ -1191,13 +1125,12 @@ void KernelCore::RunOnGuestCoreProcess(std::string&& process_name, std::function
 
     // Reserve a new thread from the process resource limit.
     KScopedResourceReservation thread_reservation(process, LimitableResource::ThreadCountMax);
-    assert(thread_reservation.Succeeded());
+    ASSERT(thread_reservation.Succeeded());
 
     // Initialize the thread.
     KThread* thread = KThread::Create(*this);
-    [[maybe_unused]] const auto initialize_service_thread_result = KThread::InitializeServiceThread(
-        System(), thread, std::move(func), ServiceThreadPriority, ServiceThreadCore, process);
-    assert(R_SUCCEEDED(initialize_service_thread_result));
+    ASSERT(R_SUCCEEDED(KThread::InitializeServiceThread(
+        System(), thread, std::move(func), ServiceThreadPriority, ServiceThreadCore, process)));
 
     // Commit the thread reservation.
     thread_reservation.Commit();
@@ -1206,8 +1139,7 @@ void KernelCore::RunOnGuestCoreProcess(std::string&& process_name, std::function
     KThread::Register(*this, thread);
 
     // Begin running the thread.
-    [[maybe_unused]] const auto run_result = thread->Run();
-    assert(R_SUCCEEDED(run_result));
+    ASSERT(R_SUCCEEDED(thread->Run()));
 }
 
 u32 KernelCore::GetCurrentHostThreadID() const {
@@ -1396,6 +1328,30 @@ Core::System& KernelCore::System() {
 const Core::System& KernelCore::System() const {
     return impl->system;
 }
+
+struct KernelCore::SlabHeapContainer {
+    KSlabHeap<KClientSession> client_session;
+    KSlabHeap<KEvent> event;
+    KSlabHeap<KPort> port;
+    KSlabHeap<KProcess> process;
+    KSlabHeap<KResourceLimit> resource_limit;
+    KSlabHeap<KSession> session;
+    KSlabHeap<KLightSession> light_session;
+    KSlabHeap<KSharedMemory> shared_memory;
+    KSlabHeap<KSharedMemoryInfo> shared_memory_info;
+    KSlabHeap<KThread> thread;
+    KSlabHeap<KTransferMemory> transfer_memory;
+    KSlabHeap<KCodeMemory> code_memory;
+    KSlabHeap<KDeviceAddressSpace> device_address_space;
+    KSlabHeap<KPageBuffer> page_buffer;
+    KSlabHeap<KThreadLocalPage> thread_local_page;
+    KSlabHeap<KObjectName> object_name;
+    KSlabHeap<KSessionRequest> session_request;
+    KSlabHeap<KSecureSystemResource> secure_system_resource;
+    KSlabHeap<KThread::LockWithPriorityInheritanceInfo> lock_info;
+    KSlabHeap<KEventInfo> event_info;
+    KSlabHeap<KDebug> debug;
+};
 
 template <typename T>
 KSlabHeap<T>& KernelCore::SlabHeap() {

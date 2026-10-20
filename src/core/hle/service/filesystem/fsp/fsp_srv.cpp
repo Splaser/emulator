@@ -207,14 +207,14 @@ Result FSP_SRV::OpenFileSystemWithPatch(OutInterface<IFileSystem> out_interface,
               open_program_id);
 
     // FIXME: many issues with this
-    assert(type == FileSystemProxyType::Manual);
+    ASSERT(type == FileSystemProxyType::Manual);
     const auto manual_romfs = romfs_controller->OpenPatchedRomFS(
         open_program_id, FileSys::ContentRecordType::HtmlDocument);
 
-    assert(manual_romfs != nullptr);
+    ASSERT(manual_romfs != nullptr);
 
     const auto extracted_romfs = FileSys::ExtractRomFS(manual_romfs);
-    assert(extracted_romfs != nullptr);
+    ASSERT(extracted_romfs != nullptr);
 
     *out_interface = std::make_shared<IFileSystem>(
         system, extracted_romfs, SizeGetter::FromStorageId(fsc, FileSys::StorageId::NandUser));

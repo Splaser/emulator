@@ -384,19 +384,19 @@ private:
     }
 
     static KMemoryRegion& Dereference(KMemoryRegion* region) {
-        assert(region != nullptr);
+        ASSERT(region != nullptr);
         return *region;
     }
 
     static const KMemoryRegion& Dereference(const KMemoryRegion* region) {
-        assert(region != nullptr);
+        ASSERT(region != nullptr);
         return *region;
     }
 
     KVirtualAddress GetStackTopAddress(s32 core_id, KMemoryRegionType type) const {
         const auto& region = Dereference(
             GetVirtualMemoryRegionTree().FindByTypeAndAttribute(type, static_cast<u32>(core_id)));
-        assert(region.GetEndAddress() != 0);
+        ASSERT(region.GetEndAddress() != 0);
         return region.GetEndAddress();
     }
 

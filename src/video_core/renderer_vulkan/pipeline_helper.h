@@ -308,8 +308,7 @@ inline void PushImageDescriptors(TextureCache& texture_cache,
             VkSampler vk_sampler{use_fallback_sampler ? sampler.HandleWithDefaultAnisotropy()
                                                       : sampler.Handle()};
             if (sampler.HasLinearFiltering() &&
-                (VideoCore::Surface::IsPixelFormatInteger(image_view.format) ||
-                 !image_view.SupportsLinearFilter())) {
+                VideoCore::Surface::IsPixelFormatInteger(image_view.format)) {
                 vk_sampler = sampler.HandleWithNearestFilter();
             }
             if (desc.is_depth && sampler.HasDepthComparison() &&

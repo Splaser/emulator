@@ -52,12 +52,6 @@ public:
     virtual size_t WriteCounter(VAddr address, bool has_timestamp, u32 value,
                                 std::optional<u32> subreport = std::nullopt) = 0;
 
-    /// True when WriteCounter leaves the final value in the query, so the report can be written
-    /// to guest memory right away instead of at the next host fence.
-    virtual bool HasImmediateResults() const {
-        return false;
-    }
-
     virtual bool HasUnsyncedQueries() const {
         return false;
     }
@@ -144,7 +138,7 @@ protected:
             old_queries.push_back(query_id);
             return;
         }
-        std::unreachable();
+        UNREACHABLE();
     }
 
     std::mutex guard;

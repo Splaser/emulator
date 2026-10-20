@@ -80,13 +80,13 @@ public:
     }
 
     void SetStorage(s32 idx, VirtualFile storage) {
-        assert(0 <= idx && idx < StorageCount);
+        ASSERT(0 <= idx && idx < StorageCount);
         m_data_storage[idx] = storage;
     }
 
     template <typename T>
     void SetStorage(s32 idx, T storage, s64 offset, s64 size) {
-        assert(0 <= idx && idx < StorageCount);
+        ASSERT(0 <= idx && idx < StorageCount);
         m_data_storage[idx] = std::make_shared<OffsetVfsFile>(storage, size, offset);
     }
 
@@ -121,7 +121,7 @@ protected:
     }
 
     VirtualFile& GetDataStorage(s32 index) {
-        assert(0 <= index && index < StorageCount);
+        ASSERT(0 <= index && index < StorageCount);
         return m_data_storage[index];
     }
 
@@ -156,9 +156,9 @@ private:
 template <bool ContinuousCheck, bool RangeCheck, typename F>
 Result IndirectStorage::OperatePerEntry(s64 offset, s64 size, F func) {
     // Validate preconditions.
-    assert(offset >= 0);
-    assert(size >= 0);
-    assert(this->IsInitialized());
+    ASSERT(offset >= 0);
+    ASSERT(size >= 0);
+    ASSERT(this->IsInitialized());
 
     // Succeed if there's nothing to operate on.
     R_SUCCEED_IF(size == 0);
@@ -251,12 +251,12 @@ Result IndirectStorage::OperatePerEntry(s64 offset, s64 size, F func) {
         // Get the offset of the entry in the data we read.
         const auto data_offset = cur_offset - cur_entry_offset;
         const auto data_size = (next_entry_offset - cur_entry_offset);
-        assert(data_size > 0);
+        ASSERT(data_size > 0);
 
         // Determine how much is left.
         const auto remaining_size = end_offset - cur_offset;
         const auto cur_size = std::min<s64>(remaining_size, data_size - data_offset);
-        assert(cur_size <= size);
+        ASSERT(cur_size <= size);
 
         // Operate, if we need to.
         bool needs_operate;

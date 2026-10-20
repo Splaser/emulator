@@ -72,12 +72,12 @@ public:
     }
 
     constexpr void SetType(u32 type) {
-        assert(this->CanDerive(type));
+        ASSERT(this->CanDerive(type));
         m_type_id = type;
     }
 
     constexpr bool Contains(u64 addr) const {
-        assert(this->GetEndAddress() != 0);
+        ASSERT(this->GetEndAddress() != 0);
         return this->GetAddress() <= addr && addr <= this->GetLastAddress();
     }
 
@@ -218,8 +218,8 @@ public:
     DerivedRegionExtents GetDerivedRegionExtents(KMemoryRegionType type_id) const {
         DerivedRegionExtents extents;
 
-        assert(extents.first_region == nullptr);
-        assert(extents.last_region == nullptr);
+        ASSERT(extents.first_region == nullptr);
+        ASSERT(extents.last_region == nullptr);
 
         for (auto it = this->cbegin(); it != this->cend(); it++) {
             if (it->IsDerivedFrom(type_id)) {
@@ -230,8 +230,8 @@ public:
             }
         }
 
-        assert(extents.first_region != nullptr);
-        assert(extents.last_region != nullptr);
+        ASSERT(extents.first_region != nullptr);
+        ASSERT(extents.last_region != nullptr);
 
         return extents;
     }
@@ -338,7 +338,7 @@ public:
     template <typename... Args>
     KMemoryRegion* Allocate(Args&&... args) {
         // Ensure we stay within the bounds of our heap.
-        assert(m_num_regions < MaxMemoryRegions);
+        ASSERT(m_num_regions < MaxMemoryRegions);
 
         // Create the new region.
         KMemoryRegion* region = std::addressof(m_region_heap[m_num_regions++]);

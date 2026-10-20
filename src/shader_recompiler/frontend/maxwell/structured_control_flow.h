@@ -14,7 +14,7 @@ namespace Shader {
 struct HostTranslateInfo;
 namespace Maxwell {
 
-[[nodiscard]] IR::AbstractSyntaxList BuildASL(IR::InstStorage& inst_storage,
+[[nodiscard]] IR::AbstractSyntaxList BuildASL(ObjectPool<IR::Inst>& inst_pool,
                                               ObjectPool<IR::Block>& block_pool, Environment& env,
                                               Flow::CFG& cfg, const HostTranslateInfo& host_info);
 

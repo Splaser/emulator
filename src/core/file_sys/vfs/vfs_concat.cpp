@@ -12,7 +12,7 @@ namespace FileSys {
 
 ConcatenatedVfsFile::ConcatenatedVfsFile(std::string&& name_, ConcatenationMap&& concatenation_map_)
     : concatenation_map(std::move(concatenation_map_)), name(std::move(name_)) {
-    assert(this->VerifyContinuity());
+    DEBUG_ASSERT(this->VerifyContinuity());
 }
 
 bool ConcatenatedVfsFile::VerifyContinuity() const {

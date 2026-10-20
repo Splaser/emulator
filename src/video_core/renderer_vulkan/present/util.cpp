@@ -551,7 +551,7 @@ vk::Pipeline CreateWrappedCoverageBlendingPipeline(
 VkWriteDescriptorSet CreateWriteDescriptorSet(std::vector<VkDescriptorImageInfo>& images,
                                               VkSampler sampler, VkImageView view,
                                               VkDescriptorSet set, u32 binding) {
-    assert(images.capacity() > images.size());
+    ASSERT(images.capacity() > images.size());
     auto& image_info = images.emplace_back(VkDescriptorImageInfo{
         .sampler = sampler,
         .imageView = view,

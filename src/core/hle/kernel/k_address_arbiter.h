@@ -34,7 +34,7 @@ public:
         case Svc::SignalType::SignalAndModifyByWaitingCountIfEqual:
             R_RETURN(this->SignalAndModifyByWaitingCountIfEqual(addr, value, count));
         default:
-            std::unreachable();
+            UNREACHABLE();
         }
     }
 
@@ -47,7 +47,7 @@ public:
         case Svc::ArbitrationType::WaitIfEqual:
             R_RETURN(WaitIfEqual(addr, value, timeout));
         default:
-            std::unreachable();
+            UNREACHABLE();
         }
     }
 

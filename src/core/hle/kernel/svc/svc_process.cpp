@@ -12,7 +12,8 @@ void ExitProcess(Core::System& system) {
     auto* current_process = GetCurrentProcessPointer(system.Kernel());
 
     LOG_INFO(Kernel_SVC, "Process {} exiting", current_process->GetProcessId());
-    assert(current_process->GetState() == KProcess::State::Running && "Process has already exited");
+    ASSERT_MSG(current_process->GetState() == KProcess::State::Running,
+               "Process has already exited");
 
     system.Exit();
 }

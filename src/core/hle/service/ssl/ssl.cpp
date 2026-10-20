@@ -150,7 +150,7 @@ private:
 
     Result SetSocketDescriptorImpl(s32* out_fd, s32 fd) {
         LOG_DEBUG(Service_SSL, "called, fd={}", fd);
-        assert(!did_handshake);
+        ASSERT(!did_handshake);
         auto bsd = system.ServiceManager().GetService<Service::Sockets::BSD>("bsd:u");
         ASSERT_OR_EXECUTE(bsd, { return ResultInternalError; });
 
@@ -179,12 +179,12 @@ private:
 
     Result SetHostNameImpl(const std::string& hostname) {
         LOG_DEBUG(Service_SSL, "called. hostname={}", hostname);
-        assert(!did_handshake);
+        ASSERT(!did_handshake);
         return backend->SetHostName(hostname);
     }
 
     Result SetVerifyOptionImpl(u32 option) {
-        assert(!did_handshake);
+        ASSERT(!did_handshake);
         LOG_DEBUG(Service_SSL, "called. option={}", option);
         verify_option = option;
         return backend->SetVerifyOption(option);
@@ -192,7 +192,7 @@ private:
 
     Result SetIoModeImpl(u32 input_mode) {
         auto mode = static_cast<IoMode>(input_mode);
-        assert(mode == IoMode::Blocking || mode == IoMode::NonBlocking);
+        ASSERT(mode == IoMode::Blocking || mode == IoMode::NonBlocking);
         ASSERT_OR_EXECUTE(socket, { return ResultNoSocket; });
 
         const bool non_block = mode == IoMode::NonBlocking;
@@ -204,7 +204,7 @@ private:
     }
 
     Result SetSessionCacheModeImpl(u32 mode) {
-        assert(!did_handshake);
+        ASSERT(!did_handshake);
         LOG_WARNING(Service_SSL, "(STUBBED) called. value={}", mode);
         return ResultSuccess;
     }

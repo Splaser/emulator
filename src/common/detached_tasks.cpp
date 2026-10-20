@@ -10,7 +10,7 @@ namespace Common {
 DetachedTasks* DetachedTasks::instance = nullptr;
 
 DetachedTasks::DetachedTasks() {
-    assert(instance == nullptr);
+    ASSERT(instance == nullptr);
     instance = this;
 }
 
@@ -23,7 +23,7 @@ DetachedTasks::~DetachedTasks() {
     WaitForAllTasks();
 
     std::unique_lock lock{mutex};
-    assert(count == 0);
+    ASSERT(count == 0);
     instance = nullptr;
 }
 

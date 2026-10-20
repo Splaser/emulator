@@ -61,7 +61,7 @@ Opcode Decode(u64 insn) {
         });
         return Opcode::NOP;
     }
-    assert(false && "Invalid insn 0x{:016x}" && (void(insn), true));
+    ASSERT_MSG(false, "Invalid insn 0x{:016x}", insn);
     return Opcode::NOP;
 }
 

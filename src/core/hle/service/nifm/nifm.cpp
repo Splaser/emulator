@@ -676,7 +676,7 @@ void IGeneralService::GetCurrentIpAddress(HLERequestContext& ctx) {
 void IGeneralService::CreateTemporaryNetworkProfile(HLERequestContext& ctx) {
     LOG_DEBUG(Service_NIFM, "called");
 
-    assert(ctx.GetReadBufferSize() == 0x17c && "SfNetworkProfileData is not the correct size");
+    ASSERT_MSG(ctx.GetReadBufferSize() == 0x17c, "SfNetworkProfileData is not the correct size");
     u128 uuid{};
     auto buffer = ctx.ReadBuffer();
     std::memcpy(&uuid, buffer.data() + 8, sizeof(u128));

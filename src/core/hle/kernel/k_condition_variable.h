@@ -44,14 +44,14 @@ private:
 
 inline void BeforeUpdatePriority(KernelCore& kernel, KConditionVariable::ThreadTree* tree,
                                  KThread* thread) {
-    assert(KScheduler::IsSchedulerLockedByCurrentThread(kernel));
+    ASSERT(KScheduler::IsSchedulerLockedByCurrentThread(kernel));
 
     tree->erase(tree->iterator_to(*thread));
 }
 
 inline void AfterUpdatePriority(KernelCore& kernel, KConditionVariable::ThreadTree* tree,
                                 KThread* thread) {
-    assert(KScheduler::IsSchedulerLockedByCurrentThread(kernel));
+    ASSERT(KScheduler::IsSchedulerLockedByCurrentThread(kernel));
 
     tree->insert(*thread);
 }

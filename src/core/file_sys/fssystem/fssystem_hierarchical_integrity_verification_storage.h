@@ -102,7 +102,7 @@ public:
         }
 
         VirtualFile& operator[](s32 index) {
-            assert(MasterStorage <= index && index <= DataStorage);
+            ASSERT(MasterStorage <= index && index <= DataStorage);
             return m_storages[index];
         }
     };

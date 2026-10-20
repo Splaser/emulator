@@ -273,10 +273,10 @@ void KSystemControl::FreeSecureMemory(KernelCore& kernel, KVirtualAddress addres
     UNIMPLEMENTED_IF(pool == static_cast<u32>(KMemoryManager::Pool::Applet));
 
     // Ensure the size is aligned.
-    [[maybe_unused]] const size_t alignment =
+    const size_t alignment =
         (pool == static_cast<u32>(KMemoryManager::Pool::System) ? PageSize : SecureAlignment);
-    assert(Common::IsAligned(GetInteger(address), alignment));
-    assert(Common::IsAligned(size, alignment));
+    ASSERT(Common::IsAligned(GetInteger(address), alignment));
+    ASSERT(Common::IsAligned(size, alignment));
 
     // Close the secure region's pages.
     kernel.MemoryManager().Close(KPageTable::GetHeapPhysicalAddress(kernel, address),

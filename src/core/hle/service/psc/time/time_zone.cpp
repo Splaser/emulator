@@ -253,7 +253,7 @@ Result TimeZone::ToPosixTimeImpl(u32& out_count, std::span<s64> out_times,
     }
 
     if (res != 0) {
-        assert(false);
+        ASSERT(false);
     }
 
     out_times[0] = time;

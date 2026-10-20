@@ -39,10 +39,10 @@ FrontendApplet::~FrontendApplet() = default;
 
 void FrontendApplet::Initialize() {
     std::shared_ptr<IStorage> common = PopInData();
-    assert(common != nullptr);
+    ASSERT(common != nullptr);
     const auto common_data = common->GetData();
 
-    assert(common_data.size() >= sizeof(CommonArguments));
+    ASSERT(common_data.size() >= sizeof(CommonArguments));
     std::memcpy(&common_args, common_data.data(), sizeof(CommonArguments));
 
     initialized = true;

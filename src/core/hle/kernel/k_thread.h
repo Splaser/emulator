@@ -494,12 +494,12 @@ public:
     }
 
     void DisableDispatch() {
-        assert(GetCurrentThread(m_kernel).GetDisableDispatchCount() >= 0);
+        ASSERT(GetCurrentThread(m_kernel).GetDisableDispatchCount() >= 0);
         this->GetStackParameters().disable_count++;
     }
 
     void EnableDispatch() {
-        assert(GetCurrentThread(m_kernel).GetDisableDispatchCount() > 0);
+        ASSERT(GetCurrentThread(m_kernel).GetDisableDispatchCount() > 0);
         this->GetStackParameters().disable_count--;
     }
 
@@ -600,14 +600,14 @@ public:
     // into things.
 
     void SetUserAddressKey(KProcessAddress key, u32 val) {
-        assert(m_waiting_lock_info == nullptr);
+        ASSERT(m_waiting_lock_info == nullptr);
         m_address_key = key;
         m_address_key_value = val;
         m_is_kernel_address_key = false;
     }
 
     void SetKernelAddressKey(KProcessAddress key) {
-        assert(m_waiting_lock_info == nullptr);
+        ASSERT(m_waiting_lock_info == nullptr);
         m_address_key = key;
         m_is_kernel_address_key = true;
     }
@@ -780,7 +780,7 @@ public:
                                                        bool is_kernel_address_key) {
             // Create a new lock info.
             auto* new_lock = LockWithPriorityInheritanceInfo::Allocate(kernel);
-            assert(new_lock != nullptr);
+            ASSERT(new_lock != nullptr);
 
             // Set the new lock's address key.
             new_lock->m_address_key = address_key;
@@ -929,7 +929,7 @@ public:
 
     void SetConditionVariable(ConditionVariableThreadTree* tree, KProcessAddress address,
                               u64 cv_key, u32 value) {
-        assert(m_waiting_lock_info == nullptr);
+        ASSERT(m_waiting_lock_info == nullptr);
         m_condvar_tree = tree;
         m_condvar_key = cv_key;
         m_address_key = address;
@@ -946,7 +946,7 @@ public:
     }
 
     void SetAddressArbiter(ConditionVariableThreadTree* tree, u64 address) {
-        assert(m_waiting_lock_info == nullptr);
+        ASSERT(m_waiting_lock_info == nullptr);
         m_condvar_tree = tree;
         m_condvar_key = address;
     }

@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <bit>
-
 #include "common/arm64/native_clock.h"
+#include "common/bit_cast.h"
 #include "common/literals.h"
 #include "common/logging.h"
 #include "core/arm/nce/arm_nce.h"
@@ -136,7 +135,7 @@ bool Patcher::PatchText(const Kernel::PhysicalMemory& program_image,
 
         // MRS Xn, CNTFRQ_EL0
         if (auto mrs = MRS{inst}; mrs.Verify() && mrs.GetSystemReg() == CntfrqEl0) {
-            std::unreachable();
+            UNREACHABLE();
         }
 
         // MSR TPIDR_EL0, Xn
@@ -154,8 +153,8 @@ bool Patcher::PatchText(const Kernel::PhysicalMemory& program_image,
     total_program_size += image_size;
     this->mode = image_size > MaxRelativeBranch ? PatchMode::PreText : PatchMode::PostData;
     if (mode == PatchMode::PreText) {
-        assert(modules.size() == 1);
-        assert(total_program_size == image_size);
+        ASSERT(modules.size() == 1);
+        ASSERT(total_program_size == image_size);
     }
     return true;
 }
@@ -195,7 +194,7 @@ bool Patcher::RelocateAndCopy(Common::ProcessAddress load_base,
             CalculateBranchToPatchOffset(mode, patch_size, total_program_size, rel);
         LogBranchRelocation("module_to_patch", branch_offset, rel);
         if (!IsValidBranchOffset(branch_offset)) {
-            std::unreachable(); // NCE branch relocation must be validated before RelocateAndCopy
+            UNREACHABLE_MSG("NCE branch relocation must be validated before RelocateAndCopy");
         }
         rc.B(branch_offset);
     };
@@ -206,7 +205,7 @@ bool Patcher::RelocateAndCopy(Common::ProcessAddress load_base,
             CalculateBranchToModuleOffset(mode, patch_size, total_program_size, rel);
         LogBranchRelocation("patch_to_module", branch_offset, rel);
         if (!IsValidBranchOffset(branch_offset)) {
-            std::unreachable(); // NCE branch relocation must be validated before RelocateAndCopy
+            UNREACHABLE_MSG("NCE branch relocation must be validated before RelocateAndCopy");
         }
         rc.B(branch_offset);
     };
@@ -228,7 +227,7 @@ bool Patcher::RelocateAndCopy(Common::ProcessAddress load_base,
     };
 
     // We are now ready to relocate!
-    assert(m_relocate_module_index < modules.size());
+    ASSERT(m_relocate_module_index < modules.size());
     const size_t module_index = m_relocate_module_index++;
     auto& patch = modules[module_index];
     const size_t module_image_size = patch.image_size;
@@ -274,8 +273,8 @@ bool Patcher::RelocateAndCopy(Common::ProcessAddress load_base,
                              total_program_size, patch_size, m_relocate_module_index,
                              modules.size(), GetInteger(load_base));
             }
-            assert(image_size == expected_image_size);
-            assert(total_program_size == 0);
+            ASSERT(image_size == expected_image_size);
+            ASSERT(total_program_size == 0);
             std::memcpy(program_image.data(), m_patch_instructions.data(),
                         m_patch_instructions.size() * sizeof(u32));
         } else {
@@ -565,7 +564,7 @@ void Patcher::WriteMsrHandler(ModuleDestLabel module_dest, oaknut::XReg src_reg)
 void Patcher::WriteCntpctHandler(ModuleDestLabel module_dest, oaknut::XReg dest_reg) {
     static Common::Arm64::NativeClock clock{};
     const auto factor = clock.GetGuestCNTFRQFactor();
-    const auto raw_factor = std::bit_cast<std::array<u64, 2>>(factor);
+    const auto raw_factor = Common::BitCast<std::array<u64, 2>>(factor);
 
     const auto use_x2_x3 = dest_reg.index() == 0 || dest_reg.index() == 1;
     oaknut::XReg scratch0 = use_x2_x3 ? X2 : X0;

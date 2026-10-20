@@ -258,7 +258,7 @@ void IOFile::Open(const fs::path& path, FileAccessMode mode, FileType type, File
     }
 #elif ANDROID
     if (Android::IsContentUri(path)) {
-        assert(mode == FileAccessMode::Read && "Content URI file access is for read-only!");
+        ASSERT_MSG(mode == FileAccessMode::Read, "Content URI file access is for read-only!");
         const auto fd = Android::OpenContentUri(path, Android::OpenMode::Read);
         if (fd != -1) {
             file = fdopen(fd, "r");

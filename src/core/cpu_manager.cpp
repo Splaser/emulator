@@ -198,7 +198,7 @@ void CpuManager::GuestActivate() {
     auto* scheduler = kernel.CurrentScheduler();
 
     scheduler->Activate();
-    std::unreachable();
+    UNREACHABLE();
 }
 
 void CpuManager::ShutdownThread() {
@@ -207,7 +207,7 @@ void CpuManager::ShutdownThread() {
     auto core = is_multicore ? kernel.CurrentPhysicalCoreIndex() : 0;
 
     Common::Fiber::YieldTo(thread->GetHostContext(), *core_data[core].host_context);
-    std::unreachable();
+    UNREACHABLE();
 }
 
 void CpuManager::RunThread(std::stop_token token, std::size_t core) {

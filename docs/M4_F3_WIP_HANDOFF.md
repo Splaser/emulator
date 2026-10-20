@@ -1,5 +1,30 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: upstream #403 conflict resolution
+
+Upstream e672babee8 reverts #376/#380/#401 for re-landing as individual subjects.
+The merge follows the restored Dynarmic submodule and upstream unrelated code,
+while retaining PR #375's backing, owner/admission, buffer-transfer and lifecycle
+interfaces and the support they require. C++23 remains a current PR prerequisite;
+upstream Common::Barrier and assertion helpers remain available. This is not a
+wholesale restoration of #376 or its Dynarmic/shader flat-IR migration. The roadmap
+below records #376 as a selective future reference at the user's request.
+
+The pre-merge three-commit Linux run 39388275267 found one native API mismatch:
+the real intrusive TLS tree erases an iterator, not a node reference. The cleanup
+now obtains and checks that iterator; the injected tree no longer supplies the
+unsupported overload. Focused Linux TLS/group/unmap checks pass after correction.
+Full merged-source compilation and regression acceptance must be recorded
+separately; conflict-marker removal alone is not build acceptance.
+
+The previous Unmap-only run 39384043830 is independently artifact-verified at
+74aea98af7: artifact 12248117179, SHA-256
+1c12ac11f46234bd324165c035a3683d1c4f8f0c003822d19cccf909d62f225f;
+146 source hash entries in 12 manifests, five CTest processes, three native
+provenance repeats of 499 assertions, 11 publication mutants and two Unmap mutants.
+Android was skipped and F2/F3 negative controls remain unchanged. Current source
+has drifted and is not certified by that old run.
+
 ## 2026-10-20: explicit process teardown entry
 
 The third independent change implements the previously written owner order.
@@ -294,6 +319,30 @@ receive captured setup/observation exceptions rather than terminating the GPU
 worker on an uncaught test exception.
 
 ## Resume roadmap
+
+### Follow-up design reference: PR #376
+
+Per the user's direction, [PR #376](https://github.com/citron-neo/emulator/pull/376)
+is a reference for overlapping ideas, not a request to restore its entire patch.
+Upstream [PR #403](https://github.com/citron-neo/emulator/pull/403) reverted that
+series for re-landing as separate subjects. Track the individual replacements
+before implementing overlapping work, and compare them against PR #375's current
+ownership and validation contracts.
+
+- Reuse the idea of stopping only the channel at a semaphore acquire and retaining
+  its continuation; preserve PR #375's explicit producer/admission boundaries.
+- Compare UMA upload decisions and driver-exported backing capability checks with
+  the current lazy-backing/alias ownership plan. Performance observations do not
+  establish physical content authority or close F2/F3.
+- Evaluate in-tree Dynarmic, index-linked IR and C++23/std-library migration as
+  separate future refactors, with their own dependency/build and semantic tests.
+  Keep upstream's restored Dynarmic submodule during this conflict resolution;
+  do not repeat the flat-IR migration as part of ownership fixes.
+- Deduplicate the Common::Barrier build repair, which both branches addressed and
+  upstream retained. Preserve focused tests and compare actual re-landed commits
+  before taking any other implementation from the series.
+
+### Active ownership work
 
 1. Extend the [bounded authority implementation plan](M4_F3_ALIAS_AUTHORITY_PLAN.md)
    with persistent write-site physical/provenance metadata and latest-writer

@@ -25,7 +25,7 @@ void KReadableEvent::Initialize(KEvent* parent) {
 }
 
 bool KReadableEvent::IsSignaled() const {
-    assert(KScheduler::IsSchedulerLockedByCurrentThread(m_kernel));
+    ASSERT(KScheduler::IsSchedulerLockedByCurrentThread(m_kernel));
 
     return m_is_signaled;
 }

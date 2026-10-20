@@ -47,7 +47,7 @@ AppletMessage LifecycleManager::PopMessageInOrderOfPriority() {
                 case FocusState::NotInFocus:
                     return AppletMessage::ChangeIntoBackground;
                 default:
-                    assert(false);
+                    ASSERT(false);
                 }
             }
         } else if (m_has_focus_state_changed) {
@@ -310,7 +310,7 @@ FocusState LifecycleManager::GetFocusStateWhileForegroundObscured() const {
         return FocusState::NotInFocus;
 
     default:
-        std::unreachable();
+        UNREACHABLE();
     }
 }
 
@@ -329,7 +329,7 @@ FocusState LifecycleManager::GetFocusStateWhileBackground(bool is_obscured) cons
         return m_is_application ? FocusState::Background : FocusState::NotInFocus;
 
     default:
-        std::unreachable();
+        UNREACHABLE();
     }
 }
 
@@ -357,7 +357,7 @@ bool LifecycleManager::UpdateRequestedFocusState() {
             break;
 
         default:
-            std::unreachable();
+            UNREACHABLE();
         }
     } else {
         // With forced suspend or resume, the applet is guaranteed to be background.

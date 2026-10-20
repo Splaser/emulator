@@ -58,10 +58,10 @@ Result AesCtrCounterExtendedStorage::Initialize(const void* key, size_t key_size
                                                 s32 entry_count,
                                                 std::unique_ptr<IDecryptor>&& decryptor) {
     // Validate preconditions.
-    assert(key != nullptr);
-    assert(key_size == KeySize);
-    assert(counter_offset >= 0);
-    assert(decryptor != nullptr);
+    ASSERT(key != nullptr);
+    ASSERT(key_size == KeySize);
+    ASSERT(counter_offset >= 0);
+    ASSERT(decryptor != nullptr);
 
     // Initialize the bucket tree table.
     if (entry_count > 0) {
@@ -91,9 +91,9 @@ void AesCtrCounterExtendedStorage::Finalize() {
 Result AesCtrCounterExtendedStorage::GetEntryList(Entry* out_entries, s32* out_entry_count,
                                                   s32 entry_count, s64 offset, s64 size) {
     // Validate pre-conditions.
-    assert(offset >= 0);
-    assert(size >= 0);
-    assert(this->IsInitialized());
+    ASSERT(offset >= 0);
+    ASSERT(size >= 0);
+    ASSERT(this->IsInitialized());
 
     // Clear the out count.
     R_UNLESS(out_entry_count != nullptr, ResultNullptrArgument);
@@ -152,7 +152,7 @@ Result AesCtrCounterExtendedStorage::GetEntryList(Entry* out_entries, s32* out_e
 
 size_t AesCtrCounterExtendedStorage::Read(u8* buffer, size_t size, size_t offset) const {
     // Validate preconditions.
-    assert(this->IsInitialized());
+    ASSERT(this->IsInitialized());
 
     // Allow zero size.
     if (size == 0) {
@@ -160,28 +160,28 @@ size_t AesCtrCounterExtendedStorage::Read(u8* buffer, size_t size, size_t offset
     }
 
     // Validate arguments.
-    assert(buffer != nullptr);
-    assert(Common::IsAligned(offset, BlockSize));
-    assert(Common::IsAligned(size, BlockSize));
+    ASSERT(buffer != nullptr);
+    ASSERT(Common::IsAligned(offset, BlockSize));
+    ASSERT(Common::IsAligned(size, BlockSize));
 
     BucketTree::Offsets table_offsets{};
     [[maybe_unused]] const auto get_offsets_result =
         m_table.GetOffsets(std::addressof(table_offsets));
     assert(R_SUCCEEDED(get_offsets_result));
 
-    assert(table_offsets.IsInclude(offset, size));
+
+    ASSERT(table_offsets.IsInclude(offset, size));
 
     // Read the data.
     m_data_storage->Read(buffer, size, offset);
 
     // Find the offset in our tree.
     BucketTree::Visitor visitor;
-    [[maybe_unused]] const auto find_result = m_table.Find(std::addressof(visitor), offset);
-    assert(R_SUCCEEDED(find_result));
+    ASSERT(R_SUCCEEDED(m_table.Find(std::addressof(visitor), offset)));
     {
-        [[maybe_unused]] const auto entry_offset = visitor.Get<Entry>()->GetOffset();
-        assert(Common::IsAligned(entry_offset, BlockSize));
-        assert(0 <= entry_offset && table_offsets.IsInclude(entry_offset));
+        const auto entry_offset = visitor.Get<Entry>()->GetOffset();
+        ASSERT(Common::IsAligned(entry_offset, BlockSize));
+        ASSERT(0 <= entry_offset && table_offsets.IsInclude(entry_offset));
     }
 
     // Prepare to read in chunks.
@@ -195,30 +195,29 @@ size_t AesCtrCounterExtendedStorage::Read(u8* buffer, size_t size, size_t offset
 
         // Get and validate the entry's offset.
         const auto cur_entry_offset = cur_entry.GetOffset();
-        assert(static_cast<size_t>(cur_entry_offset) <= cur_offset);
+        ASSERT(static_cast<size_t>(cur_entry_offset) <= cur_offset);
 
         // Get and validate the next entry offset.
         s64 next_entry_offset;
         if (visitor.CanMoveNext()) {
-            [[maybe_unused]] const auto move_next_result = visitor.MoveNext();
-            assert(R_SUCCEEDED(move_next_result));
+            ASSERT(R_SUCCEEDED(visitor.MoveNext()));
             next_entry_offset = visitor.Get<Entry>()->GetOffset();
-            assert(table_offsets.IsInclude(next_entry_offset));
+            ASSERT(table_offsets.IsInclude(next_entry_offset));
         } else {
             next_entry_offset = table_offsets.end_offset;
         }
-        assert(Common::IsAligned(next_entry_offset, BlockSize));
-        assert(cur_offset < static_cast<size_t>(next_entry_offset));
+        ASSERT(Common::IsAligned(next_entry_offset, BlockSize));
+        ASSERT(cur_offset < static_cast<size_t>(next_entry_offset));
 
         // Get the offset of the entry in the data we read.
         const auto data_offset = cur_offset - cur_entry_offset;
         const auto data_size = (next_entry_offset - cur_entry_offset) - data_offset;
-        assert(data_size > 0);
+        ASSERT(data_size > 0);
 
         // Determine how much is left.
         const auto remaining_size = end_offset - cur_offset;
         const auto cur_size = static_cast<size_t>(std::min(remaining_size, data_size));
-        assert(cur_size <= size);
+        ASSERT(cur_size <= size);
 
         // If necessary, perform decryption.
         if (cur_entry.encryption_value == Entry::Encryption::Encrypted) {

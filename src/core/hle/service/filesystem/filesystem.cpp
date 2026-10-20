@@ -197,11 +197,10 @@ Result VfsDirectoryServiceWrapper::RenameFile(const std::string& src_path_,
         return c_res;
 
     auto dest = backing->GetFileRelative(dest_path);
-    assert(dest != nullptr && "Newly created file with success cannot be found.");
+    ASSERT_MSG(dest != nullptr, "Newly created file with success cannot be found.");
 
-    [[maybe_unused]] const auto bytes_written = dest->WriteBytes(src->ReadAllBytes());
-    assert(bytes_written == src->GetSize() &&
-           "Could not write all of the bytes but everything else has succeeded.");
+    ASSERT_MSG(dest->WriteBytes(src->ReadAllBytes()) == src->GetSize(),
+               "Could not write all of the bytes but everything else has succeeded.");
 
     if (!src->GetContainingDirectory()->DeleteFile(Common::FS::GetFilename(src_path))) {
         return FileSys::ResultPermissionDenied;

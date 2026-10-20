@@ -30,7 +30,7 @@ void ProfileSelect::Initialize() {
     profile_select_version = ProfileSelectAppletVersion{common_args.library_version};
 
     const std::shared_ptr<IStorage> user_config_storage = PopInData();
-    assert(user_config_storage != nullptr);
+    ASSERT(user_config_storage != nullptr);
     const auto& user_config = user_config_storage->GetData();
 
     LOG_INFO(Service_AM, "Initializing Profile Select Applet with version={}",
@@ -38,12 +38,12 @@ void ProfileSelect::Initialize() {
 
     switch (profile_select_version) {
     case ProfileSelectAppletVersion::Version1:
-        assert(user_config.size() == sizeof(UiSettingsV1));
+        ASSERT(user_config.size() == sizeof(UiSettingsV1));
         std::memcpy(&config_old, user_config.data(), sizeof(UiSettingsV1));
         break;
     case ProfileSelectAppletVersion::Version2:
     case ProfileSelectAppletVersion::Version3:
-        assert(user_config.size() == sizeof(UiSettings));
+        ASSERT(user_config.size() == sizeof(UiSettings));
         std::memcpy(&config, user_config.data(), sizeof(UiSettings));
         break;
     default:
@@ -57,7 +57,7 @@ Result ProfileSelect::GetStatus() const {
 }
 
 void ProfileSelect::ExecuteInteractive() {
-    assert(false && "Attempted to call interactive execution on non-interactive applet.");
+    ASSERT_MSG(false, "Attempted to call interactive execution on non-interactive applet.");
 }
 
 void ProfileSelect::Execute() {

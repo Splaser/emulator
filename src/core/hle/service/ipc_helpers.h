@@ -151,10 +151,8 @@ public:
         if (manager->IsDomain()) {
             context->AddDomainObject(std::move(iface));
         } else {
-            [[maybe_unused]] const auto reserved =
-                Kernel::GetCurrentProcess(kernel).GetResourceLimit()->Reserve(
-                    Kernel::LimitableResource::SessionCountMax, 1);
-            assert(reserved);
+            ASSERT(Kernel::GetCurrentProcess(kernel).GetResourceLimit()->Reserve(
+                Kernel::LimitableResource::SessionCountMax, 1));
 
             auto* session = Kernel::KSession::Create(kernel);
             session->Initialize(nullptr, 0);
@@ -353,7 +351,7 @@ public:
     explicit RequestParser(Service::HLERequestContext& ctx) : RequestHelperBase(ctx) {
         // TIPC does not have data payload offset
         if (!ctx.IsTipc()) {
-            assert(ctx.GetDataPayloadOffset() && "context is incomplete");
+            ASSERT_MSG(ctx.GetDataPayloadOffset(), "context is incomplete");
             Skip(ctx.GetDataPayloadOffset(), false);
         }
 
@@ -395,8 +393,8 @@ public:
 
     template <class T>
     std::weak_ptr<T> PopIpcInterface() {
-        assert(context->GetManager()->IsDomain());
-        assert(context->GetDomainMessageHeader().input_object_count > 0);
+        ASSERT(context->GetManager()->IsDomain());
+        ASSERT(context->GetDomainMessageHeader().input_object_count > 0);
         return context->GetDomainHandler<T>(Pop<u32>() - 1);
     }
 };

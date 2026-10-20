@@ -18,7 +18,7 @@ public:
     }
 
     constexpr void SetAffinityMask(u64 new_mask) {
-        assert((new_mask & ~AllowedAffinityMask) == 0);
+        ASSERT((new_mask & ~AllowedAffinityMask) == 0);
         m_mask = new_mask;
     }
 
@@ -40,7 +40,7 @@ public:
 
 private:
     static constexpr u64 GetCoreBit(s32 core) {
-        assert(0 <= core && core < static_cast<s32>(Core::Hardware::NUM_CPU_CORES));
+        ASSERT(0 <= core && core < static_cast<s32>(Core::Hardware::NUM_CPU_CORES));
         return (1ULL << core);
     }
 

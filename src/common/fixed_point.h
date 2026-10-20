@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <concepts>
 #include <cstddef> // for size_t
 #include <cstdint>
 #include <exception>
@@ -393,13 +392,13 @@ public: // binary math operators, effects underlying bit pattern since these
         return *this;
     }
 
-    template <std::integral Integer>
+    template <IsIntegral Integer>
     constexpr FixedPoint& operator>>=(Integer n) {
         data_ >>= n;
         return *this;
     }
 
-    template <std::integral Integer>
+    template <IsIntegral Integer>
     constexpr FixedPoint& operator<<=(Integer n) {
         data_ <<= n;
         return *this;
@@ -588,12 +587,12 @@ constexpr FixedPoint<I, F> operator/(Number lhs, FixedPoint<I, F> rhs) {
 }
 
 // shift operators
-template <size_t I, size_t F, std::integral Integer>
+template <size_t I, size_t F, IsIntegral Integer>
 constexpr FixedPoint<I, F> operator<<(FixedPoint<I, F> lhs, Integer rhs) {
     lhs <<= rhs;
     return lhs;
 }
-template <size_t I, size_t F, std::integral Integer>
+template <size_t I, size_t F, IsIntegral Integer>
 constexpr FixedPoint<I, F> operator>>(FixedPoint<I, F> lhs, Integer rhs) {
     lhs >>= rhs;
     return lhs;
