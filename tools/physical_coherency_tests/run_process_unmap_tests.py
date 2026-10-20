@@ -68,10 +68,15 @@ struct Impl {
 };
 namespace Core::Memory {
 struct Memory {
+    using MappingTeardown=ControlledMappingPublication::Teardown;
     Impl* impl;
     ControlledMappingPublication mapping_publications{true};
     explicit Memory(Impl* target):impl{target} {}
     void UnmapRegion(Common::PageTable&,Common::ProcessAddress,u64,bool);
+    void ValidateMappingTeardown(const MappingTeardown& token) {mapping_publications.ValidateTeardown(token);}
+    void UnmapRegionForTeardown(Common::PageTable& table,u64 addr,u64 size,bool separate,const MappingTeardown& token) {
+        ValidateMappingTeardown(token);impl->UnmapRegion(table,addr,size,separate);
+    }
     void MapMemoryRegion(Common::PageTable&,u64,u64,u64,Common::MemoryPermission,bool) {}
     void ProtectRegion(Common::PageTable&,u64,u64,Common::MemoryPermission) {}
 };
@@ -137,7 +142,8 @@ struct KPageTableBase {
         return 0;
     }
     bool IsHeapPhysicalAddress(u64) const {return true;}
-    Result Operate(PageLinkedList*,u64,size_t,u64,bool,KPageProperties,OperationType,bool);
+    Result Operate(PageLinkedList*,u64,size_t,u64,bool,KPageProperties,OperationType,bool,
+                   const Core::Memory::Memory::MappingTeardown* teardown=nullptr);
 };
 // @OPERATE@
 }
@@ -179,6 +185,24 @@ int main() {
             }
             assert(table.blocks.freed==(mode==4 ? 0u : 1u) && kernel.refs.opened==0);
         }
+    }
+    for(unsigned mode=0;mode<4;++mode) {
+        Common::PageTable mapping;Impl impl;Core::Memory::Memory memory{&impl};
+        Kernel::KernelCore kernel{mapping};Kernel::KPageTableBase table{kernel,&mapping,&memory,{},false};
+        table.m_incomplete_map_groups=true; // Disjoint pending group, TLS cleanup still allowed.
+        Core::Memory::ControlledMappingPublication foreign{true};
+        auto token=memory.mapping_publications.BeginTeardown();
+        auto foreign_token=foreign.BeginTeardown();
+        bool threw=false;
+        try {assert(table.Operate(nullptr,4096,1,0,false,{},mode==1 ? O::Map :
+                                  mode==3 ? O::UnmapPhysical : O::Unmap,false,
+                                  mode==2 ? &foreign_token : &token)==0);}
+        catch(const std::runtime_error&) {threw=true;}
+        if(mode==1 || mode==2) {
+            assert(threw && mapping.mapped && impl.calls==0 && kernel.refs.refs==1 &&
+                   "invalid teardown operation must refuse before effects");
+        } else assert(!threw && !mapping.mapped && impl.calls==1 && kernel.refs.refs==0 &&
+                      kernel.refs.closed==1 && !kernel.refs.closed_while_mapped);
     }
     std::cout<<"PASS actual Unmap/UnmapPhysical cleanup: closed entry, pre-effect/uncertain exception, success ordering and non-heap control; injected kernel/refcounts, no guest lease\n";
 }

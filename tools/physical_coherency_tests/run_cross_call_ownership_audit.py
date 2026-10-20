@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Reproduce OPEN cross-call ownership gaps using extracted production bodies.
+"""Verify cross-call ownership retention using extracted production bodies.
 
 Injected PTE, allocator and tree collaborators; not native process acceptance.
-Passing means the documented defect still reproduces, NOT that ownership is safe.
+Passing covers the stated transaction/bookkeeping cases, not complete guest ownership.
 """
 import hashlib
 import json
@@ -40,6 +40,7 @@ finalize = extract(paths[5], 'void KMemoryBlockManager::Finalize(')
 pending = extract(paths[7], 'struct IncompleteMapGroup {') + ';'
 cleanup = extract(paths[0], 'void KPageTableBase::FinalizeIncompleteMapGroups(')
 unmap = extract(paths[2], 'void Memory::UnmapRegion(')
+teardown_unmap = extract(paths[2], 'void Memory::UnmapRegionForTeardown(')
 source = r'''
 #include <array>
 #include <cassert>
@@ -65,7 +66,10 @@ struct PageTable {std::array<bool,2> mapped{};};
 struct Impl {
     unsigned calls{};
     bool throw_after_effect{};
-    void UnmapRegion(Common::PageTable& table,u64,u64,bool) {table.mapped={false,false};}
+    bool unmap_fault{};
+    void UnmapRegion(Common::PageTable& table,u64,u64,bool) {
+        table.mapped={false,false};if(unmap_fault) throw std::runtime_error("unknown unmap");
+    }
     void MapMemoryRegion(Common::PageTable& table,u64,u64,u64 phys,
                          Common::MemoryPermission,bool) {
         ++calls;table.mapped.at(phys/PageSize)=true;
@@ -74,15 +78,19 @@ struct Impl {
 };
 namespace Core::Memory {
 struct Memory {
+    using MappingTeardown=ControlledMappingPublication::Teardown;
     Impl* impl;
     ControlledMappingPublication mapping_publications;
     Memory(Impl* target,bool controlled):impl{target},mapping_publications{controlled} {}
     void MapMemoryRegion(Common::PageTable&,Common::ProcessAddress,u64,u64,
                          Common::MemoryPermission,bool);
     void UnmapRegion(Common::PageTable&,Common::ProcessAddress,u64,bool);
+    void UnmapRegionForTeardown(Common::PageTable&,Common::ProcessAddress,u64,bool,const MappingTeardown&);
+    void ValidateMappingTeardown(const MappingTeardown* token) const {mapping_publications.ValidateTeardown(token);}
 };
 // @WRAPPER@
 // @UNMAP@
+// @TEARDOWN_UNMAP@
 }
 namespace Kernel {
 using KProcessAddress=u64;
@@ -133,7 +141,7 @@ struct KPageTableBase {
     // @PENDING@
     std::unique_ptr<IncompleteMapGroup> m_incomplete_map_groups;
     KPageTableBase(Common::PageTable* pte,Core::Memory::Memory* memory):m_impl{pte},m_memory{memory} {}
-    void FinalizeIncompleteMapGroups();
+    void FinalizeIncompleteMapGroups(const Core::Memory::Memory::MappingTeardown* teardown=nullptr);
     bool IsLockedByCurrentThread() const {return true;}
     Result Operate(PageLinkedList*,u64,size_t,const KPageGroup&,KPageProperties,OperationType,bool);
 };
@@ -213,6 +221,20 @@ int main() {
                     assert(!refused && !table.m_incomplete_map_groups && !pte.mapped[0] &&
                            pg.refs[0]==0 && pg.refs[1]==0 && pg.closes==1);
                 } else assert(refused && table.m_incomplete_map_groups && pg.refs[0]==1);
+                if(mode!=5) {
+                    auto token=memory.mapping_publications.BeginTeardown();
+                    impl.unmap_fault=true;bool cleanup_threw=false;
+                    try {table.FinalizeIncompleteMapGroups(&token);}
+                    catch(const std::runtime_error&) {cleanup_threw=true;}
+                    assert(cleanup_threw && table.m_incomplete_map_groups &&
+                           pg.refs[0]==1 && pg.refs[1]==1 && pg.closes==0 &&
+                           "uncertain cleanup must retain pending group references");
+                    // Explicit idempotent injected unmap recovery; no general retry claim.
+                    impl.unmap_fault=false;
+                    table.FinalizeIncompleteMapGroups(&token);
+                    assert(!table.m_incomplete_map_groups && !pte.mapped[0] &&
+                           pg.refs[0]==0 && pg.refs[1]==0 && pg.closes==1);
+                }
             }
         }
     }
@@ -247,7 +269,8 @@ int main() {
 }
 '''
 for marker, body in [('WRAPPER', wrapper), ('SCOPED', scoped), ('OPERATE', operate),
-                     ('FINALIZE', finalize), ('PENDING', pending), ('CLEANUP', cleanup), ('UNMAP', unmap)]:
+                     ('FINALIZE', finalize), ('PENDING', pending), ('CLEANUP', cleanup),
+                     ('UNMAP', unmap), ('TEARDOWN_UNMAP', teardown_unmap)]:
     source = source.replace('// @' + marker + '@', body)
 cpp = out / 'audit.cpp'
 cpp.write_text(source)
@@ -260,7 +283,7 @@ for repeat in range(1, 4):
     (out / f'audit-{repeat}.txt').write_text(result.stdout + result.stderr)
     assert result.returncode == 0 and 'PASS cross-call audit:' in result.stdout, result
     print(result.stdout.strip(), flush=True)
-# Sensitivity controls are deliberately incomplete counterfactuals, not proposed repairs.
+# Restore the original defects; only the corresponding assertion is a valid kill.
 retained = operate.replace('            spg.CancelClose();', '            // mutant: lose mapping references')
 reordered = finalize.replace('        it = m_memory_block_tree.erase(it);\n', '')
 reordered = reordered.replace('        block_callback(block->GetAddress(), block->GetSize());',

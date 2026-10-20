@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <random>
+#include <stdexcept>
 #include "common/scope_exit.h"
 #include "common/settings.h"
 #include "core/arm/dynarmic/arm_dynarmic.h"
@@ -137,15 +138,24 @@ void KProcess::Finalize() {
     // Stop queued controlled CPU stores BEFORE any process memory/PTE finalization. This joins
     // only an entered bounded store/publication visit, never a GPU completion or CPU producer.
     m_memory.SealControlledCpuWrites();
-    m_memory.SealControlledMappings(); // Default-off; join before process PTE finalization.
-    // Delete the process local region.
-    this->DeleteThreadLocalRegion(m_plr_address);
-
-    // Get the used memory size.
-    const size_t used_memory_size = this->GetUsedNonSystemUserPhysicalMemorySize();
-
-    // Finalize the page table.
-    m_page_table.Finalize();
+    size_t used_memory_size{};
+    {
+        // Close normal admission and join before scheduler/PTE locks. This
+        // exclusive owner entry authorizes cleanup unmaps without reopening it.
+        auto teardown = m_memory.BeginMappingTeardown();
+        if (m_plr_address != 0) {
+            const auto result = this->DeleteThreadLocalRegion(m_plr_address, &teardown);
+            if (R_FAILED(result)) {
+                throw std::runtime_error("TLS teardown failed; process resources retained");
+            }
+            m_plr_address = 0;
+        }
+        if (!m_finalizing_tlp_tree.empty()) {
+            throw std::runtime_error("incomplete TLS cleanup; process resources retained");
+        }
+        used_memory_size = this->GetUsedNonSystemUserPhysicalMemorySize();
+        m_page_table.Finalize(&teardown);
+    } // Release teardown lifetime before Memory::Finalize retires/disposes Impl.
 
     // Finish using our system resource.
     if (m_system_resource) {
@@ -178,6 +188,7 @@ void KProcess::Finalize() {
     // Our thread local page list must be empty at this point.
     assert(m_partially_used_tlp_tree.empty());
     assert(m_fully_used_tlp_tree.empty());
+    assert(m_finalizing_tlp_tree.empty());
 
     // Release memory to the resource limit.
     if (m_resource_limit != nullptr) {
@@ -694,12 +705,18 @@ Result KProcess::CreateThreadLocalRegion(KProcessAddress* out) {
     R_SUCCEED();
 }
 
-Result KProcess::DeleteThreadLocalRegion(KProcessAddress addr) {
+Result KProcess::DeleteThreadLocalRegion(
+    KProcessAddress addr, const Core::Memory::Memory::MappingTeardown* teardown) {
+    if (teardown) m_memory.ValidateMappingTeardown(*teardown);
     KThreadLocalPage* page_to_free = nullptr;
 
     // Release the region.
     {
         KScopedSchedulerLock sl(m_kernel);
+        // A prior uncertain cleanup retains its owner but is not safe to retry
+        // or return to the allocation trees without a separate recovery protocol.
+        R_UNLESS(m_finalizing_tlp_tree.find_key(Common::AlignDown(GetInteger(addr), PageSize)) ==
+                     m_finalizing_tlp_tree.end(), ResultInvalidState);
 
         // Try to find the page in the partially used list.
         auto it = m_partially_used_tlp_tree.find_key(Common::AlignDown(GetInteger(addr), PageSize));
@@ -730,11 +747,18 @@ Result KProcess::DeleteThreadLocalRegion(KProcessAddress addr) {
                 page_to_free = tlp;
             }
         }
+        if (page_to_free != nullptr) {
+            m_finalizing_tlp_tree.insert(*page_to_free);
+        }
     }
 
     // If we should free the page it was in, do so.
     if (page_to_free != nullptr) {
-        page_to_free->Finalize();
+        R_TRY(page_to_free->Finalize(teardown));
+        {
+            KScopedSchedulerLock sl(m_kernel);
+            m_finalizing_tlp_tree.erase(*page_to_free);
+        }
 
         KThreadLocalPage::Free(m_kernel, page_to_free);
     }

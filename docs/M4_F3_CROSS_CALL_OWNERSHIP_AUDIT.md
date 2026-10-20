@@ -1,5 +1,11 @@
 # M4-F3 cross-call ownership audit
 
+The findings below describe the pre-repair source. The three follow-up commits
+repair bookkeeping, retain incomplete MapGroup ownership and introduce an
+explicit process teardown entry. Current disposition, recovery limits and test
+evidence are in [mapping ownership transactions](M4_F3_MAPPING_OWNERSHIP_TRANSACTIONS.md).
+This supersedes the original OPEN reproduction outcomes, not F2/F3 status.
+
 ## Implementation checkpoint: Finalize bookkeeping
 
 The block-manager callback now runs while its current record remains linked.

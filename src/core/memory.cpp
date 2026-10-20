@@ -1066,6 +1066,12 @@ void Memory::UnmapRegion(Common::PageTable& page_table, Common::ProcessAddress b
     publication.Finish();
 }
 
+void Memory::UnmapRegionForTeardown(Common::PageTable& page_table, Common::ProcessAddress base,
+                                   u64 size, bool separate_heap, const MappingTeardown& entry) {
+    mapping_publications.ValidateTeardown(entry);
+    impl->UnmapRegion(page_table, base, size, separate_heap);
+}
+
 void Memory::ProtectRegion(Common::PageTable& page_table, Common::ProcessAddress vaddr, u64 size,
                            Common::MemoryPermission perms) {
     auto publication = mapping_publications.Begin();

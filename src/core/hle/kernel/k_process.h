@@ -73,6 +73,8 @@ private:
     std::atomic<size_t> m_used_kernel_memory_size{};
     TLPTree m_fully_used_tlp_tree{};
     TLPTree m_partially_used_tlp_tree{};
+    // Cleanup failures retain their TLS owner here, outside the reusable allocation trees.
+    TLPTree m_finalizing_tlp_tree{};
     s32 m_ideal_core_id{};
     KResourceLimit* m_resource_limit{};
     KSystemResource* m_system_resource{};
@@ -329,7 +331,8 @@ public:
     void RemoveSharedMemory(KSharedMemory* shmem, KProcessAddress address, size_t size);
 
     Result CreateThreadLocalRegion(KProcessAddress* out);
-    Result DeleteThreadLocalRegion(KProcessAddress addr);
+    Result DeleteThreadLocalRegion(
+        KProcessAddress addr, const Core::Memory::Memory::MappingTeardown* teardown = nullptr);
 
     KProcessAddress GetProcessLocalRegionAddress() const {
         return m_plr_address;

@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <stdexcept>
 
 #include "common/scope_exit.h"
 #include "common/settings.h"
@@ -504,7 +505,8 @@ Result KPageTableBase::FinalizeProcess() {
     R_SUCCEED();
 }
 
-void KPageTableBase::Finalize() {
+void KPageTableBase::Finalize(const Core::Memory::Memory::MappingTeardown* teardown) {
+    m_memory->ValidateMappingTeardown(teardown);
     this->FinalizeProcess();
 
     auto BlockCallback = [&](KProcessAddress addr, u64 size) {
@@ -532,7 +534,7 @@ void KPageTableBase::Finalize() {
     // Finalize memory blocks.
     {
         KScopedLightLock lk(m_general_lock);
-        this->FinalizeIncompleteMapGroups();
+        this->FinalizeIncompleteMapGroups(teardown);
         m_memory_block_manager.Finalize(m_memory_block_slab_manager, std::move(BlockCallback));
     }
 
@@ -561,14 +563,22 @@ void KPageTableBase::Finalize() {
     m_impl.reset();
 }
 
-void KPageTableBase::FinalizeIncompleteMapGroups() {
+void KPageTableBase::FinalizeIncompleteMapGroups(
+    const Core::Memory::Memory::MappingTeardown* teardown) {
     assert(this->IsLockedByCurrentThread());
+    m_memory->ValidateMappingTeardown(teardown);
     while (m_incomplete_map_groups) {
         auto& pending = *m_incomplete_map_groups;
         // No post-success block metadata was published for this group. Detach its
         // complete range before the normal metadata walk can rediscover its PTEs.
-        m_memory->UnmapRegion(*m_impl, pending.address, pending.num_pages * PageSize,
-                              pending.separate_heap);
+        if (teardown) {
+            m_memory->UnmapRegionForTeardown(*m_impl, pending.address,
+                                            pending.num_pages * PageSize,
+                                            pending.separate_heap, *teardown);
+        } else {
+            m_memory->UnmapRegion(*m_impl, pending.address, pending.num_pages * PageSize,
+                                  pending.separate_heap);
+        }
         pending.pages.CloseAndReset();
         auto next = std::move(pending.next);
         m_incomplete_map_groups = std::move(next);
@@ -2890,7 +2900,9 @@ Result KPageTableBase::MapPages(KProcessAddress address, size_t num_pages, KMemo
     R_SUCCEED();
 }
 
-Result KPageTableBase::UnmapPages(KProcessAddress address, size_t num_pages, KMemoryState state) {
+Result KPageTableBase::UnmapPages(KProcessAddress address, size_t num_pages, KMemoryState state,
+                                  const Core::Memory::Memory::MappingTeardown* teardown) {
+    if (teardown) m_memory->ValidateMappingTeardown(*teardown);
     // Check that the unmap is in range.
     const size_t size = num_pages * PageSize;
     R_UNLESS(this->Contains(address, size), ResultInvalidCurrentMemory);
@@ -2918,7 +2930,7 @@ Result KPageTableBase::UnmapPages(KProcessAddress address, size_t num_pages, KMe
     const KPageProperties unmap_properties = {KMemoryPermission::None, false, false,
                                               DisableMergeAttribute::None};
     R_TRY(this->Operate(updater.GetPageList(), address, num_pages, 0, false, unmap_properties,
-                        OperationType::Unmap, false));
+                        OperationType::Unmap, false, teardown));
 
     // Update the blocks.
     m_memory_block_manager.Update(std::addressof(allocator), address, num_pages, KMemoryState::Free,
@@ -6050,9 +6062,16 @@ Result KPageTableBase::UnmapProcessMemory(KProcessAddress dst_address, size_t si
 Result KPageTableBase::Operate(PageLinkedList* page_list, KProcessAddress virt_addr,
                                size_t num_pages, KPhysicalAddress phys_addr, bool is_pa_valid,
                                const KPageProperties properties, OperationType operation,
-                               bool reuse_ll) {
+                               bool reuse_ll,
+                               const Core::Memory::Memory::MappingTeardown* teardown) {
     assert(this->IsLockedByCurrentThread());
-    if (m_incomplete_map_groups) {
+    if (teardown) {
+        m_memory->ValidateMappingTeardown(*teardown);
+        if (operation != OperationType::Unmap && operation != OperationType::UnmapPhysical) {
+            throw std::runtime_error("teardown permits unmap only");
+        }
+    }
+    if (m_incomplete_map_groups && !teardown) {
         throw std::runtime_error("page table has an incomplete mapping transaction");
     }
     assert(num_pages > 0);
@@ -6074,7 +6093,12 @@ Result KPageTableBase::Operate(PageLinkedList* page_list, KProcessAddress virt_a
         this->MakePageGroup(pages_to_close, virt_addr, num_pages);
 
         // Unmap.
-        m_memory->UnmapRegion(*m_impl, virt_addr, num_pages * PageSize, separate_heap);
+        if (teardown) {
+            m_memory->UnmapRegionForTeardown(*m_impl, virt_addr, num_pages * PageSize,
+                                            separate_heap, *teardown);
+        } else {
+            m_memory->UnmapRegion(*m_impl, virt_addr, num_pages * PageSize, separate_heap);
+        }
 
         // Only a successful unmap can release the backing references. In particular,
         // a controlled-entry refusal has left the original mapping intact.

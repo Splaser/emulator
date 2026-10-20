@@ -75,3 +75,37 @@ descriptor failure before effects and successful untracked pending cleanup.
 Restoring reference Close during retained unwind is rejected by its ownership
 assertion. These are injected reference/PTE collaborators, not a native allocator
 or process teardown witness.
+
+## Teardown implementation evidence
+
+Memory issues the teardown entry through a private KProcess friend interface.
+The entry seals normal admission and retains the exclusive publication lifetime
+lock. Validation checks domain identity, thread identity and moved-from state.
+The explicit UnmapRegionForTeardown wrapper validates before Impl effects;
+Map/Protect/context publication have no teardown overload. Controlled PageTable
+finalization requires this entry, including when no incomplete group exists.
+
+KProcess carries the entry through DeleteThreadLocalRegion, TLS Finalize,
+UnmapPages and PageTable Finalize, then destroys it before Memory::Finalize.
+Failed TLS cleanup remains reachable in a separate finalizing tree, excluded from
+allocation. A failed Result is propagated; a second cleanup of that quarantined
+TLS page refuses until a separate recovery protocol exists. The PLR address is
+cleared only after success. The slab Destroy path cannot proceed to Free when
+Finalize throws, so its Memory/PageTable owner resources are not recycled.
+The object-list unregister earlier in Destroy is not rolled back; this is a
+fail-stop retention protocol, not restartable full-process destruction.
+
+The Linux extracted-body fixture executes the actual TLS finalizer, process TLS
+deletion, Memory cleanup wrapper and the initial KProcess::Finalize owner sequence
+(through PageTable finalization). Its remaining owner-resource cleanup is an
+injected tail, not the full native destructor. It checks normal/controlled paths,
+partial/full TLS allocation trees, Result/exception/Unknown cleanup failures,
+foreign entry refusal before TLS and unmap effects, moved/thread identity, closed
+normal admission, lifetime joining and Memory disposal after token release.
+Three positive repeats and two assertion-specific mutants pass. The group fixture
+also checks failed cleanup retains its record and references, followed by an
+explicitly idempotent injected recovery; no general Unknown retry is inferred.
+
+The preceding Unmap-only Linux CI run 39384043830 has completed successfully at
+74aea98af7. It does not validate these new transactions. A fresh Linux-only native
+run is required for this source; Android remains excluded.

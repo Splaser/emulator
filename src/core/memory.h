@@ -139,6 +139,16 @@ public:
     /// Join entered mapping publications before external process/PTE destruction.
     /// Terminal for an enrolled Memory, including across Reset/move. No later adoption.
     void SealControlledMappings();
+    using MappingTeardown = ControlledMappingPublication::Teardown;
+    /// Explicit owner-only unmap after normal entry retirement. Never reopens admission.
+    void UnmapRegionForTeardown(Common::PageTable& page_table, Common::ProcessAddress base,
+                                u64 size, bool separate_heap, const MappingTeardown& entry);
+    void ValidateMappingTeardown(const MappingTeardown& entry) const {
+        mapping_publications.ValidateTeardown(entry);
+    }
+    void ValidateMappingTeardown(const MappingTeardown* entry) const {
+        mapping_publications.ValidateTeardown(entry);
+    }
     // Existing owner-bound preparation and stores only; ordinary Memory::Write/bulk,
     // escaped pointers, services and native stores are NOT enrolled by this API.
     [[nodiscard]] auto TryCloseControlledStores(u32 poll_budget=64) const {
@@ -592,6 +602,10 @@ public:
 
 private:
     friend struct Core::SystemTestAccess;
+    friend class Kernel::KProcess;
+    [[nodiscard]] MappingTeardown BeginMappingTeardown() const {
+        return mapping_publications.BeginTeardown();
+    }
     friend struct Core::SchedulerTestAccess;
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite(
         Common::ProcessAddress, ControlledCpuWriteRequest::Value);

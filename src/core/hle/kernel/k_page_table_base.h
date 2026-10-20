@@ -267,7 +267,7 @@ private:
               pages{kernel, manager} {}
     };
     std::unique_ptr<IncompleteMapGroup> m_incomplete_map_groups;
-    void FinalizeIncompleteMapGroups();
+    void FinalizeIncompleteMapGroups(const Core::Memory::Memory::MappingTeardown* teardown);
     Core::Memory::Memory* m_memory{};
     KMemoryBlockManager m_memory_block_manager{};
     u32 m_allocate_option{};
@@ -299,7 +299,7 @@ public:
                                 KProcessAddress aslr_space_start);
 
     Result FinalizeProcess();
-    void Finalize();
+    void Finalize(const Core::Memory::Memory::MappingTeardown* teardown = nullptr);
 
     bool IsKernel() const {
         return m_is_kernel;
@@ -384,7 +384,8 @@ protected:
     // class, and this avoids unnecessary virtual function calls.
     Result Operate(PageLinkedList* page_list, KProcessAddress virt_addr, size_t num_pages,
                    KPhysicalAddress phys_addr, bool is_pa_valid, const KPageProperties properties,
-                   OperationType operation, bool reuse_ll);
+                   OperationType operation, bool reuse_ll,
+                   const Core::Memory::Memory::MappingTeardown* teardown = nullptr);
     Result Operate(PageLinkedList* page_list, KProcessAddress virt_addr, size_t num_pages,
                    const KPageGroup& page_group, const KPageProperties properties,
                    OperationType operation, bool reuse_ll);
@@ -619,7 +620,8 @@ public:
 
     Result MapPages(KProcessAddress address, size_t num_pages, KMemoryState state,
                     KMemoryPermission perm);
-    Result UnmapPages(KProcessAddress address, size_t num_pages, KMemoryState state);
+    Result UnmapPages(KProcessAddress address, size_t num_pages, KMemoryState state,
+                      const Core::Memory::Memory::MappingTeardown* teardown = nullptr);
 
     Result MapPageGroup(KProcessAddress* out_addr, const KPageGroup& pg,
                         KProcessAddress region_start, size_t region_num_pages, KMemoryState state,

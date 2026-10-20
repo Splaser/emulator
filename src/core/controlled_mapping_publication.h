@@ -6,6 +6,7 @@
 #include <optional>
 #include <shared_mutex>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 
 #include "common/producer_drain.h"
@@ -26,6 +27,26 @@ public:
     class Refused : public std::runtime_error {
     public:
         using std::runtime_error::runtime_error;
+    };
+    class Teardown {
+        friend class ControlledMappingPublication;
+        const ControlledMappingPublication* owner{};
+        std::shared_ptr<State> state;
+        std::unique_lock<std::shared_mutex> lifetime;
+        std::thread::id thread;
+        Teardown(const ControlledMappingPublication* owner_, std::shared_ptr<State> state_)
+            : owner{owner_}, state{std::move(state_)},
+              lifetime{state ? std::unique_lock{state->lifetime}
+                             : std::unique_lock<std::shared_mutex>{}},
+              thread{std::this_thread::get_id()} {
+            if (state) state->retired = true;
+        }
+    public:
+        Teardown(Teardown&& other) noexcept
+            : owner{std::exchange(other.owner, nullptr)}, state{std::move(other.state)},
+              lifetime{std::move(other.lifetime)}, thread{other.thread} {}
+        Teardown(const Teardown&) = delete;
+        ~Teardown() = default;
     };
     class Entry {
         friend class ControlledMappingPublication;
@@ -71,6 +92,21 @@ public:
     [[nodiscard]] auto TryClose(u32 poll_budget = 64) const {
         return state ? state->entries.TryClose(poll_budget)
                      : std::optional<Common::ProducerDrain::Closure>{};
+    }
+    // Owner-thread cleanup only, outside other locks. Normal admission stays sealed.
+    [[nodiscard]] Teardown BeginTeardown() const {
+        if (state) state->entries.Seal();
+        return Teardown{this, state};
+    }
+    void ValidateTeardown(const Teardown& entry) const {
+        if (entry.owner != this || entry.thread != std::this_thread::get_id() ||
+            entry.state != state || (state && !entry.lifetime.owns_lock())) {
+            throw Refused("invalid mapping teardown owner");
+        }
+    }
+    void ValidateTeardown(const Teardown* entry) const {
+        if (entry) ValidateTeardown(*entry);
+        else if (state) throw Refused("controlled table finalization requires owner teardown");
     }
     // Lifecycle join only. Never call while holding context/PTE/HostMemory locks
     // or from an entered publication. No GPU handoff, wait or callbacks here.

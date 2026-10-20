@@ -1,5 +1,25 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: explicit process teardown entry
+
+The third independent change implements the previously written owner order.
+Normal mapping admission remains closed; a private process-owner factory issues
+an exclusive, domain/thread-bound entry for explicit cleanup unmaps only. TLS
+cleanup carries it through UnmapPages. Failed TLS cleanup retains a descriptor in
+a non-reusable finalizing tree and propagates failure. PageTable cleanup detaches
+pending groups before the ordinary block walk. The entry is destroyed before
+Memory finalization, preventing recursive retirement deadlock.
+
+Linux extracted-body tests pass three repeats for owner sequencing, failed TLS
+retention, foreign/moved/thread entry refusal, closed admission and lifetime join;
+ignored-Result and unguarded-unmap mutants fail their intended assertions. Group
+cleanup failure retains all references and its recovery record. Full native
+acceptance is separate; no ordinary controlled-process enrollment is enabled.
+See the [transaction design and limits](M4_F3_MAPPING_OWNERSHIP_TRANSACTIONS.md).
+
+The old Unmap run 39384043830 has completed successfully at 74aea98af7. Its
+artifact is being recovered independently and cannot accept the three new commits.
+
 ## 2026-10-20: MapGroup ownership transaction
 
 See the [resource disposition table and teardown design](M4_F3_MAPPING_OWNERSHIP_TRANSACTIONS.md).
