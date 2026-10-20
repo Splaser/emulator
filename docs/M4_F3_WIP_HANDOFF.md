@@ -1,5 +1,41 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: pause checkpoint for quota reset
+
+Source and workflow changes are committed and pushed on
+`origin/codex/issue-372-fixes` through `a2365189ec17139ed20f86e0002012bad85863f0`.
+The execution-stop implementation is `9ad0852457`; upstream interface recovery is
+`5a6eee7b58`. This checkpoint adds documentation only and starts no new build.
+
+Last observed remote validation state (pending, not acceptance):
+
+- [Merge recovery 39391213895](https://github.com/Splaser/emulator/actions/runs/39391213895),
+  exact source `5a6eee7b58f32bd5f38eadbea87344bdb93ed127`: early native translation
+  units passed; CLI/shader-tool/unit-test build was in progress.
+- [Execution stop 39394434521](https://github.com/Splaser/emulator/actions/runs/39394434521),
+  exact source `a2365189ec17139ed20f86e0002012bad85863f0`: native build dependency
+  installation was in progress. The real Dynarmic store-loop CTest remains pending.
+
+Local Linux checks passed: execution-stop actual-body fixtures (three positive
+repeats and two assertion mutants), ProducerDrain fixtures and fifteen mutants,
+process teardown, process unmap and cross-call ownership audit fixtures and their
+mutants. Production syntax checks passed for the new stop implementation,
+KProcess, PhysicalCore and both Dynarmic interfaces. These results do not certify
+native runtime behavior. The optional local native-test syntax probe initially
+stopped at missing development headers; X11/Wayland/XCB headers were subsequently
+installed, but that probe has not been rerun.
+
+Resume by recovering both workflow results and artifacts against their exact
+source commits. Repair any native compile/runtime failures before extending M4.
+Then continue the four gates in the process guest exclusion implementation record:
+process/API/mapping/service close-and-join; actual NCE and independent producer
+exit; GPU/device drain with retained Unknown isolation; ordinary guest-backed
+Vulkan admission. Current stop acknowledgement covers backend execution only.
+SVC/service writes, escaped aliases, real storage pinning and GPU ownership are
+still Open; NCE active stop is unsupported and GuestBackingAdmission stays Unknown.
+Keep original F2/F3 negative controls. Validation remains Linux-only; no Android
+build or usage-reset redemption was requested for this pause.
+
 ## 2026-10-20: process-owned execution-stop prerequisite
 
 Continue the user's four-step M4 sequence in the
