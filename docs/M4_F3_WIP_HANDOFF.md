@@ -4,9 +4,14 @@
 
 The preceding Linux run `39380436500` has passed every configured step, including
 the eleven new publication mutants, complete native/CTest processes and full
-original Linux regressions. Android was skipped. Artifact `12246651887` is being
-downloaded for independent source/hash verification; that verification is not
-yet accepted. Its precise tested source remains `3576ea32bd`.
+original Linux regressions. Android was skipped. Artifact `12246651887` has now
+been independently verified: published ZIP SHA-256 matches, all 139 hash entries
+in eleven manifests match exact source `3576ea32bd`, five CTest processes pass and
+the three extra native provenance processes each pass 499 assertions. The eleven
+new publication mutants and three PTE/VMA repeats pass; original F2/F3 negatives
+remain unchanged. See the [publication acceptance record](M4_F3_OUTER_MAPPING_PUBLICATION.md#verified-linux-acceptance)
+and ignored `.diagnostics/ci-39380436500/` for full evidence and scope. This closes
+the preceding component only and does not accept the new Unmap source.
 
 Source audit above the per-Memory boundary found unconditional reference cleanup
 in KPageTableBase::Operate Unmap/UnmapPhysical: an inner controlled-entry refusal
@@ -21,6 +26,12 @@ documents local three-repeat acceptance, both assertion controls and precise
 limits. No native allocator/page reuse or process-wide closure is claimed.
 Full Linux validation for the new fix remains pending. Ordinary guest mode,
 producer/alias completeness, content authority and F2/F3 status are unchanged.
+
+New Linux-only validation:
+[39384043830](https://github.com/Splaser/emulator/actions/runs/39384043830), exact
+source `74aea98af7a49f4098f6772328b0271c5d904f9f`. Recover its result before further
+runtime changes or another dispatch. Android is not requested. Earlier run
+`39380436500` cannot accept the new Unmap source.
 
 ## 2026-10-20: controlled outer CPU mapping publication component
 
@@ -46,6 +57,11 @@ Current Linux-only acceptance run:
 production/test source `3576ea32bd`. Android is skipped. Recover this run's first
 actual result and artifact before another dispatch or further runtime changes;
 the local compile-only probe is not runtime or mutation acceptance.
+
+That pending run has now passed and its artifact/source evidence is verified in
+the [component acceptance record](M4_F3_OUTER_MAPPING_PUBLICATION.md#verified-linux-acceptance).
+No duplicate dispatch for `3576ea32bd` is needed. The Unmap follow-up above is
+separately tracked at source `74aea98af7`.
 
 This closes no all-owner table freeze or general guest exclusion gate. Raw PTE
 writes, another Memory, services, frame/device/GPU owners and retained Unknown

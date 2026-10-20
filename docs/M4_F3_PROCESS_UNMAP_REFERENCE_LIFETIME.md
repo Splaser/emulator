@@ -69,3 +69,8 @@ ordinary processes or treating a drained Memory as a complete table freeze.
 F2/F3 remain Open. Ordinary routing, physical content authority, all-process
 coverage and retained guest-wide Unknown isolation are not enabled. Validation
 for this iteration remains Linux-only; Android is not requested.
+
+Linux-only validation is pending in
+[39384043830](https://github.com/Splaser/emulator/actions/runs/39384043830), exact
+source `74aea98af7a49f4098f6772328b0271c5d904f9f`. The earlier publication-component
+run `39380436500` passed at `3576ea32bd` and does not accept this new Unmap change.

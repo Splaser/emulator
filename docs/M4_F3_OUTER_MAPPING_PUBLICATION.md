@@ -114,3 +114,37 @@ Pending remote run:
 The next roadmap gate remains process/PTE ownership and all relevant host/service
 publication closure with retained lifetimes, followed by device/GPU enrollment
 and retained Unknown isolation. This component alone cannot satisfy that gate.
+
+## Verified Linux acceptance
+
+[39380436500](https://github.com/Splaser/emulator/actions/runs/39380436500) passed
+the complete Linux job `118488091047` at exact source
+`3576ea32bdea1513b2afdbd47226a712a3bf768a`. Android was skipped.
+
+Independent verification downloaded artifact `12246651887` and matched its
+published ZIP SHA-256
+`8d809c7c9f3c90e161c84d2eb27b158b468f3f1c912bde033ddf8d2a21c62b19`.
+Its source stamp and all **139** source-hash entries across **11** manifests
+match Git at that exact source and current HEAD for the files those manifests
+cover. The later Unmap change is outside this acceptance; it has a separate run.
+
+- Eleven new publication assertion mutants reached their intended assertions;
+  all three real Linux PTE/VMA fixture repeats passed, including the split-map,
+  partial-publication sealing, actual entry-lock retirement and omitted-owner controls.
+- All five CTest processes passed. Three additional native provenance processes
+  each passed **499** assertions and the actual constructor/six-refusal/Reset-join
+  marker, as well as the previous CPU-preparation lifetime marker.
+- Complete native production builds, existing mapping/owner/synchronization/content
+  controls and all configured backing/coherency/lifecycle regressions passed.
+- The original F2 still prints `F2 expected=77 observed=10 backing=77`; its fixed
+  mode remains the required failure. F3's fixed mode retains exactly two alias
+  failures and exit 42. No ordinary F2/F3 repair is claimed.
+
+Downloaded metadata, ZIP, artifact, full Linux job log, verifier and acceptance
+index are retained under ignored `.diagnostics/ci-39380436500/`. This accepts
+only the constructor-enrolled per-Memory CPU publication component.
+
+The next [Unmap reference-lifetime follow-up](M4_F3_PROCESS_UNMAP_REFERENCE_LIFETIME.md)
+addresses an exception cleanup hazard in the higher-level process mapping caller.
+Its source `74aea98af7` requires independent Linux acceptance. Neither component
+enables an ordinary process freeze or guest admission.
