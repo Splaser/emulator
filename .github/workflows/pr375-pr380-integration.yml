@@ -6,11 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       validation_scope:
-        description: Linux validation by default; choose full when Android verification is needed
+        description: Choose Linux, Android, or full validation
         type: choice
         default: linux-only
         options:
           - linux-only
+          - android-only
           - full
 
 permissions:
@@ -66,6 +67,7 @@ jobs:
           if-no-files-found: warn
 
   linux-production:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.validation_scope != 'android-only' }}
     runs-on: ubuntu-24.04
     container: ghcr.io/pkgforge-dev/archlinux:latest
     timeout-minutes: 120

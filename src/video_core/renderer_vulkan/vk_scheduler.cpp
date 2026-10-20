@@ -226,7 +226,7 @@ void Scheduler::RecordBufferCopy(VkBuffer destination, VkBuffer source, std::spa
     const auto record_regions = [&](auto regions, size_t region_count) {
         for (const auto& region : std::span{regions}.first(region_count))
             RevokeBufferContent(destination, region.dstOffset, region.size);
-        EnqueueCommand([destination, source, regions = std::move(regions), region_count, barrier, upload](
+        EnqueueCommand([destination, source, captured_regions = std::move(regions), region_count, barrier, upload](
                           vk::CommandBuffer main_cmdbuf, vk::CommandBuffer upload_cmdbuf) {
             auto cmdbuf = upload ? upload_cmdbuf : main_cmdbuf;
             const VkMemoryBarrier before{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
@@ -237,7 +237,7 @@ void Scheduler::RecordBufferCopy(VkBuffer destination, VkBuffer source, std::spa
             // Upload work must still wait for prior submissions on this queue. No ancestry is imported.
             if (upload || barrier)
                 cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, before);
-            const auto recorded_regions = std::span{regions}.first(region_count);
+            const auto recorded_regions = std::span{captured_regions}.first(region_count);
             cmdbuf.CopyBuffer(source, destination, recorded_regions);
             if (!upload && barrier)
                 // HOST scope is required for downloads read by the CPU after the fence.
