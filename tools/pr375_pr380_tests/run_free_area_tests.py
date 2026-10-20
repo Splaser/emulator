@@ -23,6 +23,12 @@ result = (root / 'src/core/hle/result.h').read_text()
 macro = result[result.index('#define R_ASSERT(res_expr)'):].splitlines()
 macro_end = next(i for i, line in enumerate(macro) if not line.rstrip().endswith('\\'))
 macro = '\n'.join(macro[:macro_end + 1])
+# Keep the real ASSERT expansion: Release builds may report and continue when
+# use_debug_asserts is disabled. Only logging and its runtime handler are fixtures.
+assert_source = (root / 'src/common/assert.h').read_text()
+assert_macro = assert_source[assert_source.index('#define ASSERT(_a_)'):].splitlines()
+assert_end = next(i for i, line in enumerate(assert_macro) if not line.rstrip().endswith('\\'))
+assert_macro = '\n'.join(assert_macro[:assert_end + 1])
 head = r'''
 #include <algorithm>
 #include <cassert>
@@ -50,7 +56,12 @@ namespace Svc {struct PageInfo {};}
 #define R_SUCCEEDED(r) ((r) == 0)
 #define R_FAILED(r) ((r) != 0)
 '''
-head += macro + r'''
+head += r'''
+#define CITRON_NO_INLINE
+#define LOG_CRITICAL(...) do {} while (false)
+int assertion_failures{};
+void assert_fail_impl() { ++assertion_failures; }
+''' + assert_macro + '\n' + macro + r'''
 struct Manager {
     mutable int fallback_calls{};
     KProcessAddress FindFreeArea(KProcessAddress, size_t, size_t, size_t, size_t, size_t) const {
@@ -79,15 +90,19 @@ int main() {
     KPageTableBase normal;
     Check(normal.FindFreeArea(0x2000, 16, 1, PageSize, 0, 0) == 0x2000);
     Check(normal.queries == 1 && normal.m_memory_block_manager.fallback_calls == 0);
+    Check(assertion_failures == 0);
     KPageTableBase retry; retry.failures = 1;
     Check(retry.FindFreeArea(0x2000, 16, 1, PageSize, 0, 0) == 0x2000);
     Check(retry.queries == 2 && retry.m_memory_block_manager.fallback_calls == 0);
+    Check(assertion_failures == 1);
     KPageTableBase failure; failure.failures = 8;
     Check(failure.FindFreeArea(0x2000, 16, 1, PageSize, 0, 0) == 0x9000);
     Check(failure.queries == 8 && failure.m_memory_block_manager.fallback_calls == 1);
+    Check(assertion_failures == 9);
     KPageTableBase no_aslr; no_aslr.aslr = false;
     Check(no_aslr.FindFreeArea(0x2000, 16, 1, PageSize, 0, 0) == 0x9000);
     Check(no_aslr.queries == 0 && no_aslr.m_memory_block_manager.fallback_calls == 1);
+    Check(assertion_failures == 9);
     std::cout << "PASS Release FindFreeArea: success, failed-candidate retry, failure fallback, ASLR disabled\n";
 }
 '''

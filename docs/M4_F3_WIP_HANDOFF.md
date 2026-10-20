@@ -1,5 +1,22 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-21: final regression fixture recovery
+
+Linux run `39432258674` at `51266b64ef` compiled all requested production
+and test targets and passed all seven CTest processes, the unsupported-evidence
+mutation batch, repeated native F3/transfer/provenance witnesses and real Linux
+HostMemory/backing import checks. The F3 fixed-mode exit 42 is the intended
+negative control, not a new coherency fix.
+
+The last regression batch stopped because the extracted R_ASSERT now expands
+to ASSERT, while its standalone FindFreeArea fixture did not define ASSERT.
+The fixture now extracts the actual ASSERT macro too, mocks only logging and
+the runtime assertion handler, and checks failed-query assertion counts when
+that handler continues (use_debug_asserts disabled). Windows Release compilation,
+retry/fallback behavior and the guard-removal negative control pass. Production
+code and scheduling behavior are unchanged. Complete Linux acceptance remains
+pending until the resumed batch and exact-source artifact are verified.
+
 ## 2026-10-20: compiled native run exposes unchecked-loop stop limit
 
 Run `39427948982` at `10e58d6545` compiled/linked the real CLI, shader tool,
