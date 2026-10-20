@@ -967,8 +967,9 @@ struct Memory::Impl {
     Common::HostMemory* buffer{};
 };
 
-Memory::Memory(Core::System& system_) : system{system_} {
-    Reset();
+Memory::Memory(Core::System& system_, MappingPublicationMode mappings)
+    : system{system_}, mapping_publications{mappings == MappingPublicationMode::Controlled} {
+    impl = std::make_unique<Impl>(system);
 }
 
 std::optional<PreparedCpuPage> Memory::PrepareControlledCpuPage(
@@ -977,10 +978,15 @@ std::optional<PreparedCpuPage> Memory::PrepareControlledCpuPage(
     return impl->PrepareControlledCpuPage(page_address);
 }
 
-Memory::~Memory() { SealControlledCpuWrites(); }
+Memory::~Memory() {
+    SealControlledCpuWrites();
+    SealControlledMappings();
+}
 
 Memory::Memory(Memory&& other) : system{other.system} {
     other.SealControlledCpuWrites(); // queued requests never migrate their execution identity
+    other.SealControlledMappings();
+    mapping_publications = std::move(other.mapping_publications);
     impl = std::move(other.impl);
 }
 
@@ -988,8 +994,13 @@ void Memory::SealControlledCpuWrites() {
     if (controlled_owner) controlled_owner->Close();
 }
 
+void Memory::SealControlledMappings() {
+    mapping_publications.Retire();
+}
+
 void Memory::Finalize() {
     SealControlledCpuWrites();
+    SealControlledMappings();
     impl.reset();
     controlled_owner.reset(); // Unknown identities retain their sealed gate independently.
 }
@@ -1029,28 +1040,37 @@ ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite64(Common::ProcessAdd
 
 void Memory::Reset() {
     SealControlledCpuWrites();
+    SealControlledMappings();
     impl = std::make_unique<Impl>(system);
     controlled_owner = std::make_shared<CpuWriteOwner>(this);
 }
 
 void Memory::SetCurrentPageTable(Kernel::KProcess& process) {
+    auto publication = mapping_publications.Begin();
     impl->SetCurrentPageTable(process);
+    publication.Finish();
 }
 
 void Memory::MapMemoryRegion(Common::PageTable& page_table, Common::ProcessAddress base, u64 size,
                              Common::PhysicalAddress target, Common::MemoryPermission perms,
                              bool separate_heap) {
+    auto publication = mapping_publications.Begin();
     impl->MapMemoryRegion(page_table, base, size, target, perms, separate_heap);
+    publication.Finish();
 }
 
 void Memory::UnmapRegion(Common::PageTable& page_table, Common::ProcessAddress base, u64 size,
                          bool separate_heap) {
+    auto publication = mapping_publications.Begin();
     impl->UnmapRegion(page_table, base, size, separate_heap);
+    publication.Finish();
 }
 
 void Memory::ProtectRegion(Common::PageTable& page_table, Common::ProcessAddress vaddr, u64 size,
                            Common::MemoryPermission perms) {
+    auto publication = mapping_publications.Begin();
     impl->ProtectRegion(page_table, GetInteger(vaddr), size, perms);
+    publication.Finish();
 }
 
 bool Memory::IsValidVirtualAddress(const Common::ProcessAddress vaddr) const {
@@ -1306,11 +1326,15 @@ Result Memory::FlushDataCache(Common::ProcessAddress dest_addr, const std::size_
 }
 
 void Memory::RasterizerMarkRegionCached(Common::ProcessAddress vaddr, u64 size, bool cached) {
+    auto publication = mapping_publications.Begin();
     impl->RasterizerMarkRegionCached(GetInteger(vaddr), size, cached);
+    publication.Finish();
 }
 
 void Memory::MarkRegionDebug(Common::ProcessAddress vaddr, u64 size, bool debug) {
+    auto publication = mapping_publications.Begin();
     impl->MarkRegionDebug(GetInteger(vaddr), size, debug);
+    publication.Finish();
 }
 
 bool Memory::InvalidateNCE(Common::ProcessAddress vaddr, size_t size) {

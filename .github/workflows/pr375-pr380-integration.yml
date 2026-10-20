@@ -112,6 +112,8 @@ jobs:
             -DENABLE_QT=OFF -DENABLE_SDL2=ON -DCITRON_USE_EXTERNAL_SDL2=OFF \
             -DENABLE_CUBEB=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_LIBUSB=OFF \
             -DCITRON_ROOM=OFF -DCITRON_TESTS=ON -DCITRON_CRASH_DUMPS=OFF
+      - name: Verify controlled outer PTE and mapping publication closure
+        run: python tools/physical_coherency_tests/run_mapping_publication_tests.py
       - name: Verify HostMemory mapping freeze and omitted-owner controls
         run: python tools/physical_coherency_tests/run_host_mapping_freeze_tests.py
       - name: Verify real controlled arena owner admission and quarantine
@@ -177,6 +179,8 @@ jobs:
               > .diagnostics/pr375-pr380/f3-provenance-$repeat.txt 2>&1
             cat .diagnostics/pr375-pr380/f3-provenance-$repeat.txt
             grep -F 'PASS native controlled CPU preparation owns real pin/owner entry through closure and exception cleanup; guest exclusion Unknown' \
+              .diagnostics/pr375-pr380/f3-provenance-$repeat.txt
+            grep -F 'PASS native controlled mapping constructor, six pre-effect refusals and Reset lifetime join; guest admission Unknown' \
               .diagnostics/pr375-pr380/f3-provenance-$repeat.txt
           done
       - name: Preserve original F2 defect and fixed-mode negative control
@@ -261,6 +265,7 @@ jobs:
             .diagnostics/m4-host-mapping-freeze/*
             .diagnostics/m4-controlled-owner/*
             .diagnostics/m4-cpu-preparation-owner/*
+            .diagnostics/m4-mapping-publication/*
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn

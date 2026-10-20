@@ -21,6 +21,9 @@
 
 namespace Core {
 struct SchedulerTestAccess : SystemTestAccess {
+    static auto EnterControlledMapping(Memory::Memory& memory) {
+        return memory.mapping_publications.Begin();
+    }
     static auto EnterGuestExecution(Kernel::PhysicalCore& core) {return core.guest_execution.TryEnter();}
     static bool VisitManagedMemory(Memory::Memory& memory, const std::function<void(Memory::Memory&)>& visit) {
         return memory.controlled_owner->TryVisit(visit);

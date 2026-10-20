@@ -137,6 +137,7 @@ void KProcess::Finalize() {
     // Stop queued controlled CPU stores BEFORE any process memory/PTE finalization. This joins
     // only an entered bounded store/publication visit, never a GPU completion or CPU producer.
     m_memory.SealControlledCpuWrites();
+    m_memory.SealControlledMappings(); // Default-off; join before process PTE finalization.
     // Delete the process local region.
     this->DeleteThreadLocalRegion(m_plr_address);
 

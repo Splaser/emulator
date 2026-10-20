@@ -1091,6 +1091,57 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         REQUIRE(exception_close->ResumeNoEffects());
         std::cout << "PASS native controlled CPU preparation owns real pin/owner entry through closure and exception cleanup; guest exclusion Unknown\n";
     }
+    {
+        using MappingMemory = Core::Memory::Memory;
+        using Drain = Common::ProducerDrain;
+        REQUIRE_FALSE(memory.TryCloseControlledMappings().has_value()); // Ordinary process stays off.
+        MappingMemory controlled{system, MappingMemory::MappingPublicationMode::Controlled};
+        controlled.SetCurrentPageTable(*owner.process);
+        auto& table = owner.process->GetPageTable().GetImpl();
+        auto before = table.SnapshotMapping(GetInteger(owner.heap) & ~u64{4095});
+        REQUIRE(before.has_value());
+        auto close = controlled.TryCloseControlledMappings(64);
+        REQUIRE(close.has_value());
+        REQUIRE(close->Poll() == Drain::Result::DrainedSubset);
+        REQUIRE_THROWS_AS(controlled.SetCurrentPageTable(*owner.process), std::runtime_error);
+        REQUIRE_THROWS_AS(controlled.MapMemoryRegion(table, owner.heap, 4096, before->physical_page,
+            Common::MemoryPermission::ReadWrite, false), std::runtime_error);
+        REQUIRE_THROWS_AS(controlled.UnmapRegion(table, owner.heap, 4096, false), std::runtime_error);
+        REQUIRE_THROWS_AS(controlled.ProtectRegion(table, owner.heap, 4096,
+            Common::MemoryPermission::Read), std::runtime_error);
+        REQUIRE_THROWS_AS(controlled.RasterizerMarkRegionCached(owner.heap, 4096, true), std::runtime_error);
+        REQUIRE_THROWS_AS(controlled.MarkRegionDebug(owner.heap, 4096, true), std::runtime_error);
+        REQUIRE(before->IsCurrent());
+        REQUIRE(close->ResumeNoEffects());
+
+        // The peer holds the actual owner entry; no mapping, CPU store or GPU lease is faked.
+        std::promise<void> entered, release;
+        auto released = release.get_future();
+        std::thread publisher([&] {
+            auto entry = Access::EnterControlledMapping(controlled);
+            entered.set_value(); released.wait(); entry.Finish();
+        });
+        entered.get_future().wait();
+        auto draining = controlled.TryCloseControlledMappings(64);
+        const auto pending = draining ? draining->Poll() : Drain::Result::Unknown;
+        const bool early = draining && draining->ResumeNoEffects();
+        std::promise<void> resetting;
+        auto reset = std::async(std::launch::async, [&] {
+            resetting.set_value(); controlled.Reset();
+        });
+        resetting.get_future().wait();
+        const bool reset_early = reset.wait_for(std::chrono::milliseconds{100}) == std::future_status::ready;
+        release.set_value(); publisher.join(); reset.get(); // Join before any throwing assertion.
+        REQUIRE(draining.has_value());
+        REQUIRE(pending == Drain::Result::Pending);
+        REQUIRE_FALSE(early);
+        REQUIRE_FALSE(reset_early);
+        REQUIRE(draining->Poll() == Drain::Result::Unknown);
+        REQUIRE_FALSE(draining->ResumeNoEffects());
+        REQUIRE_THROWS_AS(controlled.SetCurrentPageTable(*owner.process), std::runtime_error);
+        REQUIRE(before->IsCurrent());
+        std::cout << "PASS native controlled mapping constructor, six pre-effect refusals and Reset lifetime join; guest admission Unknown\n";
+    }
     constexpr DAddr A = 0x1000000, B = 0x2000000, C = 0x4000000, D = 0x5000000, E = 0x6000000;
     constexpr u32 Page = 4096;
     std::vector<u8> initial(2 * Footprint, 10);

@@ -1,5 +1,29 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: controlled outer CPU mapping publication component
+
+The [outer mapping publication contract](M4_F3_OUTER_MAPPING_PUBLICATION.md)
+adds constructor-only opt-in entry closure around the six actual Memory mapping,
+permission and context-publication wrappers. Each counted scope precedes Impl/PTE
+access and lasts through actual HostMemory effects and final tag publication.
+Retirement joins entered scopes before Impl lifetime ends; partial-publication
+exceptions seal the domain. Ordinary Memory/NCE instances remain untracked with
+no new allocated domain, counter operations or mapping mutex. No KProcess adopts
+the mode, and controlled retirement is terminal, including across Reset/move.
+
+The new Linux fixture uses actual wrapper/Impl bodies and real HostMemory/PTEs,
+with three repeats and eleven assertion mutants. It includes a real split PTE/VMA
+pause and an omitted-second-owner counterexample. Native provenance additionally
+checks actual constructor/default behavior, six public refusals and the real
+Memory::Reset lifetime join; the paused entry is privileged test orchestration.
+Local Windows fixture compilation succeeded; the Linux-specific runtime checks
+and full Linux acceptance remain pending. Android is explicitly not requested.
+
+This closes no all-owner table freeze or general guest exclusion gate. Raw PTE
+writes, another Memory, services, frame/device/GPU owners and retained Unknown
+isolation remain unclosed. No ordinary routing or physical content authority is
+enabled; F2/F3 remain Open. Continue validation on the PR branch only.
+
 ## 2026-10-20: cross-platform compilation recovery
 
 After syncing upstream `598b700884`, source `d67743a8c7` fixes a missing direct
@@ -21,6 +45,14 @@ check cannot rely on a precompiled Device definition. Full Linux/Android run
 [39352517047](https://github.com/Splaser/emulator/actions/runs/39352517047) targets
 exact source `d67743a8c7`; acceptance is pending. Recover its actual results before
 another dispatch or further runtime implementation. No local full build was run.
+
+That historical run subsequently passed its complete Linux job and failed Android
+at a separate shadowed lambda capture in `vk_scheduler.cpp`. Source `96d81e5aaf`
+renames that capture; Android-only
+[39357500270](https://github.com/Splaser/emulator/actions/runs/39357500270) passed
+NCE/core, HostMemory, Vulkan and shader library compilation. This is not APK
+packaging or device/runtime acceptance. The Linux-only iteration above builds on
+those recovered results; no duplicate Android dispatch is requested.
 
 Other historical failures need separate disposition: the native Windows clang-cl
 job in `39274847896` rejects an unused `/std:c++latest` alongside

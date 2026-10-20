@@ -1206,6 +1206,7 @@ add_library(core STATIC
     loader/xci.h
     memory.cpp
     controlled_cpu_page.h
+    controlled_mapping_publication.h
     memory.h
     memory/cheat_engine.cpp
     memory/cheat_engine.h

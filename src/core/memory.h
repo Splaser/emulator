@@ -14,6 +14,7 @@
 #include "common/typed_address.h"
 #include "core/guest_memory.h"
 #include "core/controlled_cpu_page.h"
+#include "core/controlled_mapping_publication.h"
 #include "core/hle/result.h"
 
 namespace Common {
@@ -58,7 +59,9 @@ enum : u64 {
 /// Central class that handles all memory operations and state.
 class Memory {
 public:
-    explicit Memory(Core::System& system);
+    enum class MappingPublicationMode { Untracked, Controlled };
+    explicit Memory(Core::System& system,
+                    MappingPublicationMode mappings = MappingPublicationMode::Untracked);
     ~Memory();
 
     Memory(const Memory&) = delete;
@@ -128,6 +131,14 @@ public:
     /// Owner teardown only, before process PTE finalization or Memory reset/destruction.
     /// Closes CPU store/preparation visits, without waiting for GPU requests to finish.
     void SealControlledCpuWrites();
+    /// Constructor-enrolled outer entries only. No all-process/raw/service/GPU closure.
+    /// Caller retains Memory, System and target PageTable owners at initial API entry.
+    [[nodiscard]] auto TryCloseControlledMappings(u32 poll_budget = 64) const {
+        return mapping_publications.TryClose(poll_budget);
+    }
+    /// Join entered mapping publications before external process/PTE destruction.
+    /// Terminal for an enrolled Memory, including across Reset/move. No later adoption.
+    void SealControlledMappings();
     // Existing owner-bound preparation and stores only; ordinary Memory::Write/bulk,
     // escaped pointers, services and native stores are NOT enrolled by this API.
     [[nodiscard]] auto TryCloseControlledStores(u32 poll_budget=64) const {
@@ -586,6 +597,7 @@ private:
         Common::ProcessAddress, ControlledCpuWriteRequest::Value);
     Core::System& system;
     std::shared_ptr<CpuWriteOwner> controlled_owner{std::make_shared<CpuWriteOwner>(this)};
+    ControlledMappingPublication mapping_publications;
 
     struct Impl;
     std::unique_ptr<Impl> impl;
