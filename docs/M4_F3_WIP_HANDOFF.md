@@ -1,5 +1,22 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: cross-call ownership audit
+
+The [cross-call ownership audit](M4_F3_CROSS_CALL_OWNERSHIP_AUDIT.md) identifies
+three remaining OPEN prerequisites: MapGroup unwinding closes references for a
+published prefix; controlled KProcess retirement precedes its own TLS unmap;
+and block-manager Finalize removes a record before a potentially throwing cleanup
+callback. MapPageGroupImpl's Result rollback and KScopedPageTableUpdater do not
+provide exception rollback. All actual processes remain untracked.
+
+The actual-body audit fixture reproduces the group and block-manager failures
+with injected collaborators and normal/refusal/untracked controls. Passing this
+fixture records existing defects, not safe ownership or fixed acceptance. The
+Linux WSL fixture passed three reproductions and two assertion-specific
+counterfactual sensitivity controls. The
+full-process/TLS path is source-audited only. No runtime change or new dispatch
+is part of this audit; recover the pending Unmap Linux run below separately.
+
 ## 2026-10-20: process Unmap exception-ordering follow-up
 
 The preceding Linux run `39380436500` has passed every configured step, including
