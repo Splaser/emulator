@@ -393,56 +393,6 @@ VkRect2D GetScissorState(const Tegra::Engines::Maxwell3D::Regs& regs, size_t ind
     return scissor;
 }
 
-// The area CLEAR_SURFACE writes: the render area, cut down by scissor 0, the clear rect and
-// viewport clip 0 when SET_CLEAR_SURFACE_CONTROL USE_SCISSOR0, USE_CLEAR_RECT and
-// USE_VIEWPORT_CLIP0 ask for them (clb197.h). The clear rect max is exclusive (NVK writes
-// offset + extent into it). Window rectangles flip like the scissor for a lower left origin.
-VkRect2D GetClearRect(const Tegra::Engines::Maxwell3D::Regs& regs, VkExtent2D render_area,
-                      u32 up_scale, u32 down_shift) {
-    s64 x0 = 0;
-    s64 y0 = 0;
-    s64 x1 = render_area.width;
-    s64 y1 = render_area.height;
-    const auto cut = [&](s64 min_x, s64 min_y, s64 max_x, s64 max_y) {
-        x0 = std::max(x0, min_x);
-        y0 = std::max(y0, min_y);
-        x1 = std::min(x1, max_x);
-        y1 = std::min(y1, max_y);
-    };
-    const bool lower_left =
-        regs.window_origin.mode != Tegra::Engines::Maxwell3D::Regs::WindowOrigin::Mode::UpperLeft;
-    const s64 clip_height = regs.surface_clip.height;
-    const auto cut_window = [&](s64 min_x, s64 min_y, s64 max_x, s64 max_y) {
-        if (lower_left) {
-            const s64 flipped_min_y = clip_height - max_y;
-            max_y = clip_height - min_y;
-            min_y = flipped_min_y;
-        }
-        const auto scale = [&](s64 value) { return (value * up_scale) >> down_shift; };
-        cut(scale(min_x), scale(min_y), scale(max_x), scale(max_y));
-    };
-    const auto& control = regs.clear_control;
-    if (control.use_scissor) {
-        const VkRect2D scissor = GetScissorState(regs, 0, up_scale, down_shift);
-        cut(scissor.offset.x, scissor.offset.y,
-            static_cast<s64>(scissor.offset.x) + scissor.extent.width,
-            static_cast<s64>(scissor.offset.y) + scissor.extent.height);
-    }
-    if (control.use_clear_rect) {
-        cut_window(regs.clear_rect.x_min, regs.clear_rect.y_min, regs.clear_rect.x_max,
-                   regs.clear_rect.y_max);
-    }
-    if (control.use_viewport_clip0) {
-        const auto& viewport = regs.viewports[0];
-        cut_window(viewport.x, viewport.y, static_cast<s64>(viewport.x) + viewport.width,
-                   static_cast<s64>(viewport.y) + viewport.height);
-    }
-    return VkRect2D{
-        .offset = {.x = static_cast<s32>(x0), .y = static_cast<s32>(y0)},
-        .extent = {.width = static_cast<u32>(std::max<s64>(x1 - x0, 0)),
-                   .height = static_cast<u32>(std::max<s64>(y1 - y0, 0))},
-    };
-}
 
 DrawParams MakeDrawParams(const MaxwellDrawState& draw_state, u32 num_instances, bool is_indexed) {
     DrawParams params{
@@ -2624,34 +2574,12 @@ void RasterizerVulkan::UpdateVertexInput(Tegra::Engines::Maxwell3D::Regs& regs) 
         if (attribute.constant || binding >= max_bindings) {
             continue;
         }
-        // An attribute that runs past its binding's stride is narrowed to fit (a stride of 0 is a
-        // single vertex, nothing to fit). Said once per guest layout.
-        const u32 stride{regs.vertex_streams[binding].stride.Value()};
-        const bool past_stride{stride > attribute.offset &&
-                               attribute.offset + attribute.SizeInBytes() > stride};
-        const VkFormat format{past_stride
-                                  ? MaxwellToVK::VertexFormat(device, attribute.type, attribute.size,
-                                                              stride - attribute.offset)
-                                  : MaxwellToVK::VertexFormat(device, attribute.type, attribute.size)};
-        if (past_stride) {
-            const size_t key{(static_cast<size_t>(attribute.type.Value()) << 6) |
-                             static_cast<size_t>(attribute.size.Value())};
-            if (!reported_vertex_layouts.test(key)) {
-                reported_vertex_layouts.set(key);
-                LOG_WARNING(Render_Vulkan,
-                            "Vertex attribute {} type={} size={} ({} bytes at offset {}) runs past "
-                            "the {} byte stride of binding {}: host format {}",
-                            index, attribute.type.Value(), attribute.size.Value(),
-                            attribute.SizeInBytes(), attribute.offset.Value(), stride, binding,
-                            format);
-            }
-        }
         attributes.push_back({
             .sType = VK_STRUCTURE_TYPE_VERTEX_INPUT_ATTRIBUTE_DESCRIPTION_2_EXT,
             .pNext = nullptr,
             .location = index,
             .binding = binding,
-            .format = format,
+            .format = MaxwellToVK::VertexFormat(device, attribute.type, attribute.size),
             .offset = attribute.offset,
         });
     }
