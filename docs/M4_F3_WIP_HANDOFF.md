@@ -1,5 +1,27 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: process Unmap exception-ordering follow-up
+
+The preceding Linux run `39380436500` has passed every configured step, including
+the eleven new publication mutants, complete native/CTest processes and full
+original Linux regressions. Android was skipped. Artifact `12246651887` is being
+downloaded for independent source/hash verification; that verification is not
+yet accepted. Its precise tested source remains `3576ea32bd`.
+
+Source audit above the per-Memory boundary found unconditional reference cleanup
+in KPageTableBase::Operate Unmap/UnmapPhysical: an inner controlled-entry refusal
+can leave the mapping intact while SCOPE_EXIT calls physical Close. The original
+body reproduces that assertion in an actual-body fixture with injected kernel,
+mapping and refcount collaborators. The new implementation closes mapping
+references only after UnmapRegion returns successfully. Non-heap compatibility
+is preserved; no new MakePageGroup error classification is introduced.
+
+The [Unmap reference lifetime record](M4_F3_PROCESS_UNMAP_REFERENCE_LIFETIME.md)
+documents local three-repeat acceptance, both assertion controls and precise
+limits. No native allocator/page reuse or process-wide closure is claimed.
+Full Linux validation for the new fix remains pending. Ordinary guest mode,
+producer/alias completeness, content authority and F2/F3 status are unchanged.
+
 ## 2026-10-20: controlled outer CPU mapping publication component
 
 The [outer mapping publication contract](M4_F3_OUTER_MAPPING_PUBLICATION.md)

@@ -114,6 +114,8 @@ jobs:
             -DCITRON_ROOM=OFF -DCITRON_TESTS=ON -DCITRON_CRASH_DUMPS=OFF
       - name: Verify controlled outer PTE and mapping publication closure
         run: python tools/physical_coherency_tests/run_mapping_publication_tests.py
+      - name: Verify process unmap reference cleanup on refusal and uncertainty
+        run: python tools/physical_coherency_tests/run_process_unmap_tests.py
       - name: Verify HostMemory mapping freeze and omitted-owner controls
         run: python tools/physical_coherency_tests/run_host_mapping_freeze_tests.py
       - name: Verify real controlled arena owner admission and quarantine
@@ -128,6 +130,7 @@ jobs:
             src/core/CMakeFiles/core.dir/cpu_manager.cpp.o \
             src/core/CMakeFiles/core.dir/hle/kernel/kernel.cpp.o \
             src/core/CMakeFiles/core.dir/hle/kernel/physical_core.cpp.o \
+            src/core/CMakeFiles/core.dir/hle/kernel/k_page_table_base.cpp.o \
             src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/present/window_adapt_pass.cpp.o \
             src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/vk_scheduler.cpp.o \
             src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/vk_rasterizer.cpp.o \
@@ -266,6 +269,7 @@ jobs:
             .diagnostics/m4-controlled-owner/*
             .diagnostics/m4-cpu-preparation-owner/*
             .diagnostics/m4-mapping-publication/*
+            .diagnostics/m4-process-unmap/*
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn

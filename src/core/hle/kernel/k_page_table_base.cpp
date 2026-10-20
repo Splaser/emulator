@@ -6049,17 +6049,18 @@ Result KPageTableBase::Operate(PageLinkedList* page_list, KProcessAddress virt_a
     case OperationType::UnmapPhysical: {
         const bool separate_heap = operation == OperationType::UnmapPhysical;
 
-        // Ensure that any pages we track are closed on exit.
+        // Keep the mapping's references if the actual unmap refuses or throws.
         KPageGroup pages_to_close(m_kernel, this->GetBlockInfoManager());
-        SCOPE_EXIT {
-            pages_to_close.CloseAndReset();
-        };
 
         // Make a page group representing the region to unmap.
         this->MakePageGroup(pages_to_close, virt_addr, num_pages);
 
         // Unmap.
         m_memory->UnmapRegion(*m_impl, virt_addr, num_pages * PageSize, separate_heap);
+
+        // Only a successful unmap can release the backing references. In particular,
+        // a controlled-entry refusal has left the original mapping intact.
+        pages_to_close.CloseAndReset();
 
         R_SUCCEED();
     }
