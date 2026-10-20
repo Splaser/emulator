@@ -6,6 +6,10 @@
 #include <type_traits>
 #include <utility>
 
+// Real backend headers can open this namespace before the adapter is parsed.
+// The adapter must always refer to the embedder's ::Common, independently of order.
+namespace Dynarmic::Common {}
+
 #include "dynarmic/common/container/unordered_map.h"
 #include "dynarmic/common/container/unordered_set.h"
 #include "dynarmic/ir/location_descriptor.h"

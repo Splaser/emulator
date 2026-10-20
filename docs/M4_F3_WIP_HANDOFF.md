@@ -1,5 +1,22 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-20: compatibility include-order follow-up
+
+Run `39424847488` at `883e7f904b` exposed a missing global namespace qualifier in
+our new adapter: after backend headers declare Dynarmic::Common, Common::TupleHash
+resolves there instead of the embedder. It now explicitly uses ::Common::TupleHash.
+The real container test declares the nested namespace before including the adapter;
+a Windows strict-warning smoke passes in that order and the unqualified-name
+counterfactual fails. This closes the local smoke's original include-order gap.
+
+The same run found a pre-existing -Wshadow warning in the pinned dependency's
+LocationDescriptor constructor when included by the new strict test. Only that
+third-party header directory is marked SYSTEM for the test target. Project and
+compatibility headers remain non-system under the existing warning policy; no
+-Wno-shadow or global warning downgrade is added. The pin/source remain unchanged.
+Complete Linux native/runtime acceptance is still pending; the failed run did not
+execute CTest. Resume the exact new Linux run before advancing M4.
+
 ## 2026-10-20: pinned Dynarmic tuple hashing after include recovery
 
 Linux run `39421826300` at `ac3fa60a6841d345a53e1fbf37fc5fefdd808b54`

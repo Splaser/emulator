@@ -13,7 +13,7 @@ namespace Dynarmic::Compat {
 template <class Key>
 struct DefaultHash : std::hash<Key> {};
 template <class... Ts>
-struct DefaultHash<std::tuple<Ts...>> : Common::TupleHash {};
+struct DefaultHash<std::tuple<Ts...>> : ::Common::TupleHash {};
 template <class First, class Second>
-struct DefaultHash<std::pair<First, Second>> : Common::TupleHash {};
+struct DefaultHash<std::pair<First, Second>> : ::Common::TupleHash {};
 } // namespace Dynarmic::Compat

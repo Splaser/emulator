@@ -46,6 +46,10 @@ if (TARGET dynarmic)
     if (_pinned_container_compat)
         target_sources(tests PRIVATE common/dynarmic_containers.cpp)
         target_link_libraries(tests PRIVATE dynarmic::dynarmic)
+        # The real descriptor type is third-party code with its own warning policy.
+        # Keep our test and compatibility headers non-system and under -Werror.
+        target_include_directories(tests SYSTEM PRIVATE
+            "${CMAKE_SOURCE_DIR}/externals/dynarmic/src/dynarmic/..")
     endif()
 endif()
 
