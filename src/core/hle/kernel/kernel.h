@@ -268,6 +268,11 @@ public:
     // No automatic interrupt, host-producer closure or guest-backed permission.
     [[nodiscard]] std::optional<GuestExecutionDrain> TryCloseGuestExecution(u32 poll_budget=64);
 
+    // Closes guest process initialization through rollback/publication of its initial
+    // PageTable. Does not close service creation, existing mappings or Memory writes.
+    [[nodiscard]] std::optional<Common::ProducerDrain::Closure>
+    TryCloseGuestProcessInitialization(u32 poll_budget = 64);
+
     /// Exceptional exit application process.
     void ExceptionalExitApplication();
 
@@ -307,6 +312,9 @@ public:
 private:
     friend class KProcess;
     friend class KThread;
+
+    [[nodiscard]] std::optional<Common::ProducerDrain::Entry>
+    TryEnterGuestProcessInitialization();
 
     /// Creates a new object ID, incrementing the internal object ID counter.
     u32 CreateNewObjectID();

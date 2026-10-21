@@ -88,6 +88,8 @@ struct KernelCore::Impl {
     }
 
     void Initialize(KernelCore& kernel) {
+        // A new kernel session has a distinct domain. Old closures cannot reopen it.
+        guest_process_initialization = std::make_unique<Common::ProducerDrain>();
         hardware_timer = std::make_unique<Kernel::KHardwareTimer>(kernel);
         hardware_timer->Initialize();
 
@@ -802,7 +804,10 @@ struct KernelCore::Impl {
     std::atomic<u64> next_user_process_id{KProcess::ProcessIdMin};
     std::atomic<u64> next_thread_id{1};
 
-    // Lists all processes that exist in the current session.
+    std::unique_ptr<Common::ProducerDrain> guest_process_initialization =
+        std::make_unique<Common::ProducerDrain>();
+
+    // OS wrapper publication list, not an exhaustive KProcess/backing owner census.
     std::mutex process_list_lock;
     std::vector<KProcess*> process_list;
     KProcess* application_process{};
@@ -1292,6 +1297,15 @@ std::optional<GuestExecutionDrain> KernelCore::TryCloseGuestExecution(u32 poll_b
         drain.cores[i].emplace(std::move(*closure));
     }
     return drain;
+}
+
+std::optional<Common::ProducerDrain::Entry> KernelCore::TryEnterGuestProcessInitialization() {
+    return impl->guest_process_initialization->TryEnter();
+}
+
+std::optional<Common::ProducerDrain::Closure>
+KernelCore::TryCloseGuestProcessInitialization(u32 poll_budget) {
+    return impl->guest_process_initialization->TryClose(poll_budget);
 }
 
 void KernelCore::ShutdownCores() {

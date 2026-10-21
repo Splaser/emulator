@@ -11,9 +11,11 @@ namespace Kernel {
 ProcessExecutionStop::ProcessExecutionStop(
     KScopedAutoObject<KProcess>&& process_, KernelCore& kernel_, Common::PageTable* table_,
     Common::RetainedBackingStorage&& backing_,
+    Common::ProducerDrain::Closure&& initialization_,
     GuestExecutionDrain&& execution_, u32 budget)
     : backing{std::move(backing_)}, process{std::move(process_)}, kernel{kernel_},
-      page_table{table_}, execution{std::move(execution_)}, remaining{budget} {}
+      page_table{table_}, initialization{std::move(initialization_)},
+      execution{std::move(execution_)}, remaining{budget} {}
 
 ProcessExecutionStop::ProcessExecutionStop(ProcessExecutionStop&&) = default;
 ProcessExecutionStop::~ProcessExecutionStop() = default;
@@ -47,6 +49,14 @@ ProcessExecutionStop::Result ProcessExecutionStop::Poll() {
         return Result::Unknown;
     }
     --remaining;
+    // Initializers admitted before closure may still map or roll back initial
+    // guest pages. Do not acknowledge (or request a backend halt) until they exit.
+    const auto initialized = initialization.Poll();
+    if (initialized == Common::ProducerDrain::Result::Unknown) {
+        Quarantine();
+        return Result::Unknown;
+    }
+    if (initialized == Common::ProducerDrain::Result::Pending) return Result::Pending;
     bool pending = false;
     for (size_t i = 0; i < requested.size(); ++i) {
         if (requested[i]) continue;
@@ -80,12 +90,17 @@ bool ProcessExecutionStop::CancelNoEffects() {
         Quarantine();
         return false;
     }
+    if (!initialization.ResumeNoEffects()) {
+        Quarantine();
+        return false;
+    }
     released = true;
     return true;
 }
 
 void ProcessExecutionStop::Quarantine() noexcept {
     unknown = true;
+    initialization.Quarantine();
     execution.Quarantine();
 }
 } // namespace Kernel

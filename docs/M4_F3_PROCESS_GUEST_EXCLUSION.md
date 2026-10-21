@@ -132,8 +132,12 @@ once, occupied-slot refusal and foreign-owner retention after unsupported stop
 and late exit. A third assertion mutant removes the capture and must fail at
 the pre-halt retention assertion. A new isolated native CTest requests from A
 while real Dynarmic executes a checked store loop in B, then checks retained
-ownership through exit and exact reference release. Remote runtime acceptance
-for this follow-up is pending; the accepted baseline predates it.
+ownership through exit and exact reference release. Linux run 39533283269 at
+`d98272e36a` passed the complete workflow. Artifact 12317661714 was independently
+verified against that exact source: 170 source hash entries across 15 manifests,
+98 unique files and all eight CTests. The archive digest is
+`9d5cfe1feb2ccd7f3b3d5119d68474d67c29cc519a21aca5eb14cab082eea65b`.
+This accepts the running-owner prerequisite, not later storage/initialization work.
 
 This is the running-backend cohort, not a complete process/backing owner roster.
 KernelCore::GetProcessList is populated by the OS process wrapper and is not an
@@ -175,6 +179,44 @@ The stop actual-body fixture separately checks failed capture before closure,
 old allocation retention after replacement and storage surviving process Close.
 Production/native syntax and the existing full HostMemory mapping-freeze controls
 pass locally. New-source native runtime/full-workflow acceptance is pending.
+
+## Guest process initialization closure follow-up
+
+KernelCore now owns a session-specific guest initialization domain, independent
+of the OS wrapper process list. Both PageTable-building KProcess::Initialize
+overloads enter before resource reservation or initial mapping. Their entry
+outlives initial TLS creation, the initialized flag and all local rollback guards.
+The public real-process common initializer also enters; the two outer initializers
+call a private InitializeCommon under their existing entry, so a close cannot
+cause a spurious nested refusal halfway through an admitted initialization.
+Closed, contended or exhausted entry refuses with ResultBusy before effects.
+
+ProcessExecutionStop closes this domain before closing core execution. Poll waits
+for admitted initializers/rollback to exit before issuing backend halt requests.
+Budget exhaustion seals both domains Unknown; a later initializer exit does not
+reopen them. Known no-effects cancellation reopens initialization last. An occupied
+initialization closure refuses the factory before any core closure. Kernel session
+initialization creates a fresh domain; an old closure cannot reopen the new one.
+No process-list, scheduler or PTE lock is held while polling.
+
+The actual-body stop fixture tests a pending initializer with a running backend,
+no early halt request, closed re-entry, successful release/cancellation, stale
+cancellation, timeout followed by late exit and occupied-closure refusal without
+core effects. A fourth assertion mutant bypasses initialization drainage and must
+fail specifically at the early halt request. The native checked/unchecked stop
+witnesses now call all three real-process Initialize overloads while closed and
+require ResultBusy, no initialized publication and unchanged resource-limit
+references. Checked witnesses also create and tear down a real mapped process
+after known cancellation. Linux native runtime acceptance for this follow-up is
+pending.
+
+This closes initial PageTable/TLS construction only. Kernel service-process
+creation (is_real=false), later metadata/interface/module setup, publication of
+an already initialized process, Run/ordinary mapping mutation, existing Memory
+contexts, service callbacks and teardown remain independent obligations. In
+particular, initialization drainage supplies neither an exhaustive retained owner
+roster nor proof that all users of previously published backing have stopped.
+All GuestBackingAdmission results remain Unknown.
 
 ## Next gates (still Open)
 

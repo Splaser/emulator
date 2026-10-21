@@ -34,10 +34,12 @@ std::optional<ProcessExecutionStop> KProcess::TryStopGuestExecution(u32 poll_bud
     if (!backing || !backing->OwnerAlive()) return std::nullopt;
     KScopedAutoObject<KProcess> owner{this};
     auto* table = std::addressof(m_page_table.GetImpl());
+    auto initialization = m_kernel.TryCloseGuestProcessInitialization(poll_budget);
+    if (!initialization) return std::nullopt;
     auto execution = m_kernel.TryCloseGuestExecution(poll_budget);
     if (!execution) return std::nullopt;
     return ProcessExecutionStop{std::move(owner), m_kernel, table, std::move(*backing),
-                                 std::move(*execution), poll_budget};
+                                 std::move(*initialization), std::move(*execution), poll_budget};
 }
 
 namespace {
@@ -225,6 +227,16 @@ void KProcess::Finalize() {
 
 Result KProcess::Initialize(const Svc::CreateProcessParameter& params, KResourceLimit* res_limit,
                             bool is_real) {
+    // Kernel service processes have no initial guest PageTable. Their creation and
+    // subsequent host callbacks require a separate close-and-join protocol.
+    if (!is_real) return InitializeCommon(params, res_limit, false);
+    auto initialization = m_kernel.TryEnterGuestProcessInitialization();
+    R_UNLESS(initialization.has_value(), ResultBusy);
+    R_RETURN(InitializeCommon(params, res_limit, true));
+}
+
+Result KProcess::InitializeCommon(const Svc::CreateProcessParameter& params,
+                                  KResourceLimit* res_limit, bool is_real) {
     // TODO: remove this special case
     if (is_real) {
         // Create and clear the process local region.
@@ -302,6 +314,9 @@ Result KProcess::Initialize(const Svc::CreateProcessParameter& params, KResource
 Result KProcess::Initialize(const Svc::CreateProcessParameter& params, const KPageGroup& pg,
                             std::span<const u32> caps, KResourceLimit* res_limit,
                             KMemoryManager::Pool pool, bool immortal) {
+    // Keep this entry through all initial mapping effects, publication and rollback.
+    auto initialization = m_kernel.TryEnterGuestProcessInitialization();
+    R_UNLESS(initialization.has_value(), ResultBusy);
     assert(res_limit != nullptr);
     assert((params.code_num_pages * PageSize) / PageSize ==
            static_cast<size_t>(params.code_num_pages));
@@ -387,7 +402,7 @@ Result KProcess::Initialize(const Svc::CreateProcessParameter& params, const KPa
     assert(m_process_id <= InitialProcessIdMax);
 
     // Initialize the rest of the process.
-    R_TRY(this->Initialize(params, res_limit, true));
+    R_TRY(this->InitializeCommon(params, res_limit, true));
 
     // We succeeded!
     R_SUCCEED();
@@ -396,6 +411,8 @@ Result KProcess::Initialize(const Svc::CreateProcessParameter& params, const KPa
 Result KProcess::Initialize(const Svc::CreateProcessParameter& params,
                             std::span<const u32> user_caps, KResourceLimit* res_limit,
                             KMemoryManager::Pool pool, KProcessAddress aslr_space_start) {
+    auto initialization = m_kernel.TryEnterGuestProcessInitialization();
+    R_UNLESS(initialization.has_value(), ResultBusy);
     assert(res_limit != nullptr);
 
     // Set members.
@@ -494,7 +511,7 @@ Result KProcess::Initialize(const Svc::CreateProcessParameter& params,
     }
 
     // Initialize the rest of the process.
-    R_TRY(this->Initialize(params, res_limit, true));
+    R_TRY(this->InitializeCommon(params, res_limit, true));
 
     // We succeeded, so commit our memory reservation.
     memory_reservation.Commit();

@@ -136,6 +136,8 @@ private:
 
 private:
     Result StartTermination();
+    Result InitializeCommon(const Svc::CreateProcessParameter& params, KResourceLimit* res_limit,
+                            bool is_real);
     void FinishTermination();
 
     void PinThread(s32 core_id, KThread* thread) {

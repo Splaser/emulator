@@ -72,6 +72,10 @@ interrupt = extract(core, 'void PhysicalCore::Interrupt(')
 factory = extract('src/core/hle/kernel/k_process.cpp', 'std::optional<ProcessExecutionStop> KProcess::TryStopGuestExecution(')
 close = extract('src/core/hle/kernel/kernel.cpp', 'std::optional<GuestExecutionDrain> KernelCore::TryCloseGuestExecution(')
 close = close[close.index('{'):]
+init_enter = extract('src/core/hle/kernel/kernel.cpp',
+                     'std::optional<Common::ProducerDrain::Entry> KernelCore::TryEnterGuestProcessInitialization(')
+init_close = extract('src/core/hle/kernel/kernel.cpp',
+                     'std::optional<Common::ProducerDrain::Closure>\nKernelCore::TryCloseGuestProcessInitialization(')
 methods = (root / 'src/core/hle/kernel/process_execution_stop.cpp').read_text()
 methods = methods[methods.index('namespace Kernel {') + len('namespace Kernel {'):methods.rindex('} // namespace Kernel')]
 template = 'tools/physical_coherency_tests/process_execution_stop_fixture.cpp.in'
@@ -80,6 +84,8 @@ for marker, text in [('RUN', run), ('REQUEST', request), ('INTERRUPT', interrupt
                      ('FACTORY', factory), ('STOP_METHODS', methods)]:
     source = source.replace('// @' + marker + '@', text)
 source = source.replace('@CLOSE@', close)
+source = source.replace('@INIT_ENTER@', init_enter[init_enter.index('{'):])
+source = source.replace('@INIT_CLOSE@', init_close[init_close.index('{'):])
 # Test-only profiling annotation. All execution and stop bodies above remain extracted.
 source = '#define CITRON_PROFILE_SCOPE(...)\n' + source
 command = [os.environ.get('CXX', 'g++'), '-std=c++23', '-O1', '-pthread', '-Wall', '-Wextra',
@@ -117,7 +123,14 @@ retention = '    running_owner.Reset(m_current_thread->GetOwnerProcess());'
 assert request.count(retention) == 1
 execute('omit-running-owner-retention', source.replace(request, request.replace(retention, '')),
         'running backend owner must be retained before halt request')
+initialization = '    const auto initialized = initialization.Poll();'
+assert methods.count(initialization) == 1
+execute('omit-initialization-drain', source.replace(initialization,
+        '    const auto initialized = Common::ProducerDrain::Result::DrainedSubset;'),
+        'initialization must drain before halt request')
 paths = [core, 'src/core/hle/kernel/physical_core.h', 'src/core/hle/kernel/k_process.cpp',
+         'src/core/hle/kernel/k_process.h', 'src/core/hle/kernel/kernel.h',
+         'src/tests/core/controlled_cpu_scheduler.cpp',
          'src/core/hle/kernel/kernel.cpp', 'src/core/hle/kernel/process_execution_stop.h',
          'src/core/hle/kernel/process_execution_stop.cpp', 'src/common/producer_drain.h',
          'src/core/hle/kernel/guest_execution_drain.h', template,
@@ -126,7 +139,7 @@ paths = [core, 'src/core/hle/kernel/physical_core.h', 'src/core/hle/kernel/k_pro
 (out / 'extraction.json').write_text(json.dumps({
     'positive_repeats': 3,
     'assertion_mutants': ['count-suspended-svc-as-backend', 'request-is-acknowledgement',
-                         'omit-running-owner-retention'],
+                         'omit-running-owner-retention', 'omit-initialization-drain'],
     'sha256': {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths},
     'boundary': 'Actual execution/stop bodies; injected backend/kernel, no NCE or guest admission proof',
 }, indent=2) + '\n')

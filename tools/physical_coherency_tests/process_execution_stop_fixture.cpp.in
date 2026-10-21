@@ -76,7 +76,11 @@ struct Backend final : Core::ArmInterface {
 namespace Kernel {
 class KernelCore {
 public:
-    struct Impl {std::array<std::unique_ptr<Kernel::PhysicalCore>,Core::Hardware::NUM_CPU_CORES> cores;};
+    struct Impl {
+        std::array<std::unique_ptr<Kernel::PhysicalCore>,Core::Hardware::NUM_CPU_CORES> cores;
+        std::unique_ptr<Common::ProducerDrain> guest_process_initialization=
+            std::make_unique<Common::ProducerDrain>();
+    };
     Core::System system;
     std::unique_ptr<Impl> impl=std::make_unique<Impl>();
     KernelCore() {for(size_t i=0;i<impl->cores.size();++i) impl->cores[i]=std::make_unique<Kernel::PhysicalCore>(*this,i);}
@@ -84,6 +88,8 @@ public:
     Core::System& System() {return system;}
     Kernel::PhysicalCore& PhysicalCore(size_t index) {return *impl->cores.at(index);}
     std::optional<GuestExecutionDrain> TryCloseGuestExecution(u32 poll_budget) @CLOSE@
+    std::optional<Common::ProducerDrain::Entry> TryEnterGuestProcessInitialization() @INIT_ENTER@
+    std::optional<Common::ProducerDrain::Closure> TryCloseGuestProcessInitialization(u32 poll_budget) @INIT_CLOSE@
 };
 struct PageTable {
     Common::PageTable table;
@@ -138,6 +144,46 @@ template<class Predicate> void Until(Predicate predicate) {
 }
 int main() {
     using R=Kernel::ProcessExecutionStop::Result;
+    { // A pre-existing initializer/rollback remains part of the stop obligation.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};
+        Kernel::KThread thread{process};
+        std::thread cpu{[&] {kernel.PhysicalCore(0).RunThread(&thread);}};
+        Until([&] {return process.backend.running.load();});
+        auto initializing=kernel.TryEnterGuestProcessInitialization();assert(initializing);
+        auto stop=process.TryStopGuestExecution(8);assert(stop);
+        assert(!kernel.TryEnterGuestProcessInitialization());
+        const auto pending=stop->Poll();
+        assert(process.backend.requests==0 && "initialization must drain before halt request");
+        assert(pending==R::Pending && "initialization must drain before backend acknowledgement");
+        assert(!stop->CancelNoEffects());
+        assert(!kernel.TryEnterGuestProcessInitialization());
+        initializing.reset();
+        (void)stop->Poll();cpu.join();
+        assert(stop->Poll()==R::BackendsStopped && stop->CancelNoEffects());
+        assert(kernel.TryEnterGuestProcessInitialization());
+        auto next=process.TryStopGuestExecution();assert(next);
+        assert(!stop->CancelNoEffects() && !kernel.TryEnterGuestProcessInitialization());
+        assert(next->Poll()==R::BackendsStopped && next->CancelNoEffects());
+    }
+    { // Uncertain initialization cannot be reopened by a late rollback exit/destructor.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};
+        auto initializing=kernel.TryEnterGuestProcessInitialization();assert(initializing);
+        auto stop=process.TryStopGuestExecution(1);assert(stop);
+        assert(stop->Poll()==R::Unknown);
+        initializing.reset();
+        assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
+        stop.reset();
+        assert(!kernel.TryEnterGuestProcessInitialization());
+    }
+    { // Another initializer closure refuses before any core closure effect.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};
+        auto closed=kernel.TryCloseGuestProcessInitialization(8);assert(closed);
+        assert(!process.TryStopGuestExecution());
+        auto core=kernel.PhysicalCore(0).TryCloseGuestExecution(8);assert(core);
+        assert(core->Poll()==Common::ProducerDrain::Result::DrainedSubset);
+        assert(core->ResumeNoEffects());
+        assert(closed->ResumeNoEffects());
+    }
     { // The requester does not own either running core; a caller-only pin is insufficient.
         Kernel::KernelCore kernel;
         Kernel::KProcess caller{kernel},first{kernel},second{kernel};

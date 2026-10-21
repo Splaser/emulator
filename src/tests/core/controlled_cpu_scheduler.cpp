@@ -223,6 +223,26 @@ void ProcessExecutionStopWitness(bool fast_link, bool cross_process = false) {
     auto stop = requester->TryStopGuestExecution(fast_link ? 64 : 4096);
     REQUIRE(stop.has_value());
     REQUIRE(requester->GetReferenceCount() >= requester_refs + 1);
+    { // Actual public overloads refuse before any initial PageTable/TLS effects.
+        auto& kernel = system.Kernel();
+        // This never-initialized object uses normal C++ destruction, so refusal
+        // also cleans its constructor-owned Memory without slab finalization.
+        Kernel::KProcess candidate{kernel};
+        const auto limit_refs = kernel.GetSystemResourceLimit()->GetReferenceCount();
+        const Kernel::Svc::CreateProcessParameter params{};
+        const std::span<const u32> caps{};
+        const Kernel::KPageGroup pages{kernel, nullptr}; // Refusal must not inspect the group.
+        REQUIRE(candidate.Initialize(params, caps, kernel.GetSystemResourceLimit(),
+                                      Kernel::KMemoryManager::Pool::Application, 0) == Kernel::ResultBusy);
+        REQUIRE(candidate.Initialize(params, pages, caps, kernel.GetSystemResourceLimit(),
+                                      Kernel::KMemoryManager::Pool::Application, false) == Kernel::ResultBusy);
+        REQUIRE(candidate.Initialize(params, kernel.GetSystemResourceLimit(), true) == Kernel::ResultBusy);
+        REQUIRE_FALSE(candidate.IsInitialized());
+        REQUIRE(kernel.GetSystemResourceLimit()->GetReferenceCount() == limit_refs);
+        REQUIRE(stop->GuestBackingAdmission() == Common::ProducerDrain::Result::Unknown);
+        std::cout << "PASS native closed guest initialization refuses all three real-process overloads "
+                     "before effects; service exclusion remains an independent obligation\n";
+    }
     Kernel::ProcessExecutionStop::Result result{};
     unsigned polls = 0;
     REQUIRE(Until([&] {
@@ -269,6 +289,10 @@ void ProcessExecutionStopWitness(bool fast_link, bool cross_process = false) {
     REQUIRE_FALSE(stop->CancelNoEffects()); // Old operation cannot reopen the new domain.
     REQUIRE(next->Poll() == Kernel::ProcessExecutionStop::Result::BackendsStopped);
     REQUIRE(next->CancelNoEffects());
+    { // Known cancellation restores actual initial mapping/TLS publication.
+        Process after_cancel{system};
+        REQUIRE(after_cancel.process->IsInitialized());
+    }
     if (cross_process) {
         stop.reset();
         REQUIRE(process->GetReferenceCount() == refs);
