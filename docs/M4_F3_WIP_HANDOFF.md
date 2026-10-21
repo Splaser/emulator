@@ -2,6 +2,15 @@
 
 ## 2026-10-21: retain the actual running backend owners
 
+Implementation source: `d98272e36abd40dd63dc4367c14b50194ebe4fb5` on
+`origin/codex/issue-372-fixes`. Current Linux-only validation is
+[39533283269](https://github.com/Splaser/emulator/actions/runs/39533283269);
+it is in progress and Android is skipped. Resume by recovering this run before
+another dispatch or broader M4 changes. Verify eight CTest processes, including
+the new cross-process marker, and three stop assertion mutants against that exact
+source. The ignored recovery verifier now distinguishes the seven-test baseline
+from this eight-test source by reading its committed CMake configuration.
+
 The global stop previously retained only its requesting KProcess. It now captures
 each actual running process under that core's try-locked context before halt,
 retains its PageTable/Memory lifetime with the requester and validates identity
