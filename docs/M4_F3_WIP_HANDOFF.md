@@ -1,5 +1,50 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-21: close and drain initial guest process PageTable construction
+
+Implementation source: `a09bf27bb4a737604479f38e5b0f3dfe28b20881`.
+Linux-only acceptance dispatched as
+[run 39540116589](https://github.com/Splaser/emulator/actions/runs/39540116589),
+queued at this checkpoint. Android remains excluded. Do not duplicate this run.
+The independent preceding storage run 39537228855 at 64d67e2c30 is still running:
+full build, all eight native CTests and the storage-owner suite passed; the
+unsupported synchronization regression step is still active. Neither pending
+result is full-workflow acceptance yet. SHA-specific concurrency preserves both.
+
+KernelCore now owns a session-specific guest process initialization domain.
+Both PageTable-building Initialize overloads enter before allocation/mapping and
+retain the entry through initial TLS, initialized publication and local rollback.
+A private InitializeCommon avoids nested entry after closure. The public real
+common initializer also refuses before effects; is_real=false service creation
+is deliberately outside this domain and still requires separate closure/join.
+ProcessExecutionStop closes initialization before cores and drains it before
+requesting halt. Unknown seals both domains; cancellation reopens initialization
+last. Existing Memory writes/mappings, metadata/interfaces/module setup, service
+creation/callbacks, teardown and a complete retained process roster remain Open.
+This is not Process-wide Guest Exclusion or ordinary guest admission.
+
+Local Linux validation passed: three actual stop-body repeats and four precise
+mutants, including bypassed initialization drainage before halt; active initializer,
+timeout/late exit, occupied-closure refusal, move and stale cancellation controls.
+Actual process/kernel/stop production TUs and the expanded native test TU pass
+syntax checks. Native witnesses now require all three real-process Initialize
+overloads to return ResultBusy without initialized publication/resource-limit
+reference effects while closed, and a mapped process to initialize/retire after
+known cancellation. Their runtime result is pending the exact new-source CI.
+Logs: `.diagnostics/m4-process-initialization-{regression,syntax,native-syntax}.log`;
+source-bound outputs: `.diagnostics/m4-process-execution-stop/`.
+
+The earlier running-owner run 39533283269 at d98272e36a is fully accepted and its
+artifact recovery has finished: artifact 12317661714, 170 source hash entries,
+98 unique source files, 15 manifests, eight CTests, archive SHA256
+`9d5cfe1feb2ccd7f3b3d5119d68474d67c29cc519a21aca5eb14cab082eea65b`.
+Evidence is `.diagnostics/ci-39533283269/verification.json`. No recovery download
+is still active. The ignored verifier now detects the initialization API in each
+exact source and requires its fourth mutant plus native refusal marker.
+Next resume: recover pending CI/artifacts, then advance the actual owner roster
+and ordinary writer/publication closure without treating the OS wrapper list as
+an exhaustive census. Keep unchecked-loop/NCE/SVC/raw-alias/GPU negatives intact.
+
 ## 2026-10-21: retain the real backing allocation through process stop
 
 Implementation source: `64d67e2c309b185e9b91eac22725c7f774522259`.
