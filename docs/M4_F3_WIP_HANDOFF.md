@@ -1,5 +1,56 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-21: retain a lifecycle inventory of real KProcess owners
+
+Implementation source: `9068f9c3d867d2882ec801dfe7ee5a125afe20f5`.
+New Linux-only acceptance is
+[run 39550288914](https://github.com/Splaser/emulator/actions/runs/39550288914),
+queued at dispatch; do not duplicate it. It still has eight CTests, now with the
+native roster witness in checked/cross-process/unchecked execution tests, and a
+new dedicated three-repeat roster suite with four precise mutants. Android is
+excluded. Recover this exact source before claiming native/full-workflow acceptance.
+
+ProcessOwnerRoster is separate from the OS wrapper list. KProcess registers after
+Memory construction and before any Initialize; slab Destroy marks the registration
+retiring before inherited Finalize/Free. A thrown Finalize leaves that record
+retiring and future snapshots refuse. Exact monotonically assigned IDs prevent
+old completion from erasing a new owner at a reused address. C++ destruction also
+marks retiring; a first-declared registration member completes retirement after
+all PageTable/Memory/member destruction. Its destructor unregisters the object's
+kernel bookkeeping as well (the previous native stack candidate left an entry).
+
+TryRetainProcessOwners captures real scoped references using checked TryOpen;
+zero-reference construction/final-Close losers refuse without resurrection.
+Capture/current validation try-lock once. Partial pins release after unlocking,
+even when the caller drops the last other reference mid-capture and finalization
+reenters the roster. Stale or moved snapshots cannot validate; stale snapshots
+keep their pins. This API is cold retention only, not a bounded halt, alias freeze
+or admission certificate. Kernel/System must outlive retained process references.
+
+Local Linux validation passed: three dedicated repeats; ignore-retiring-owner,
+omit-registration-revision, erase-reused-address and omit-owner-pin mutants;
+the existing three stop-body repeats/four stop mutants; actual production
+roster/process/kernel and expanded native test TU syntax. Logs are
+`.diagnostics/m4-process-owner-roster-{regression,stop-regression,syntax,native-syntax}.log`.
+Actual source-bound suite outputs are `.diagnostics/m4-process-owner-roster/`.
+Native code retains an actual unpublished process through Terminate/final Close,
+rejects a real zero-ref constructor and reacquires the roster after finalization.
+Runtime result remains pending. The ignored artifact verifier requires the new
+manifest, four mutants and native marker when its exact source contains the roster.
+
+Previous initialization/storage source a09bf27bb4 passed the entire Linux workflow
+39540116589. Artifact 12320539901 is independently verified: 180 source hash entries,
+103 unique files, 16 manifests, eight CTests, archive SHA256
+`6267209c50becfca1166b8f15b3025fca0e7386157ed79f0bb61e45a3f3fb5a7`.
+Evidence: `.diagnostics/ci-39540116589/verification.json`; recovery is finished.
+
+Next: check/recover the new CI, then design adoption of the retained cohort under
+continuous initialization/creation/publication closure and ordinary write/teardown
+exclusion. ProcessExecutionStop DOES NOT yet adopt the roster. A one-time IsCurrent
+check cannot exclude future service constructors or cover arbitrary Memory views,
+failed-initialization remnants, raw aliases or GPU/device owners. Guest admission
+and all four full M4 gates remain Open; preserve the original independent negatives.
+
 ## 2026-10-21: close and drain initial guest process PageTable construction
 
 Implementation source: `a09bf27bb4a737604479f38e5b0f3dfe28b20881`.
