@@ -1,5 +1,26 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-21: complete Linux baseline accepted
+
+Run [39528346917](https://github.com/Splaser/emulator/actions/runs/39528346917)
+passed in full at `9fdec2afa12775caf402c1dd7b59d41bb3cc403b`; Android was skipped.
+This includes the full production build, all seven CTest processes, focused
+ownership/mutation checks, repeated real Vulkan witnesses, original F2/F3
+negatives, real HostMemory checks and the complete final regression batch.
+
+Artifact `12316026001` was downloaded and independently verified against its API
+digest: SHA-256 `16ecf784de58ff1431a3fa365eb570183c882d37ca0786606ac779cc8ad28dbc`.
+All 170 hash entries / 98 unique files / 15 manifests match the exact run source;
+the Dynarmic gitlink is unchanged. All seven CTest markers, checked-loop stop and
+unchecked-loop refusal, three actual-body positives/two stop assertion mutants,
+and the original F2/F3 negatives are present. Evidence is under ignored
+`.diagnostics/ci-39528346917/`, with `.diagnostics/recover_linux_run.py` as verifier.
+
+This accepts the existing backend-stop prerequisite and ownership fixes only.
+It does not certify arbitrary Dynarmic/NCE stop, all processes/services/raw aliases,
+mapping closure, backing storage pinning, GPU drainage or ordinary guest admission.
+Any following code change requires its own exact-source Linux validation.
+
 ## 2026-10-21: office continuation recovered the final regression failure
 
 Run [39518766603](https://github.com/Splaser/emulator/actions/runs/39518766603)

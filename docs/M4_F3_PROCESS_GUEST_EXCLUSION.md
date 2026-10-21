@@ -94,6 +94,11 @@ ReserveRange adapter. Its exact-source artifact (12310269482) is independently
 hash-verified, including all seven CTests and the stop positives/mutants. The
 resolver and assertion-stub fixture corrections still require a full Linux run;
 the cancelled interim run 39527273477 supplies no additional acceptance.
+The corrected baseline at `9fdec2afa1` subsequently passed the complete Linux
+workflow 39528346917. Artifact 12316026001 is independently verified: 170 source
+hash entries in 15 manifests and all seven CTest markers, with the pinned
+Dynarmic gitlink unchanged. This accepts the existing prerequisite and negative
+controls only; subsequent running-owner changes require a new run.
 Neither result closes services/GPU or proves a complete alias census; the harness drives the real backend on a dedicated
 host thread, not as an ARM application dispatched by the scheduler.
 
