@@ -16,6 +16,30 @@ struct SchedulerTestAccess {
 int main() {
     using Kernel::KProcess;
     using Kernel::KScopedAutoObject;
+    { // Close owns unregister; slab Free never invokes the C++ destructor.
+        Kernel::KernelCore kernel;const Kernel::KAutoObject* identity{};
+        bool member_destroyed = false;
+        {
+            KProcess owner{kernel};identity=&owner;
+            owner.on_member_destroy = [&] {member_destroyed=true;};
+            owner.Close();
+            assert(owner.finalized && !member_destroyed);
+            assert(kernel.UnregisterCount(identity)==1 && "Close must unregister exactly once");
+            // Fixture storage later uses C++ cleanup. The consumed registration
+            // cannot take responsibility for kernel unregistration a second time.
+        }
+        assert(member_destroyed && kernel.UnregisterCount(identity)==1 &&
+               "Close must own the only unregister after consumed registration");
+    }
+    { // Direct construction/destruction never calls Close.
+        Kernel::KernelCore kernel;const Kernel::KAutoObject* identity{};
+        {
+            KProcess owner{kernel,false};identity=&owner;
+            assert(kernel.UnregisterCount(identity)==0);
+        }
+        assert(kernel.UnregisterCount(identity)==1 &&
+               "direct C++ destruction must unregister exactly once");
+    }
     { // Registered at construction, without OS wrapper publication or Initialize.
         Kernel::KernelCore kernel;
         KProcess first{kernel}, second{kernel};

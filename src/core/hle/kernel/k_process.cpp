@@ -1242,8 +1242,12 @@ KProcess::OwnerRegistration::~OwnerRegistration() {
     if (id) kernel.CompleteProcessOwnerRetirement(id);
 }
 KProcess::~KProcess() {
-    if (m_owner_registration.id) m_kernel.BeginProcessOwnerRetirement(m_owner_registration.id);
-    m_kernel.UnregisterKernelObject(this);
+    // Only direct C++ destruction still owns a registration. Slab Destroy
+    // consumes it; that path leaves kernel bookkeeping to KAutoObject::Close.
+    if (m_owner_registration.id) {
+        m_kernel.BeginProcessOwnerRetirement(m_owner_registration.id);
+        m_kernel.UnregisterKernelObject(this);
+    }
 }
 
 void KProcess::Destroy() {

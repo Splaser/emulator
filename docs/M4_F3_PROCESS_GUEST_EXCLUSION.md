@@ -244,6 +244,17 @@ stale on registration/retirement; stale validation does not release those pins.
 Counter overflow poisons validation instead of permitting identity/revision reuse.
 Cold reference opening/allocation is not a bounded stop or signal-handler API.
 
+Kernel bookkeeping unregister has explicit ownership: a direct C++ destructor
+unregisters only while its registration is still present. Slab Destroy consumes
+that registration and leaves unregister to KAutoObject::Close. The production
+slab Free does not invoke the C++ destructor, so the earlier implementation did
+not double-unregister on that ordinary path; the guard clarifies responsibility
+and prevents a consumed registration from taking it again in later C++ cleanup.
+The lifecycle witness now compiles the actual inherited slab Destroy body, counts
+unregister calls through actual Close/UnregisterWithKernel, checks direct C++
+cleanup separately and rejects unconditional or omitted destructor unregister.
+These two additional mutants bring the roster suite to six precise negatives.
+
 The standalone Linux witness compiles the actual roster, scoped reference type,
 KAutoObject Open/Close and extracted KProcess Destroy/destructor, with injected
 slab/Finalize collaborators. Three repeats cover zero refs, real final-reference

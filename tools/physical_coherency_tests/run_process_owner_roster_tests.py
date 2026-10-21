@@ -20,28 +20,42 @@ stub = out / 'stubs'
 #define UNREACHABLE() std::abort()
 ''')
 (stub / 'core/hle/kernel/kernel.h').write_text('''#pragma once
+#include <unordered_map>
 #include "core/hle/kernel/process_owner_roster.h"
 namespace Kernel {
 class KernelCore {
 public:
  ProcessOwnerRoster roster;
+ std::unordered_map<const KAutoObject*,unsigned> unregister_calls;
  void RegisterKernelObject(KAutoObject*) {}
- void UnregisterKernelObject(KAutoObject*) {}
+ void UnregisterKernelObject(KAutoObject* p) {++unregister_calls[p];}
+ unsigned UnregisterCount(const KAutoObject* p) const {
+   const auto it=unregister_calls.find(p);return it==unregister_calls.end()?0:it->second;
+ }
+ bool IsObjectListContainerValid() const {return false;}
+ struct Container {void Unregister(KAutoObject*) {}} container;
+ Container& ObjectListContainer() {return container;}
  u64 RegisterProcessOwner(KProcess* p) {return roster.Register(p);}
  void BeginProcessOwnerRetirement(u64 id) {roster.BeginRetirement(id);}
  void CompleteProcessOwnerRetirement(u64 id) {roster.CompleteRetirement(id);}
 };}
 ''')
-(stub / 'core/hle/kernel/k_process.h').write_text('''#pragma once
+process_stub = '''#pragma once
 #include <functional>
 #include <utility>
 #include "core/hle/kernel/kernel.h"
 namespace Kernel {
-class KWorkerTask {};
-template<class T,class Base> class KAutoObjectWithSlabHeapAndContainer : public KAutoObject {
+class KWorkerTask : public KAutoObject {
+public: explicit KWorkerTask(KernelCore& k):KAutoObject{k} {}
+};
+template<class Derived,class Base> class KAutoObjectWithSlabHeapAndContainer : public Base {
+ static void Free(KernelCore&,Derived* object) {object->FreeForTest();}
 public:
- explicit KAutoObjectWithSlabHeapAndContainer(KernelCore& k):KAutoObject{k} {}
- void Destroy() override {this->Finalize();static_cast<T*>(this)->FreeForTest();}
+ explicit KAutoObjectWithSlabHeapAndContainer(KernelCore& k):Base{k} {}
+ bool IsInitialized() const {return true;}
+ uintptr_t GetPostDestroyArgument() const {return 0;}
+ static void PostDestroy(uintptr_t) {}
+ @SLAB_DESTROY@
 };
 class KProcess : public KAutoObjectWithSlabHeapAndContainer<KProcess,KWorkerTask> {
  struct OwnerRegistration {
@@ -66,12 +80,12 @@ public:
  void FreeForTest() {if(on_free) on_free();}
  void AdoptReplacementForTest(u64 id) {m_owner_registration.id=id;}
 };}
-''')
+'''
 
 
-def extract(marker):
-    text = (root / 'src/core/hle/kernel/k_process.cpp').read_text()
-    start = text.index(marker)
+def extract(marker, path='src/core/hle/kernel/k_process.cpp', after=None):
+    text = (root / path).read_text()
+    start = text.index(marker, text.index(after) if after else 0)
     end = text.index('{', start) + 1
     depth = 1
     while depth:
@@ -80,12 +94,14 @@ def extract(marker):
     return text[start:end]
 
 
+slab_destroy = extract('virtual void Destroy() override', 'src/core/hle/kernel/slab_helpers.h',
+                       'class KAutoObjectWithSlabHeapAndContainer')
+(stub / 'core/hle/kernel/k_process.h').write_text(process_stub.replace('@SLAB_DESTROY@', slab_destroy))
 destroy = extract('void KProcess::Destroy()')
 destructor = extract('KProcess::~KProcess()')
 registration_destructor = extract('KProcess::OwnerRegistration::~OwnerRegistration()')
-lifecycle = out / 'lifecycle.cpp'
-lifecycle.write_text('#include "core/hle/kernel/k_process.h"\nnamespace Kernel {\n' +
-                     destroy + '\n' + destructor + '\n' + registration_destructor + '\n}\n')
+lifecycle_source = '#include "core/hle/kernel/k_process.h"\nnamespace Kernel {\n' + \
+                   destroy + '\n' + destructor + '\n' + registration_destructor + '\n}\n'
 path = 'src/core/hle/kernel/process_owner_roster.cpp'
 source = (root / path).read_text()
 test_path = 'tools/physical_coherency_tests/process_owner_roster_tests.cpp'
@@ -111,13 +127,27 @@ variants = [('production', source, references, None)] + [
     (name, body, references, expected) for name, body, expected in mutants]
 variants.append(('omit-owner-pin', source, references.replace('        owner.m_obj = object;',
                  '        owner.m_obj = nullptr; object->Close();'), 'snapshot must own real references'))
+lifecycle_mutants = {
+    'unconditional-destructor-unregister': (lifecycle_source.replace(destructor,
+        'KProcess::~KProcess() {\n'
+        '    if (m_owner_registration.id) m_kernel.BeginProcessOwnerRetirement(m_owner_registration.id);\n'
+        '    m_kernel.UnregisterKernelObject(this);\n}'),
+        'Close must own the only unregister after consumed registration'),
+    'omit-direct-destructor-unregister': (lifecycle_source.replace(
+        '        m_kernel.UnregisterKernelObject(this);', ''),
+        'direct C++ destruction must unregister exactly once'),
+}
+variants += [(name, source, references, expected) for name, (_, expected) in lifecycle_mutants.items()]
 for name, body, refs, expected in variants:
-    assert expected is None or body != source or refs != references
+    life = lifecycle_mutants[name][0] if name in lifecycle_mutants else lifecycle_source
+    assert expected is None or body != source or refs != references or life != lifecycle_source
     variant = out / 'headers' / name / 'core/hle/kernel'
     variant.mkdir(parents=True, exist_ok=True)
     (variant / 'k_auto_object.h').write_text(refs)
     cpp = out / (name + '.cpp')
     cpp.write_text(body)
+    lifecycle = out / (name + '-lifecycle.cpp')
+    lifecycle.write_text(life)
     exe = out / (name + '.bin')
     subprocess.run(command[:1] + ['-I', str(out / 'headers' / name)] + command[1:] + [str(cpp), str(lifecycle), str(root / test_path),
                    str(root / 'src/core/hle/kernel/k_auto_object.cpp'), '-o', str(exe)], check=True)
@@ -134,6 +164,7 @@ paths = [path, 'src/core/hle/kernel/process_owner_roster.h',
          'src/core/hle/kernel/k_auto_object.h', 'src/core/hle/kernel/k_auto_object.cpp',
          'src/core/hle/kernel/k_process.cpp', 'src/core/hle/kernel/k_process.h',
          'src/core/hle/kernel/kernel.cpp', 'src/core/hle/kernel/kernel.h', test_path,
+         'src/core/hle/kernel/slab_helpers.h', 'src/core/hle/kernel/k_slab_heap.h',
          'src/core/CMakeLists.txt', 'src/tests/core/controlled_cpu_scheduler.cpp',
          '.github/workflows/pr375-pr380-integration.yml',
          'tools/physical_coherency_tests/run_process_owner_roster_tests.py']
