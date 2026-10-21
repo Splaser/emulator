@@ -1,5 +1,27 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-21: merge upstream PRs 404, 405 and 406
+
+Upstream main `5b543e71769bdd4c116c8b66a8974224d0c1e1e8` was merged into
+`codex/issue-372-fixes` as `5956cbe934` and pushed, without conflicts. This brings
+the Android max-clock thread fix, mobile GPU CPU-side Z-pass counting and Thor
+dual-screen support. The automatic vk_turbo_mode merge preserves the existing
+branch code and adds the upstream thread naming/timed wait. Diff whitespace checks
+pass; no Android build was requested.
+
+Post-merge Linux validation is
+[run 39550694175](https://github.com/Splaser/emulator/actions/runs/39550694175).
+Use this exact merged source for integration acceptance; preceding roster-only
+run 39550288914 predates the upstream merge and remains separate evidence.
+The lifecycle roster/ordinary-write closure roadmap below remains unchanged.
+
+Fork main was inspected but not changed: it has a separate older feature history
+(263 commits absent from upstream), and a read-only merge-tree probe reports
+historical content/modify-delete conflicts involving upstream reverts and the
+Dynarmic storage-layout transition. No conflicted tree was committed, no branch
+history was reset and no files/submodule contents were removed to force checkout.
+Current working branch remains the PR375 branch.
+
 ## 2026-10-21: retain a lifecycle inventory of real KProcess owners
 
 Implementation source: `9068f9c3d867d2882ec801dfe7ee5a125afe20f5`.
