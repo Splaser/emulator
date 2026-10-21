@@ -17,6 +17,15 @@ retry/fallback behavior and the guard-removal negative control pass. Production
 code and scheduling behavior are unchanged. Complete Linux acceptance remains
 pending until the resumed batch and exact-source artifact are verified.
 
+A local sweep also found a second stale extraction fixture: the remap page-table
+array lacked the existing ReserveRange API. It now models reservation success
+and refusal, checks both pages remain unpublished on refusal, even generation
+restoration and a successful retry. Removing the production reservation guard
+must fail that specific assertion. Both fixtures pass locally; Windows checks
+that need absent Boost/Vulkan dependencies remain unverified locally. The earlier
+replacement run was cancelled before its long test stages and is superseded by
+a run containing both fixture repairs.
+
 ## 2026-10-20: compiled native run exposes unchecked-loop stop limit
 
 Run `39427948982` at `10e58d6545` compiled/linked the real CLI, shader tool,

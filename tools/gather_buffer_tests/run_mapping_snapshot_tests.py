@@ -28,13 +28,19 @@ def method(source, marker, template=False):
     start = source.rfind('template <', 0, pos) if template else pos
     return source[start:source.index('\n    }\n', pos) + 7]
 
-def run(name, code):
+def run(name, code, rejected_assertion=None):
     cpp = out / (name + '.cpp')
     cpp.write_text(code)
     exe = out / (name + ('.exe' if os.name == 'nt' else ''))
     subprocess.run([args.cxx, '-std=c++23', '-O0', '-pthread', '-I', str(root / 'src'),
                     str(cpp), '-o', str(exe)], check=True)
-    subprocess.run([str(exe)], check=True, timeout=20)
+    if rejected_assertion is None:
+        subprocess.run([str(exe)], check=True, timeout=20)
+    else:
+        result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
+        if result.returncode == 0 or rejected_assertion not in result.stderr:
+            raise RuntimeError('Mutant did not fail the intended assertion: ' + result.stderr)
+        print('PASS reservation guard negative control rejected before successful publication')
 
 fixture = Path(__file__).with_name('run_tests.py')
 head = '#include <thread>\n#include <future>\n#include <cassert>\n' + literal(fixture, 'head')
@@ -129,7 +135,15 @@ struct MemoryManager {
  std::mutex mapping_update_guard,guard; mutable std::mutex page_table_guard;
  std::atomic<u64> map_generation{0};
  std::array<EntryType,128> small{},big{};
- std::array<u32,128> page_table{},big_page_table_dev{};
+ // Reservation/allocation is a fixture; the extracted production PageTableOp
+ // must still check its result before publishing any PTEs.
+ struct {
+  std::array<u32,128> entries{}; bool allow=true; unsigned reservations{};
+  bool ReserveRange(u64,size_t) { ++reservations; return allow; }
+  u32& operator[](size_t index) { return entries[index]; }
+  const u32& operator[](size_t index) const { return entries[index]; }
+ } page_table;
+ std::array<u32,128> big_page_table_dev{};
  std::array<bool,128> continuous{};
  std::vector<std::pair<u64,size_t>> page_stash;
  struct { void Map(u64,u64,PTEKind) {} } kind_map;
@@ -191,7 +205,23 @@ int main() {
  mm.Map(128,2000,16,PTEKind::Pitch,true);
  assert(mm.MapGeneration()==12 && mm.GpuToCpuAddress(129)==2001 && mm.continuous[8]);
  mm.MapSparse(128,16,true); assert(mm.MapGeneration()==14 && !mm.GpuToCpuAddress(128));
- std::cout << "PASS production GPU remap: invalidation before odd epoch, callback/cache lock order, small/big/sparse/unmap, old writeback mapping\n";
+ assert(mm.page_table.reservations==2); // small mapped calls only
+ mm.page_table.allow=false;
+ assert(mm.Map(192,3000,8,PTEKind::Pitch,false)==0);
+ assert(mm.MapGeneration()==16 && !mm.GpuToCpuAddress(192) && !mm.GpuToCpuAddress(196));
+ assert(mm.page_table[48]==0 && mm.page_table[49]==0 && mm.page_table.reservations==3);
+ mm.page_table.allow=true;
+ assert(mm.Map(192,3000,8,PTEKind::Pitch,false)==192);
+ assert(mm.MapGeneration()==18 && mm.GpuToCpuAddress(192)==3000 && mm.GpuToCpuAddress(196)==3004);
+ assert(mm.page_table.reservations==4);
+ std::cout << "PASS production GPU remap: invalidation before odd epoch, callback/cache lock order, small/big/sparse/unmap, reservation refusal/retry, old writeback mapping\n";
 }
 '''
 run('remap', head + body + tail)
+
+reservation_guard = """        if (!page_table.ReserveRange(gpu_addr, size)) {
+            return 0;
+        }"""
+assert body.count(reservation_guard) == 1
+run('remap-reservation-mutant', head + body.replace(reservation_guard, '') + tail,
+    'mm.Map(192,3000,8,PTEKind::Pitch,false)==0')
