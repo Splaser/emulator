@@ -2,6 +2,14 @@
 
 ## 2026-10-21: retain the real backing allocation through process stop
 
+Implementation source: `64d67e2c309b185e9b91eac22725c7f774522259`.
+Current acceptance attempt is
+[Linux run 39537228855](https://github.com/Splaser/emulator/actions/runs/39537228855),
+still in progress with Android skipped. Recover this exact run before a duplicate
+dispatch; expect eight CTests plus the dedicated three-repeat storage owner
+witness and epoch-only-owner negative. The ignored verifier now requires that
+manifest/log set when the committed common CMake list contains the new header.
+
 HostMemory now provides an opaque RetainedBackingStorage holding its actual Impl
 and epoch. Capture neither materializes lazy chunks nor exposes bytes, FDs or
 mapping authority. KProcess captures it before process references/core closure;
@@ -27,6 +35,11 @@ its independent artifact recovery is in progress. That result predates this new
 storage owner and cannot accept it. A fresh Linux-only source run is required.
 The new workflow includes the dedicated storage witness and its artifact files.
 Ordinary GuestBackingAdmission and F2/F3 remain Open; no Android build is requested.
+
+Local recovery for that preceding run is still active in terminal session 86386
+at this checkpoint. Poll it before starting a second download on this machine.
+The recovery script now checks an existing ZIP's digest and uses a partial file
+for future downloads, so an interrupted zero-byte archive is not accepted/reused.
 
 ## 2026-10-21: retain the actual running backend owners
 
