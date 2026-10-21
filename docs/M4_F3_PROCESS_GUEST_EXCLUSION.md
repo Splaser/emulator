@@ -88,8 +88,12 @@ change or forced in-process cleanup disguises the original counterexample.
 Both native results passed in run 39432258674 at 51266b64ef, with all seven
 CTest logs and exact-source artifact hashes independently recovered. That run
 later failed a stale extraction fixture, so it is not full-workflow acceptance.
-Replacement run 39518766603 at 89f034d20b passed build/CTest and is still running
-at the 2026-10-21 office handoff; recover its final regressions/artifact first.
+Replacement run 39518766603 at 89f034d20b passed build/CTest, repeated native
+witnesses and HostMemory checks, then failed the shared resolver fixture's missing
+ReserveRange adapter. Its exact-source artifact (12310269482) is independently
+hash-verified, including all seven CTests and the stop positives/mutants. The
+resolver and assertion-stub fixture corrections still require a full Linux run;
+the cancelled interim run 39527273477 supplies no additional acceptance.
 Neither result closes services/GPU or proves a complete alias census; the harness drives the real backend on a dedicated
 host thread, not as an ARM application dispatched by the scheduler.
 

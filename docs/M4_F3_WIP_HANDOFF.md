@@ -19,6 +19,32 @@ resolver and physical-shadow checks pass. The remaining regression batch and
 fresh exact-source remote Linux validation must complete before broader M4 work.
 No Android validation or ordinary guest admission is enabled.
 
+The local continuation also found missing `DEBUG_ASSERT` definitions in the
+standalone representation-pin, shared HostMemory and first-registration assertion stubs after the
+upstream SlotVector restore. Both now retain active assertion checks. The real
+payload/pin lifetime controls, cache representation, physical admission and
+page-writer suites pass after that fixture correction. Run `39527273477` at
+`c160ad1fc9` was cancelled before full validation because it lacks this correction;
+do not use it as acceptance.
+
+The preceding failed run's artifact `12310269482` is independently recovered:
+ZIP SHA-256 `74b73e4803a867a7a6208b736898f19b1ac2bd27b58ec84a120da028b72a5834`;
+109 hash entries / 78 unique files / 12 manifests match its exact Git tree, and
+the Dynarmic gitlink remains `e40fa8ba6d739807b0965c5e3a60e69f2353f209`.
+All seven CTest markers, three actual-body stop positives/two intended assertion
+mutants and the original F2/F3 negative evidence are present. The verifier and
+download live under ignored `.diagnostics/ci-39518766603/` and
+`.diagnostics/recover_linux_run.py`; recover remote artifacts on another machine.
+This verified partial evidence still does not make the failed workflow a pass.
+
+The local final-regression sweep completed all 33 commands: 28 passed directly,
+and five dependent commands exposed the assertion-stub drift. Four affected
+commands passed after repair, along with the repeated first-registration controls.
+The repaired registration pipeline's main case passed ten repeats; its remaining
+mutation/observer controls are still running locally at this checkpoint. A fresh
+Linux-only workflow is dispatched for the committed fixture repairs. Recover its
+result before claiming complete acceptance or extending guest admission.
+
 ## 2026-10-21 08:20 Asia/Taipei: paused for office-machine continuation
 
 User requested a progress marker and no further development. This is a

@@ -38,6 +38,7 @@ template<class... T> void TestLog(const char*,T&&...) {}
 #include <cstdlib>
 #define ASSERT(x) assert(x)
 #define ASSERT_MSG(x, ...) assert(x)
+#define DEBUG_ASSERT(x) assert(x)
 #define UNIMPLEMENTED_MSG(...) std::abort()
 ''')
 (stub / 'fmt/format.h').write_text('''#pragma once

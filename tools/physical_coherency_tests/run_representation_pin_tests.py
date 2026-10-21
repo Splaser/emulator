@@ -14,7 +14,12 @@ root = Path(__file__).resolve().parents[2]
 out = root/'.diagnostics/m3b-representation-pin'
 stub = out/'stubs/common'
 stub.mkdir(parents=True, exist_ok=True)
-(stub/'assert.h').write_text('#pragma once\n#include <cassert>\n')
+(stub/'assert.h').write_text('''#pragma once
+#include <cassert>
+// SlotVector's restored validation uses the project's DEBUG_ASSERT spelling.
+// Keep validation active in this fixture instead of removing the checks.
+#define DEBUG_ASSERT(condition) assert(condition)
+''')
 header = (root/'src/video_core/renderer_vulkan/vk_buffer_cache.h').read_text()
 buffer = header[header.index('class Buffer :'):header.index('\nclass QuadArrayIndexBuffer;')]
 seal = next(line.strip() for line in header.splitlines() if 'void SealStagedPins()' in line)
