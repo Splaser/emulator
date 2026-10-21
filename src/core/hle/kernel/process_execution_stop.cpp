@@ -10,10 +10,10 @@
 namespace Kernel {
 ProcessExecutionStop::ProcessExecutionStop(
     KScopedAutoObject<KProcess>&& process_, KernelCore& kernel_, Common::PageTable* table_,
-    std::shared_ptr<const Common::GuestBackingEpoch> backing_,
+    Common::RetainedBackingStorage&& backing_,
     GuestExecutionDrain&& execution_, u32 budget)
-    : process{std::move(process_)}, kernel{kernel_}, page_table{table_},
-      backing{std::move(backing_)}, execution{std::move(execution_)}, remaining{budget} {}
+    : backing{std::move(backing_)}, process{std::move(process_)}, kernel{kernel_},
+      page_table{table_}, execution{std::move(execution_)}, remaining{budget} {}
 
 ProcessExecutionStop::ProcessExecutionStop(ProcessExecutionStop&&) = default;
 ProcessExecutionStop::~ProcessExecutionStop() = default;
@@ -21,8 +21,8 @@ ProcessExecutionStop::~ProcessExecutionStop() = default;
 bool ProcessExecutionStop::OwnerCurrent() const {
     const auto* owner = process.GetPointerUnsafe();
     if (!owner || released || owner_thread != std::this_thread::get_id() ||
-        !owner->IsInitialized() || !backing || !backing->alive.load(std::memory_order_acquire) ||
-        kernel.System().DeviceMemory().buffer.BackingEpoch() != backing ||
+        !owner->IsInitialized() || !backing.OwnerAlive() ||
+        kernel.System().DeviceMemory().buffer.BackingEpoch() != backing.Epoch() ||
         std::addressof(owner->GetPageTable().GetImpl()) != page_table) {
         return false;
     }

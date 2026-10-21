@@ -1498,6 +1498,14 @@ void HostMemory::EnsureBackingRange(size_t offset, size_t length) const {
 #endif
 }
 
+std::optional<RetainedBackingStorage> HostMemory::RetainBackingStorage() const {
+    if (!impl) return std::nullopt;
+    auto epoch = backing_lifetime.Get();
+    if (!epoch || !epoch->alive.load(std::memory_order_acquire)) return std::nullopt;
+    auto owner = impl;
+    return RetainedBackingStorage{std::move(owner), std::move(epoch), backing_size};
+}
+
 std::optional<PinnedPhysicalMemory> HostMemory::PinPhysicalRange(size_t offset, size_t length) const {
     // Preserve the moved-from query contract before touching the transferred gate.
     if (!impl) return std::nullopt;

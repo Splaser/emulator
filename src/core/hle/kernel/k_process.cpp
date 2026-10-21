@@ -30,13 +30,13 @@ namespace Kernel {
 std::optional<ProcessExecutionStop> KProcess::TryStopGuestExecution(u32 poll_budget) {
     if (!IsInitialized() || !poll_budget || poll_budget > 4096)
         return std::nullopt;
-    auto backing = m_kernel.System().DeviceMemory().buffer.BackingEpoch();
-    if (!backing || !backing->alive.load(std::memory_order_acquire)) return std::nullopt;
+    auto backing = m_kernel.System().DeviceMemory().buffer.RetainBackingStorage();
+    if (!backing || !backing->OwnerAlive()) return std::nullopt;
     KScopedAutoObject<KProcess> owner{this};
     auto* table = std::addressof(m_page_table.GetImpl());
     auto execution = m_kernel.TryCloseGuestExecution(poll_budget);
     if (!execution) return std::nullopt;
-    return ProcessExecutionStop{std::move(owner), m_kernel, table, std::move(backing),
+    return ProcessExecutionStop{std::move(owner), m_kernel, table, std::move(*backing),
                                  std::move(*execution), poll_budget};
 }
 

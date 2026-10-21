@@ -15,6 +15,7 @@
 #include "common/pinned_physical_memory.h"
 #include "common/physical_cpu_page.h"
 #include "common/published_guest_chunk.h"
+#include "common/retained_backing_storage.h"
 #include "common/virtual_buffer.h"
 
 namespace Common {
@@ -169,6 +170,10 @@ public:
     /// Invalid/empty extents return nullopt; materialization failures propagate before exposure.
     [[nodiscard]] std::optional<PinnedPhysicalMemory> PinPhysicalRange(size_t offset,
                                                                     size_t length) const;
+    /// Cold owner capture only. Caller keeps this facade alive and excludes move/replacement
+    /// during capture. Retains Impl independently afterwards; no range materialization,
+    /// pointer export, mapping lock or access permission. Retirement invalidates OwnerAlive.
+    [[nodiscard]] std::optional<RetainedBackingStorage> RetainBackingStorage() const;
     /// Cold preparation of a canonical physical-page writer/registration gate. No VA lookup
     /// or access activation; caller protects this HostMemory object during resolution.
     [[nodiscard]] std::optional<PreparedPhysicalCpuPage> PreparePhysicalCpuPage(

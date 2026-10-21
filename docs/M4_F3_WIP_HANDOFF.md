@@ -1,5 +1,33 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-21: retain the real backing allocation through process stop
+
+HostMemory now provides an opaque RetainedBackingStorage holding its actual Impl
+and epoch. Capture neither materializes lazy chunks nor exposes bytes, FDs or
+mapping authority. KProcess captures it before process references/core closure;
+ProcessExecutionStop retains it after closure destruction and process Close.
+Moved-from facades refuse capture. Epoch retirement/replacement keeps Poll Unknown
+while the old allocation stays alive for the handle lifetime. This does not make
+System/Kernel/facade destruction concurrent with API entry legal or retain a GPU
+device; normal writer/alias/native-resource closure is still required.
+
+Local Linux acceptance: three real HostMemory/OS lifetime repeats plus the precise
+epoch-only fake-owner negative; facade/token move, epoch retirement, replacement,
+final unmap/FD cleanup, zero-chunk lazy capture/later chunk retention, and capture
+under mapping freeze without escape/reopening. The actual stop fixture passes
+three repeats/three existing mutants, now also proving failed capture before core
+closure and allocation retention through process finalization. Full existing
+HostMemory mapping-freeze controls and production/native-test syntax checks pass.
+Logs/manifests are in ignored `.diagnostics/m4-backing-storage-owner/`,
+`.diagnostics/m4-process-execution-stop/`, `.diagnostics/m4-host-mapping-freeze/`,
+and `.diagnostics/m4-backing-storage-*-syntax.log`.
+
+The preceding cross-process run 39533283269 at d98272e36a has completed successfully;
+its independent artifact recovery is in progress. That result predates this new
+storage owner and cannot accept it. A fresh Linux-only source run is required.
+The new workflow includes the dedicated storage witness and its artifact files.
+Ordinary GuestBackingAdmission and F2/F3 remain Open; no Android build is requested.
+
 ## 2026-10-21: retain the actual running backend owners
 
 Implementation source: `d98272e36abd40dd63dc4367c14b50194ebe4fb5` on

@@ -5,6 +5,7 @@
 #include <memory>
 #include <thread>
 
+#include "common/retained_backing_storage.h"
 #include "core/hle/kernel/guest_execution_drain.h"
 #include "core/hle/kernel/k_auto_object.h"
 #include "core/hle/kernel/physical_core.h"
@@ -19,14 +20,15 @@ class KProcess;
 
 // A process-bound backend stop prerequisite, NOT Guest Exclusion/admission.
 // Retains KProcess (hence its PageTable/Memory owners) and captures backing identity.
-// The epoch is identity only, NOT a pin of backing storage or an alias freeze.
+// Pins the actual backing storage owner, without materializing or freezing aliases.
 // Caller keeps System/Kernel/HostMemory alive; no async GPU work can adopt this type.
 class ProcessExecutionStop {
     friend class KProcess;
+    // Outlives process finalization and execution-closure destruction.
+    Common::RetainedBackingStorage backing;
     KScopedAutoObject<KProcess> process;
     KernelCore& kernel;
     Common::PageTable* page_table;
-    std::shared_ptr<const Common::GuestBackingEpoch> backing;
     // The requester need not own the backends running on these global cores.
     // Keep their real process/PageTable/Memory owners alongside the requester.
     std::array<KScopedAutoObject<KProcess>, Core::Hardware::NUM_CPU_CORES> running_owners;
@@ -40,7 +42,7 @@ class ProcessExecutionStop {
 
     ProcessExecutionStop(KScopedAutoObject<KProcess>&& process_, KernelCore& kernel_,
                          Common::PageTable* table_,
-                         std::shared_ptr<const Common::GuestBackingEpoch> backing_,
+                         Common::RetainedBackingStorage&& backing_,
                          GuestExecutionDrain&& execution_, u32 budget);
     bool OwnerCurrent() const;
 

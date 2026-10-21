@@ -72,6 +72,7 @@ add_library(common STATIC
     host_mapping_domain.h
     host_memory.h
     pinned_physical_memory.h
+    retained_backing_storage.h
     published_guest_chunk.h
     physical_range_admission.h
     physical_page_gate.h

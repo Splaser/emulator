@@ -9,7 +9,20 @@
 #include "common/scope_exit.h"
 #include "core/hle/kernel/process_execution_stop.h"
 using namespace std::chrono_literals;
-namespace Common {struct PageTable {};struct GuestBackingEpoch {std::atomic<bool> alive{true};};}
+namespace Common {
+struct PageTable {};
+// Allocation collaborator only. The separate backing-storage suite links real HostMemory.
+class HostMemory {
+public:
+    std::shared_ptr<const GuestBackingEpoch> epoch=std::make_shared<GuestBackingEpoch>();
+    std::shared_ptr<int> allocation=std::make_shared<int>(77);
+    auto BackingEpoch() {return epoch;}
+    std::optional<RetainedBackingStorage> RetainBackingStorage() const {
+        if(!allocation || !epoch || !epoch->alive) return std::nullopt;
+        return RetainedBackingStorage{allocation,epoch,4096};
+    }
+};
+}
 namespace Core {
 struct Debugger {
     template<class... T> void NotifyThreadStopped(T&&...) {}
@@ -18,10 +31,7 @@ struct Debugger {
 class System {
 public:
     struct Device {
-        struct Buffer {
-            std::shared_ptr<const Common::GuestBackingEpoch> epoch=std::make_shared<Common::GuestBackingEpoch>();
-            auto BackingEpoch() {return epoch;}
-        } buffer;
+        Common::HostMemory buffer;
     } device;
     Debugger debugger;
     bool DebuggerEnabled() {return false;}
@@ -85,9 +95,10 @@ public:
     enum class State {Running,Terminated};
     KernelCore& m_kernel;PageTable m_page_table;Backend backend;
     std::atomic<unsigned> refs{1};bool initialized=true;State state=State::Running;
+    std::function<void()> on_close;
     explicit KProcess(KernelCore& kernel):m_kernel{kernel} {}
     bool Open() {++refs;return true;}
-    void Close() {--refs;}
+    void Close() {--refs;if(on_close) on_close();}
     bool IsInitialized() const {return initialized;}
     State GetState() const {return state;}
     PageTable& GetPageTable() {return m_page_table;}
@@ -228,6 +239,29 @@ int main() {
         assert(moved.Poll()==R::BackendsStopped);
         kernel.system.device.buffer.epoch=std::make_shared<Common::GuestBackingEpoch>();
         assert(moved.Poll()==R::Unknown && !moved.CancelNoEffects());
+    }
+    { // The epoch is not storage: replacement must keep the old allocation alive.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};
+        auto& buffer=kernel.system.device.buffer;
+        std::weak_ptr<int> old=buffer.allocation;
+        auto stop=process.TryStopGuestExecution();assert(stop);
+        process.on_close=[&] {
+            if(process.refs==0)
+                assert(!old.expired() && "backing owner must outlive process finalization");
+        };
+        process.Close(); // Transfer the final process reference to the request.
+        buffer.allocation=std::make_shared<int>(99);
+        buffer.epoch=std::make_shared<Common::GuestBackingEpoch>();
+        assert(!old.expired() && "process stop must retain actual backing storage");
+        assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
+        assert(!old.expired());stop.reset();assert(old.expired());
+    }
+    { // Failed storage capture precedes every core closure or owner reference.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};
+        kernel.system.device.buffer.allocation.reset();
+        assert(!process.TryStopGuestExecution() && process.refs==1);
+        auto close=kernel.TryCloseGuestExecution(64);assert(close);
+        assert(close->Poll()==Common::ProducerDrain::Result::DrainedSubset && close->CancelNoEffects());
     }
     { // Exception still clears context and releases execution scope, never content admission.
         Kernel::KernelCore kernel;Kernel::KProcess process{kernel};Kernel::KThread thread{process};

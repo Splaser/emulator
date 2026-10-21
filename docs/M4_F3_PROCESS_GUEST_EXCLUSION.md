@@ -33,13 +33,17 @@ nonblocking backend interrupt and only acknowledges BackendsStopped once every
 entered backend has returned, including UnlockThread. Poll-budget exhaustion,
 unsupported interrupt, stale owner or retired backing is sticky Unknown.
 
-The captured epoch is explicitly identity only. It does not pin HostMemory
-storage, freeze aliases or close a different Memory object. The retained process
-prevents its normal slab finalization while this request lives; System, Kernel
-and HostMemory must still be externally retained. This precursor cannot be
-transferred to asynchronous GPU work. Unknown backend closure remains sealed;
-the full resource-isolation registry for future asynchronous operations is still
-required before such work can be admitted.
+The stop now captures a RetainedBackingStorage from the actual HostMemory Impl,
+along with the allocation epoch. The epoch remains identity only; the separate
+opaque owner retains the real allocation/reservation and existing or subsequently
+materialized lazy chunks. Capture exposes no pointer/FD, materializes no chunk
+and does not freeze aliases or close a different Memory object. It is declared
+before the process owners so allocation release follows process finalization.
+System, Kernel and the HostMemory facade still need external lifetime protection
+during capture/validation; retaining storage is not permission to race facade
+move/destruction. This precursor cannot transfer to asynchronous GPU work.
+Unknown backend closure remains sealed; a durable resource-isolation registry
+is still required before such work can be admitted.
 
 PhysicalCore's previous count spanned the entire RunThread function, including
 Svc::Call. A SVC can yield its fiber after the backend has already exited, leaving
@@ -136,10 +140,41 @@ KernelCore::GetProcessList is populated by the OS process wrapper and is not an
 exhaustive allocation/publication census. Constructor/initialization, registration,
 all Memory views, teardown and independent service ownership must be closed and
 joined before a full cohort can be certified. No process-list mutex is held across
-halt/drain: those locks can be needed by lifecycle work. The epoch still does not
-pin storage, and the handle cannot transfer to async GPU work. Callers retain
+halt/drain: those locks can be needed by lifecycle work. A separate backing
+storage owner now retains Impl; it does not retain native GPU resources or freeze
+aliases, and the handle cannot transfer to async GPU work. Callers retain
 System/Kernel/HostMemory and an uncertain handle; a future durable Unknown registry
 is still required. Original unchecked-loop/NCE/service/raw-alias/GPU blockers remain.
+
+## Actual backing storage retention follow-up
+
+RetainedBackingStorage is privately constructed by HostMemory from its real Impl
+and epoch. Unlike an epoch reference it keeps OS allocation/reservation resources
+alive; unlike PinnedPhysicalMemory it exposes no byte range, pointer or FD. Capture
+is a cold owner operation, not a signal/ordinary-write path, and never materializes
+lazy chunks, enrolls ordinary mappings or enters a mapping mutation. A moved-from
+HostMemory refuses capture before touching transferred state. Moving the token
+leaves its old OwnerAlive false and Size zero.
+
+KProcess acquires this owner before opening process references or closing cores.
+A capture failure has no core-closure effects. ProcessExecutionStop holds the
+storage before its process members in declaration order: execution closures seal,
+captured processes release/finalize, then storage releases. Replacement or epoch
+retirement makes Poll Unknown while the old allocation remains retained for the
+handle lifetime. System/Kernel/facade protection and durable Unknown retirement
+remain separate requirements; this cannot keep a destroyed GPU device usable.
+
+The dedicated Linux suite links actual HostMemory and uses process_vm_readv to
+probe lifetime without dereferencing a potentially freed address. It checks
+facade/token moves, moved-from refusal, retirement, replacement isolation, final
+unmap/FD release, lazy capture with zero chunk creation, a later materialized chunk,
+and capture during a controlled mapping freeze without escape or reopening.
+Three repeats pass. A fake-owner mutant retaining only an unrelated allocation
+and the real epoch fails at the precise premature-storage-release witness.
+The stop actual-body fixture separately checks failed capture before closure,
+old allocation retention after replacement and storage surviving process Close.
+Production/native syntax and the existing full HostMemory mapping-freeze controls
+pass locally. New-source native runtime/full-workflow acceptance is pending.
 
 ## Next gates (still Open)
 

@@ -121,6 +121,7 @@ paths = [core, 'src/core/hle/kernel/physical_core.h', 'src/core/hle/kernel/k_pro
          'src/core/hle/kernel/kernel.cpp', 'src/core/hle/kernel/process_execution_stop.h',
          'src/core/hle/kernel/process_execution_stop.cpp', 'src/common/producer_drain.h',
          'src/core/hle/kernel/guest_execution_drain.h', template,
+         'src/common/retained_backing_storage.h',
          'tools/physical_coherency_tests/run_process_execution_stop_tests.py']
 (out / 'extraction.json').write_text(json.dumps({
     'positive_repeats': 3,
