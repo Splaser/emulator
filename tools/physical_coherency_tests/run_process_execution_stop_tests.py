@@ -45,6 +45,10 @@ template<class T> class KScopedAutoObject {
 public:
  KScopedAutoObject()=default;
  explicit KScopedAutoObject(T* ptr):object{ptr} {if(object) object->Open();}
+ static std::optional<KScopedAutoObject> TryOpen(T* ptr) {
+   if(!ptr || !ptr->refs.load() || !ptr->Open()) return std::nullopt;
+   KScopedAutoObject result;result.object=ptr;return result;
+ }
  KScopedAutoObject(KScopedAutoObject&& other):object{std::exchange(other.object,nullptr)} {}
  KScopedAutoObject(const KScopedAutoObject&)=delete;
  ~KScopedAutoObject() {if(object) object->Close();}
@@ -86,6 +90,16 @@ for marker, text in [('RUN', run), ('REQUEST', request), ('INTERRUPT', interrupt
 source = source.replace('@CLOSE@', close)
 source = source.replace('@INIT_ENTER@', init_enter[init_enter.index('{'):])
 source = source.replace('@INIT_CLOSE@', init_close[init_close.index('{'):])
+for token, marker in [
+    ('OWNERS', 'std::optional<ProcessOwnerRoster::Snapshot> KernelCore::TryRetainProcessOwners()'),
+    ('CREATION', 'std::optional<ProcessOwnerRoster::CreationClosure> KernelCore::TryCloseProcessCreation()'),
+    ('PUBLICATIONS', 'const std::shared_ptr<Common::ProducerDrain>& KernelCore::ProcessPublicationDomain()')]:
+    body = extract('src/core/hle/kernel/kernel.cpp', marker)
+    source = source.replace('@' + token + '@', body[body.index('{'):])
+# Compile the actual roster after its injected KProcess collaborator is complete.
+(stubs / 'core/hle/kernel/k_process.h').write_text('#pragma once\n')
+source = source.replace('int main() {', (root / 'src/core/hle/kernel/process_owner_roster.cpp').read_text() + '\nint main() {')
+source = 'namespace Kernel {class ProcessCohortStop;}\n' + source
 # Test-only profiling annotation. All execution and stop bodies above remain extracted.
 source = '#define CITRON_PROFILE_SCOPE(...)\n' + source
 command = [os.environ.get('CXX', 'g++'), '-std=c++23', '-O1', '-pthread', '-Wall', '-Wextra',

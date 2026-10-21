@@ -26,6 +26,7 @@ class KProcess;
 // Caller keeps System/Kernel/HostMemory alive; no async GPU work can adopt this type.
 class ProcessExecutionStop {
     friend class KProcess;
+    friend class ProcessCohortStop;
     // Outlives process finalization and execution-closure destruction.
     Common::RetainedBackingStorage backing;
     KScopedAutoObject<KProcess> process;

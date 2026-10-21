@@ -154,6 +154,7 @@ void EndThread(Kernel::KThread* thread) {
     thread->Close();
 }
 
+template <bool Cohort = false>
 void ProcessExecutionStopWitness(bool fast_link, bool cross_process = false) {
 #if defined(__linux__) && defined(ARCHITECTURE_x86_64)
     Settings::values.use_multi_core.SetValue(true);
@@ -253,10 +254,34 @@ void ProcessExecutionStopWitness(bool fast_link, bool cross_process = false) {
     REQUIRE(Access::BackendRunning(core));
     const auto refs = process->GetReferenceCount();
     const auto requester_refs = requester->GetReferenceCount();
-    auto stop = requester->TryStopGuestExecution(fast_link ? 64 : 4096);
+    const auto request_stop = [&](u32 budget) {
+        if constexpr (Cohort) return requester->TryStopProcessCohort(budget);
+        else return requester->TryStopGuestExecution(budget);
+    };
+    auto stop = request_stop(fast_link ? 64 : 4096);
     REQUIRE(stop.has_value());
     REQUIRE(requester->GetReferenceCount() >= requester_refs + 1);
-    { // Actual public overloads refuse before any initial PageTable/TLS effects.
+    if constexpr (Cohort) {
+        auto& kernel = system.Kernel();
+        const auto slots = Kernel::KProcess::GetNumRemaining(kernel);
+        REQUIRE_THROWS_AS(Kernel::KProcess::Create(kernel), Kernel::ProcessOwnerRoster::CreationRefused);
+        REQUIRE(Kernel::KProcess::GetNumRemaining(kernel) == slots);
+        REQUIRE_THROWS_AS(Kernel::KProcess{kernel}, Kernel::ProcessOwnerRoster::CreationRefused);
+        const auto before = process->GetPageTable().GetImpl().SnapshotMapping(GetInteger(code));
+        REQUIRE(before.has_value());
+        REQUIRE_THROWS_AS(memory.ProtectRegion(process->GetPageTable().GetImpl(), code, 4096,
+                         Common::MemoryPermission::Read), Core::Memory::ControlledMappingPublication::Refused);
+        REQUIRE(before->IsCurrent());
+        REQUIRE_THROWS_AS(memory.Reset(), Core::Memory::ControlledMappingPublication::Refused);
+        REQUIRE_THROWS_AS(Core::Memory::Memory{std::move(memory)}, Core::Memory::ControlledMappingPublication::Refused);
+        REQUIRE_THROWS_AS(process->InitializeInterfaces(), Core::Memory::ControlledMappingPublication::Refused);
+        REQUIRE_THROWS_AS(process->LoadModule(Kernel::CodeSet{}, 0), Core::Memory::ControlledMappingPublication::Refused);
+        REQUIRE_THROWS_AS(kernel.AppendNewProcess(process), Core::Memory::ControlledMappingPublication::Refused);
+        REQUIRE_THROWS_AS(kernel.MakeApplicationProcess(process), Core::Memory::ControlledMappingPublication::Refused);
+        REQUIRE(process->Initialize(Kernel::Svc::CreateProcessParameter{},
+                                   kernel.GetSystemResourceLimit(), false) == Kernel::ResultBusy);
+        REQUIRE(process->Run(16, 4096) == Kernel::ResultBusy);
+    } else { // Actual public overloads refuse before any initial PageTable/TLS effects.
         auto& kernel = system.Kernel();
         // This never-initialized object uses normal C++ destruction, so refusal
         // also cleans its constructor-owned Memory without slab finalization.
@@ -317,7 +342,7 @@ void ProcessExecutionStopWitness(bool fast_link, bool cross_process = false) {
     core.RunThread(thread); // Closed real entry cannot restart the store loop.
     REQUIRE(memory.Read32(data) == value);
     REQUIRE(stop->CancelNoEffects());
-    auto next = requester->TryStopGuestExecution(64);
+    auto next = request_stop(64);
     REQUIRE(next.has_value());
     REQUIRE_FALSE(stop->CancelNoEffects()); // Old operation cannot reopen the new domain.
     REQUIRE(next->Poll() == Kernel::ProcessExecutionStop::Result::BackendsStopped);
@@ -331,6 +356,10 @@ void ProcessExecutionStopWitness(bool fast_link, bool cross_process = false) {
         REQUIRE(process->GetReferenceCount() == refs);
         std::cout << "PASS native cross-process stop retains the actual running process, "
                      "PageTable and Memory through halt/exit, releasing its reference once\n";
+    }
+    if constexpr (Cohort) {
+        std::cout << "PASS native sustained process cohort closure and real Dynarmic halt, "
+                     "constructor rollback, cold publication refusal and resumed process mapping; Guest admission Unknown\n";
     }
     std::cout << "PASS native process-owned checked-branch Dynarmic execution halt/exit, stable real guest backing, "
                  "closed re-entry and stale-cancel isolation; service/GPU exclusion remains Unknown\n";
@@ -352,6 +381,11 @@ TEST_CASE("Unchecked Dynarmic fast-link loop retains Unknown until process termi
 TEST_CASE("Global backend stop retains a process different from its requester",
           "[.][process-execution-stop-cross-process]") {
     ProcessExecutionStopWitness(false, true);
+}
+
+TEST_CASE("Owned process cohort closes creation and cold publication across real backend stop",
+          "[.][process-cohort-stop]") {
+    ProcessExecutionStopWitness<true>(false);
 }
 
 TEST_CASE("Controlled writes cross real guest fibers and process finalization",

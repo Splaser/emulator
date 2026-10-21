@@ -13,8 +13,8 @@
 
 namespace Core::Memory {
 
-// Constructor-only enrollment of one Memory's outer mapping/publication entries.
-// Not an alias census, PageTable-wide freeze, producer lease or GPU capability.
+// Constructor-only local enrollment plus a shared cold process publication gate.
+// Cache/fault-related Begin is independent. Neither path is an alias census or GPU capability.
 class ControlledMappingPublication {
     struct State {
         Common::ProducerDrain entries;
@@ -22,6 +22,7 @@ class ControlledMappingPublication {
         bool retired{}; // Protected by lifetime, including initial entry validation.
     };
     std::shared_ptr<State> state;
+    std::shared_ptr<Common::ProducerDrain> process_publications;
 
 public:
     class Refused : public std::runtime_error {
@@ -50,6 +51,7 @@ public:
     };
     class Entry {
         friend class ControlledMappingPublication;
+        std::optional<Common::ProducerDrain::Entry> process_entry;
         // Release the lifetime lock before the counted entry and retained state.
         std::shared_ptr<State> state;
         std::optional<Common::ProducerDrain::Entry> counted;
@@ -63,16 +65,23 @@ public:
         Entry() = default; // Ordinary Memory: no allocation, counter or mutex.
         Entry(Entry&&) = default;
         Entry(const Entry&) = delete;
-        ~Entry() { if (state && !finished) state->entries.Seal(); }
+        ~Entry() {
+            if (state && !finished) state->entries.Seal();
+        }
         // Any unwinding after entry has an unknown publication disposition.
         void Finish() noexcept { finished = true; }
     };
 
-    explicit ControlledMappingPublication(bool enrolled = false)
-        : state{enrolled ? std::make_shared<State>() : nullptr} {}
+    explicit ControlledMappingPublication(bool enrolled = false,
+                                          std::shared_ptr<Common::ProducerDrain> process_ = {})
+        : state{enrolled ? std::make_shared<State>() : nullptr},
+          process_publications{std::move(process_)} {}
     ControlledMappingPublication(ControlledMappingPublication&&) = default;
     ControlledMappingPublication& operator=(ControlledMappingPublication&& other) {
-        if (this != &other) { Retire(); state = std::move(other.state); }
+        if (this != &other) {
+            Retire(); state = std::move(other.state);
+            process_publications = std::move(other.process_publications);
+        }
         return *this;
     }
     ControlledMappingPublication(const ControlledMappingPublication&) = delete;
@@ -92,6 +101,22 @@ public:
     [[nodiscard]] auto TryClose(u32 poll_budget = 64) const {
         return state ? state->entries.TryClose(poll_budget)
                      : std::optional<Common::ProducerDrain::Closure>{};
+    }
+    // Cold process mapping/context publication only. The GPU cache/NCE-related
+    // Begin path remains separate and cannot be inferred drained from this gate.
+    [[nodiscard]] Entry BeginCold() const {
+        auto counted = BeginProcessOnly();
+        auto entry = Begin();
+        if (counted) entry.process_entry.emplace(std::move(*counted));
+        return entry;
+    }
+    // Reset/move must close and join local entries themselves; do not acquire a
+    // local shared lifetime lock before that join (which would self-deadlock).
+    [[nodiscard]] std::optional<Common::ProducerDrain::Entry> BeginProcessOnly() const {
+        if (!process_publications) return std::nullopt;
+        auto counted = process_publications->EnterCold();
+        if (!counted) throw Refused("process mapping publication closed");
+        return counted;
     }
     // Owner-thread cleanup only, outside other locks. Normal admission stays sealed.
     [[nodiscard]] Teardown BeginTeardown() const {

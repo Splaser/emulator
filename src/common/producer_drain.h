@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <thread>
 #include "common/common_types.h"
 
 namespace Common {
@@ -71,6 +72,17 @@ public:
     // observer stores, timing, registry, lock, allocation or additional wait.
     std::optional<Entry> TryEnter(EntryAttempt& attempt) const noexcept {
         return TryEnterImpl<true>(&attempt);
+    }
+    // Cold publication callers must not turn ordinary reader-count contention
+    // into a mapping failure. This may yield/retry; never use in a fault handler,
+    // backend entry or bounded stop poll. Closed/capacity still refuse before effects.
+    std::optional<Entry> EnterCold() const noexcept {
+        for (;;) {
+            EntryAttempt attempt;
+            auto entry = TryEnter(attempt);
+            if (entry || attempt != EntryAttempt::Contended) return entry;
+            std::this_thread::yield();
+        }
     }
 private:
     template <bool Diagnose>

@@ -269,14 +269,16 @@ public:
     // No automatic interrupt, host-producer closure or guest-backed permission.
     [[nodiscard]] std::optional<GuestExecutionDrain> TryCloseGuestExecution(u32 poll_budget=64);
 
-    // Closes guest process initialization through rollback/publication of its initial
-    // PageTable. Does not close service creation, existing mappings or Memory writes.
+    // Closes all process initialization (including service-process common setup)
+    // through initial PageTable/TLS rollback. Creation/publication are separate gates.
     [[nodiscard]] std::optional<Common::ProducerDrain::Closure>
     TryCloseGuestProcessInitialization(u32 poll_budget = 64);
 
     // Retention only; callers must separately close/join initialization, ordinary
     // writers, services and publication. A current snapshot grants no admission.
     [[nodiscard]] std::optional<ProcessOwnerRoster::Snapshot> TryRetainProcessOwners() const;
+    [[nodiscard]] std::optional<ProcessOwnerRoster::CreationClosure> TryCloseProcessCreation();
+    const std::shared_ptr<Common::ProducerDrain>& ProcessPublicationDomain() const;
 
     /// Exceptional exit application process.
     void ExceptionalExitApplication();

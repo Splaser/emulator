@@ -281,11 +281,14 @@ if args.compile_only:
     sys.exit(0)
 for name in names:
     body = method('void Memory::' + name + '(', '\n}')
-    omitted = body.replace('    auto publication = mapping_publications.Begin();\n', '').replace('    publication.Finish();\n', '')
+    omitted = body.replace('    auto publication = mapping_publications.Begin();\n', '').replace(
+        '    auto publication = mapping_publications.BeginCold();\n', '').replace('    publication.Finish();\n', '')
     assert body != omitted
     execute('unguarded-' + name, source.replace(body, omitted))
 early = wrappers.replace('    auto publication = mapping_publications.Begin();',
                          '    {auto publication = mapping_publications.Begin();publication.Finish();}')
+early = early.replace('    auto publication = mapping_publications.BeginCold();',
+                       '    {auto publication = mapping_publications.BeginCold();publication.Finish();}')
 early = early.replace('    publication.Finish();\n', '')
 execute('probe-before-publication', source.replace(wrappers, early))
 guard = 'if (state && !finished) state->entries.Seal();'

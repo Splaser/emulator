@@ -369,6 +369,7 @@ public:
     Common::PageTable& GetImpl() {
         return *m_impl;
     }
+    bool HasImpl() const noexcept { return m_impl != nullptr; }
 
     Common::PageTable& GetImpl() const {
         return *m_impl;

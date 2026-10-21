@@ -807,6 +807,8 @@ struct KernelCore::Impl {
     std::unique_ptr<Common::ProducerDrain> guest_process_initialization =
         std::make_unique<Common::ProducerDrain>();
     ProcessOwnerRoster process_owners;
+    std::shared_ptr<Common::ProducerDrain> process_publications =
+        std::make_shared<Common::ProducerDrain>();
 
     // OS wrapper publication list, not an exhaustive KProcess/backing owner census.
     std::mutex process_list_lock;
@@ -909,6 +911,8 @@ KResourceLimit* KernelCore::GetSystemResourceLimit() {
 }
 
 void KernelCore::AppendNewProcess(KProcess* process) {
+    auto publication = ProcessPublicationDomain()->EnterCold();
+    if (!publication) throw Core::Memory::ControlledMappingPublication::Refused("process list publication closed");
     process->Open();
 
     std::scoped_lock lk{impl->process_list_lock};
@@ -923,6 +927,8 @@ void KernelCore::RemoveProcess(KProcess* process) {
 }
 
 void KernelCore::MakeApplicationProcess(KProcess* process) {
+    auto publication = ProcessPublicationDomain()->EnterCold();
+    if (!publication) throw Core::Memory::ControlledMappingPublication::Refused("application process publication closed");
     impl->MakeApplicationProcess(process);
 }
 
@@ -1301,7 +1307,7 @@ std::optional<GuestExecutionDrain> KernelCore::TryCloseGuestExecution(u32 poll_b
 }
 
 std::optional<Common::ProducerDrain::Entry> KernelCore::TryEnterGuestProcessInitialization() {
-    return impl->guest_process_initialization->TryEnter();
+    return impl->guest_process_initialization->EnterCold();
 }
 
 std::optional<Common::ProducerDrain::Closure>
@@ -1320,6 +1326,12 @@ void KernelCore::CompleteProcessOwnerRetirement(u64 id) {
 }
 std::optional<ProcessOwnerRoster::Snapshot> KernelCore::TryRetainProcessOwners() const {
     return impl->process_owners.TryCapture();
+}
+std::optional<ProcessOwnerRoster::CreationClosure> KernelCore::TryCloseProcessCreation() {
+    return impl->process_owners.TryCloseCreation();
+}
+const std::shared_ptr<Common::ProducerDrain>& KernelCore::ProcessPublicationDomain() const {
+    return impl->process_publications;
 }
 
 void KernelCore::ShutdownCores() {

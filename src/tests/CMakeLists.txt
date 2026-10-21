@@ -78,6 +78,9 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND ARCHITECTURE_x86_64)
     add_test(NAME native_process_execution_stop_cross_process
              COMMAND controlled_cpu_scheduler_tests "[process-execution-stop-cross-process]")
     set_tests_properties(native_process_execution_stop_cross_process PROPERTIES TIMEOUT 45)
+    add_test(NAME native_process_cohort_stop
+             COMMAND controlled_cpu_scheduler_tests "[process-cohort-stop]")
+    set_tests_properties(native_process_cohort_stop PROPERTIES TIMEOUT 45)
     if (_pinned_container_compat)
         # The pinned unchecked LinkBlockFast loop has no halt check. Keep this
         # negative in its own process: its safe terminal boundary is OS exit.

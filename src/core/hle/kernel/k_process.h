@@ -18,6 +18,7 @@
 #include "core/hle/kernel/k_thread.h"
 #include "core/hle/kernel/k_thread_local_page.h"
 #include "core/hle/kernel/process_execution_stop.h"
+#include "core/hle/kernel/process_cohort_stop.h"
 #include "core/memory.h"
 
 namespace Kernel {
@@ -165,6 +166,7 @@ private:
 public:
     explicit KProcess(KernelCore& kernel);
     ~KProcess() override;
+    [[nodiscard]] std::optional<ProcessCohortStop> TryStopProcessCohort(u32 poll_budget = 64);
     void Destroy() override;
 
     Result Initialize(const Svc::CreateProcessParameter& params, KResourceLimit* res_limit,

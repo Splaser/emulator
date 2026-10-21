@@ -45,6 +45,7 @@ public:
     Common::PageTable& GetImpl() {
         return m_page_table.GetImpl();
     }
+    bool HasImpl() const noexcept { return m_page_table.HasImpl(); }
 
     Common::PageTable& GetImpl() const {
         return m_page_table.GetImpl();

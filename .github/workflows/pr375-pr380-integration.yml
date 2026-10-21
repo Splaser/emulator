@@ -122,6 +122,8 @@ jobs:
         run: python tools/physical_coherency_tests/run_process_teardown_tests.py
       - name: Verify process-owned backend stop and omitted service writer control
         run: python tools/physical_coherency_tests/run_process_execution_stop_tests.py
+      - name: Verify sustained creation, initialization and cold publication across cohort stop
+        run: python tools/physical_coherency_tests/run_process_cohort_stop_tests.py
       - name: Verify actual backing storage retention without access or lazy materialization
         run: python tools/physical_coherency_tests/run_backing_storage_owner_tests.py
       - name: Verify process owner inventory, actual reference capture and retirement failures
@@ -146,6 +148,8 @@ jobs:
             src/core/CMakeFiles/core.dir/hle/kernel/k_thread_local_page.cpp.o \
             src/core/CMakeFiles/core.dir/hle/kernel/process_execution_stop.cpp.o \
             src/core/CMakeFiles/core.dir/hle/kernel/process_owner_roster.cpp.o \
+            src/core/CMakeFiles/core.dir/hle/kernel/process_cohort_stop.cpp.o \
+            src/core/CMakeFiles/core.dir/hle/service/os/process.cpp.o \
             src/core/CMakeFiles/core.dir/arm/dynarmic/arm_dynarmic_32.cpp.o \
             src/core/CMakeFiles/core.dir/arm/dynarmic/arm_dynarmic_64.cpp.o \
             src/video_core/CMakeFiles/video_core.dir/renderer_vulkan/present/window_adapt_pass.cpp.o \
@@ -292,6 +296,7 @@ jobs:
             .diagnostics/m4-process-execution-stop/*
             .diagnostics/m4-backing-storage-owner/*
             .diagnostics/m4-process-owner-roster/*
+            .diagnostics/m4-process-cohort-stop/*
             build-integration/Testing/Temporary/LastTest.log
             build-integration/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn

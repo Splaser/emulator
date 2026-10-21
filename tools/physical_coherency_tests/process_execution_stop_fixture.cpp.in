@@ -8,6 +8,7 @@
 #include <thread>
 #include "common/scope_exit.h"
 #include "core/hle/kernel/process_execution_stop.h"
+#include "core/hle/kernel/process_owner_roster.h"
 using namespace std::chrono_literals;
 namespace Common {
 struct PageTable {};
@@ -80,6 +81,9 @@ public:
         std::array<std::unique_ptr<Kernel::PhysicalCore>,Core::Hardware::NUM_CPU_CORES> cores;
         std::unique_ptr<Common::ProducerDrain> guest_process_initialization=
             std::make_unique<Common::ProducerDrain>();
+        ProcessOwnerRoster process_owners;
+        std::shared_ptr<Common::ProducerDrain> process_publications=
+            std::make_shared<Common::ProducerDrain>();
     };
     Core::System system;
     std::unique_ptr<Impl> impl=std::make_unique<Impl>();
@@ -90,9 +94,13 @@ public:
     std::optional<GuestExecutionDrain> TryCloseGuestExecution(u32 poll_budget) @CLOSE@
     std::optional<Common::ProducerDrain::Entry> TryEnterGuestProcessInitialization() @INIT_ENTER@
     std::optional<Common::ProducerDrain::Closure> TryCloseGuestProcessInitialization(u32 poll_budget) @INIT_CLOSE@
+    std::optional<ProcessOwnerRoster::Snapshot> TryRetainProcessOwners() @OWNERS@
+    std::optional<ProcessOwnerRoster::CreationClosure> TryCloseProcessCreation() @CREATION@
+    const std::shared_ptr<Common::ProducerDrain>& ProcessPublicationDomain() const @PUBLICATIONS@
 };
 struct PageTable {
     Common::PageTable table;
+    bool HasImpl() const {return true;}
     Common::PageTable& GetImpl() {return table;}
     Common::PageTable& GetImpl() const {return const_cast<Common::PageTable&>(table);}
 };
@@ -102,7 +110,9 @@ public:
     KernelCore& m_kernel;PageTable m_page_table;Backend backend;
     std::atomic<unsigned> refs{1};bool initialized=true;State state=State::Running;
     std::function<void()> on_close;
-    explicit KProcess(KernelCore& kernel):m_kernel{kernel} {}
+    u64 registration;
+    explicit KProcess(KernelCore& kernel):m_kernel{kernel},registration{kernel.impl->process_owners.Register(this)} {}
+    ~KProcess() {m_kernel.impl->process_owners.Remove(registration);}
     bool Open() {++refs;return true;}
     void Close() {--refs;if(on_close) on_close();}
     bool IsInitialized() const {return initialized;}
@@ -111,6 +121,7 @@ public:
     const PageTable& GetPageTable() const {return m_page_table;}
     Core::ArmInterface* GetArmInterface(size_t) {return &backend;}
     std::optional<ProcessExecutionStop> TryStopGuestExecution(u32 poll_budget=64);
+    std::optional<ProcessCohortStop> TryStopProcessCohort(u32 poll_budget=64);
 };
 enum class StepState {None,StepPending,StepPerformed};
 enum class SuspendType {Debug};

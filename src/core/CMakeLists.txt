@@ -343,6 +343,8 @@ add_library(core STATIC
     hle/kernel/physical_core.cpp
     hle/kernel/process_execution_stop.cpp
     hle/kernel/process_execution_stop.h
+    hle/kernel/process_cohort_stop.cpp
+    hle/kernel/process_cohort_stop.h
     hle/kernel/process_owner_roster.cpp
     hle/kernel/process_owner_roster.h
     hle/kernel/physical_core.h

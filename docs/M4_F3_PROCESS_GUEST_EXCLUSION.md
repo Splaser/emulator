@@ -5,6 +5,9 @@ This is the active follow-up to the
 The ownership boundary is KProcess, its PageTable and physical backing, including
 other Memory contexts, CPU aliases and independent producers of that backing.
 Per-Memory retirement and a private arena are not certificates for this boundary.
+The remaining roadmap has three phases, listed at the end. Lifecycle fixes and
+the implementation slices below are prerequisites within those phases, not
+additional M4 milestones. None currently authorizes ordinary Guest admission.
 
 ## Required state and resource order
 
@@ -214,8 +217,9 @@ references. Checked witnesses also create and tear down a real mapped process
 after known cancellation. Linux run 39540116589 at a09bf27bb4 passed the full
 workflow; the exact-source artifact and eight CTest markers were independently verified.
 
-This closes initial PageTable/TLS construction only. Kernel service-process
-creation (is_real=false), later metadata/interface/module setup, publication of
+The initial implementation closed PageTable/TLS construction only. Its later
+cohort extension below also closes is_real=false initialization and cold setup.
+Service callbacks, independent cache/GPU publication, publication of
 an already initialized process, Run/ordinary mapping mutation, existing Memory
 contexts, service callbacks and teardown remain independent obligations. In
 particular, initialization drainage supplies neither an exhaustive retained owner
@@ -276,29 +280,82 @@ alone cannot authorize an asynchronous operation; creation could follow it.
 Keep the captured cohort owned through all future drains/Unknown isolation rather
 than returning raw pointers or enumerating GetProcessList under a long-held lock.
 
-## Next gates (still Open)
+## Sustained cohort and execution integration (phase one, in progress)
 
-1. **Process guest exclusion.** Attach ordinary Memory CPU writes and mapping
-   publication to a process/PageTable/backing cohort shared by every Memory
-   context. Exclude host-service writes under that same owner boundary. A mutable
-   pointer loan lasts through its final use, not just GetPointer. Raw escaped
-   pointers and incomplete export/owner history must prevent admission.
-2. **Whole-guest quiescence.** Combine the real execution acknowledgement with
-   System suspension serialization and actual independent-producer close-and-join.
-   Do not reuse today's unbounded suspension wait as a bounded certificate.
-   Prove NCE separately or refuse it. The pinned unchecked fast-link loop is also
-   an open stop/completion blocker; a halt request alone does not bound its exit.
-   Preserve prior pause state and lock order;
-   no owner may be parked holding a lock needed by drainage/completion.
-3. **Device/GPU owners and Unknown.** Close GPU workers, transfer/shader/image
-   producers and mapping mutation, including queued-but-unsubmitted commands.
-   Retain backing storage, frozen aliases and native ownership through the exact
-   checked completion. Retire an Unknown operation only through explicit proven
-   recovery/termination; a late old submission cannot release a newer isolation.
-4. **Actual guest-backed admission witness.** One known ordinary memfd physical
-   page, bounded complete aliases, one queue, no concurrent shader/image writers.
-   Exercise a real Vulkan Copy with success/refusal/partial failure/remap/teardown/
-   resource-retirement controls. Retain the original independent F2/F3 negatives.
+KProcess::TryStopProcessCohort now composes continuously owned capabilities:
+
+1. Retain actual backing storage and the requester, refusing a requester without
+   a real Guest PageTable. Close creation at the same mutex-protected point that
+   registers every KProcess, including service processes. A constructor not yet
+   registered must refuse and unwind; its kernel bookkeeping and popped slab slot
+   are restored. Already registered zero-ref constructors are retried/refused,
+   never omitted or resurrected.
+2. Close all initialization, including is_real=false common service setup, and
+   the shared cold publication domain. Wait for admitted entries to leave before
+   closing CPU execution; an admitted loader must not be parked behind its own
+   CPU-dependent completion. No scheduler/PTE/roster lock spans the drain.
+3. Capture the real owner roster while creation remains closed. Keep every strong
+   owner reference, then close actual PhysicalCore entry and issue actual backend
+   halt requests. IsCurrent is an additional consistency check under those owned
+   closures, not a substitute for keeping creation/publication closed.
+4. Retain the closures and cohort through polling, move and uncertainty. Known
+   cancellation reopens creation last. Unknown and late producer exit do not
+   reopen acquired gates. Backing outlives closure destruction and all retained
+   process finalization. This type has no asynchronous GPU adoption interface.
+
+Every Memory constructor binds a shared kernel cold-publication domain, including
+locally untracked Memory. BeginCold covers context bind, map, unmap, protect and
+debug publication. Reset/move use a parent-only entry before their local join to
+avoid acquiring a shared lifetime lock and then waiting on themselves. Local
+controlled-arena enrollment remains separate. Run, metadata/module/interface
+setup, the OS loader wrapper, process-list publication and application-process
+publication also participate. Refusal precedes effects; the OS wrapper propagates
+loading/running refusal rather than claiming success. Cold entry retries count
+contention so normal concurrent mapping is not rejected spuriously. That retry
+API is forbidden in a fault handler, backend entry or bounded stop poll.
+
+Cache/fault-related RasterizerMarkRegionCached still uses its original independent
+Begin path. It remains a required successful bypass control; this component
+certifies neither all PTE publishers nor full alias/producer coverage. The NCE
+fault path has no new wait or parking mechanism. Ordinary writes, raw pointers,
+service callbacks, GPU resources and partial-initialization remnants remain
+separate proof obligations. Manual destruction outside the intrusive owner
+protocol is not authorized by a snapshot. BackendsStopped is a prerequisite only;
+GuestBackingAdmission remains Unknown.
+
+The Linux actual-body integration fixture retains idle/unpublished owners before
+the halt callback, delays initialization and publication independently, proves
+CPU entry is not closed during those drains, refuses creation and cold mapping,
+and tests move, stale cancel, zero refs, timeout/late exit and a post-stop seal.
+Four mutants move capture after halt, omit publication drainage, omit creation
+closure or close an unrelated publication domain. The ninth native CTest uses
+real KProcess/Memory/roster and a real checked Dynarmic store loop. It tests actual
+constructor/slab rollback, mapping/reset/move/interface/module/OS publication
+refusal and resumed mapped-process initialization after cancellation. Native
+runtime acceptance for this integration is pending its exact-source Linux CI.
+
+## Remaining roadmap: three phases
+
+1. **Roster plus real execution drainage — in progress.** Finish the continuous
+   creation/initialization/publication ownership boundary and scheduler/lifecycle
+   protocol. The sustained cold-route integration above does not close independent
+   cache/GPU PTE publishers or prove all arbitrary Memory views. Never promote a
+   single IsCurrent observation to permission for subsequent asynchronous work.
+2. **Close every independent producer — Open.** Ordinary scalar/bulk/atomic CPU
+   writes; NCE native stores and unchecked Dynarmic fastmem; Audio/VIC/service
+   callbacks; raw pointer loans, external mappings and aliases; queued/unsubmitted
+   GPU transfers, shader/image writes and cache/DAddr/GPU mapping publication.
+   Require real stop and close-and-join facts, preserve pause state, and avoid
+   parking an owner while it holds a lock needed for completion. Unknown must
+   keep backing, alias protection and native resources owned under an explicit
+   durable isolation/retirement protocol; an old completion cannot release a new
+   operation. No fine-grained page-fault parking is required for this first version.
+3. **Real Guest-backed Admission — Open.** With real KProcess and ordinary Guest
+   physical backing, drain all relevant producers, freeze mapping/permission
+   publication and retain physical storage, PageTables and GPU owners. Execute one
+   restricted real Vulkan Copy, wait for exact checked completion, then release
+   safely or keep isolation/resources on Unknown. Cover success/refusal/partial
+   failure/remap/teardown/retirement and preserve independent original F2/F3 negatives.
 
 No normal guest route or physical latest-writer authority is enabled. F2/F3
 remain Open. Validation continues on Linux; Android is not requested.

@@ -968,7 +968,8 @@ struct Memory::Impl {
 };
 
 Memory::Memory(Core::System& system_, MappingPublicationMode mappings)
-    : system{system_}, mapping_publications{mappings == MappingPublicationMode::Controlled} {
+    : system{system_}, mapping_publications{mappings == MappingPublicationMode::Controlled,
+                                          system_.Kernel().ProcessPublicationDomain()} {
     impl = std::make_unique<Impl>(system);
 }
 
@@ -984,6 +985,7 @@ Memory::~Memory() {
 }
 
 Memory::Memory(Memory&& other) : system{other.system} {
+    auto process_publication = other.mapping_publications.BeginProcessOnly();
     other.SealControlledCpuWrites(); // queued requests never migrate their execution identity
     other.SealControlledMappings();
     mapping_publications = std::move(other.mapping_publications);
@@ -1039,6 +1041,7 @@ ControlledCpuWriteRequestPtr Memory::PrepareControlledWrite64(Common::ProcessAdd
 }
 
 void Memory::Reset() {
+    auto process_publication = mapping_publications.BeginProcessOnly();
     SealControlledCpuWrites();
     SealControlledMappings();
     impl = std::make_unique<Impl>(system);
@@ -1046,7 +1049,7 @@ void Memory::Reset() {
 }
 
 void Memory::SetCurrentPageTable(Kernel::KProcess& process) {
-    auto publication = mapping_publications.Begin();
+    auto publication = mapping_publications.BeginCold();
     impl->SetCurrentPageTable(process);
     publication.Finish();
 }
@@ -1054,14 +1057,14 @@ void Memory::SetCurrentPageTable(Kernel::KProcess& process) {
 void Memory::MapMemoryRegion(Common::PageTable& page_table, Common::ProcessAddress base, u64 size,
                              Common::PhysicalAddress target, Common::MemoryPermission perms,
                              bool separate_heap) {
-    auto publication = mapping_publications.Begin();
+    auto publication = mapping_publications.BeginCold();
     impl->MapMemoryRegion(page_table, base, size, target, perms, separate_heap);
     publication.Finish();
 }
 
 void Memory::UnmapRegion(Common::PageTable& page_table, Common::ProcessAddress base, u64 size,
                          bool separate_heap) {
-    auto publication = mapping_publications.Begin();
+    auto publication = mapping_publications.BeginCold();
     impl->UnmapRegion(page_table, base, size, separate_heap);
     publication.Finish();
 }
@@ -1074,7 +1077,7 @@ void Memory::UnmapRegionForTeardown(Common::PageTable& page_table, Common::Proce
 
 void Memory::ProtectRegion(Common::PageTable& page_table, Common::ProcessAddress vaddr, u64 size,
                            Common::MemoryPermission perms) {
-    auto publication = mapping_publications.Begin();
+    auto publication = mapping_publications.BeginCold();
     impl->ProtectRegion(page_table, GetInteger(vaddr), size, perms);
     publication.Finish();
 }
@@ -1338,7 +1341,7 @@ void Memory::RasterizerMarkRegionCached(Common::ProcessAddress vaddr, u64 size, 
 }
 
 void Memory::MarkRegionDebug(Common::ProcessAddress vaddr, u64 size, bool debug) {
-    auto publication = mapping_publications.Begin();
+    auto publication = mapping_publications.BeginCold();
     impl->MarkRegionDebug(GetInteger(vaddr), size, debug);
     publication.Finish();
 }

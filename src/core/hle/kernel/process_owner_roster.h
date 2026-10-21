@@ -5,6 +5,7 @@
 #include <mutex>
 #include <optional>
 #include <vector>
+#include <stdexcept>
 #include "core/hle/kernel/k_auto_object.h"
 
 namespace Core { struct SchedulerTestAccess; }
@@ -23,11 +24,31 @@ class ProcessOwnerRoster {
         std::vector<Record> records;
         u64 next_id{1}, revision{};
         bool poisoned{};
+        u64 creation_owner{}, next_creation_owner{1};
+        std::atomic<bool> creation_unknown{};
         void Changed() noexcept;
     };
     std::shared_ptr<State> state{std::make_shared<State>()};
 
 public:
+    class CreationRefused : public std::runtime_error {
+    public:
+        CreationRefused() : std::runtime_error{"process creation closed"} {}
+    };
+    class CreationClosure {
+        friend class ProcessOwnerRoster;
+        std::shared_ptr<State> state;
+        u64 owner;
+        bool released{};
+        CreationClosure(std::shared_ptr<State> state_, u64 owner_);
+    public:
+        CreationClosure(CreationClosure&&) noexcept;
+        CreationClosure(const CreationClosure&) = delete;
+        ~CreationClosure();
+        bool IsClosed() const;
+        bool CancelNoEffects();
+        void Quarantine();
+    };
     class Snapshot {
         friend class ProcessOwnerRoster;
         std::shared_ptr<State> state;
@@ -56,5 +77,8 @@ public:
     // One try-lock. Refusal/exception releases any partial pins AFTER unlocking.
     // A zero-ref constructor/retiring object refuses; it is never resurrected.
     std::optional<Snapshot> TryCapture() const;
+    // Register and this close linearize under the same lock. Constructors that
+    // have not registered yet must roll back; no new owner can publish afterward.
+    std::optional<CreationClosure> TryCloseCreation();
 };
 } // namespace Kernel

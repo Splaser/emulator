@@ -28,6 +28,21 @@
 
 namespace Kernel {
 
+std::optional<ProcessCohortStop> KProcess::TryStopProcessCohort(u32 poll_budget) {
+    if (!IsInitialized() || !m_page_table.HasImpl() || !poll_budget || poll_budget > 4096) return std::nullopt;
+    auto backing = m_kernel.System().DeviceMemory().buffer.RetainBackingStorage();
+    if (!backing || !backing->OwnerAlive()) return std::nullopt;
+    auto creation = m_kernel.TryCloseProcessCreation();
+    if (!creation) return std::nullopt;
+    auto publication = m_kernel.ProcessPublicationDomain()->TryClose(poll_budget);
+    if (!publication) return std::nullopt;
+    auto initialization = m_kernel.TryCloseGuestProcessInitialization(poll_budget);
+    if (!initialization) return std::nullopt;
+    return ProcessCohortStop{std::move(*backing), KScopedAutoObject<KProcess>{this}, m_kernel,
+                            std::addressof(m_page_table.GetImpl()), std::move(*creation),
+                            std::move(*publication), std::move(*initialization), poll_budget};
+}
+
 std::optional<ProcessExecutionStop> KProcess::TryStopGuestExecution(u32 poll_budget) {
     if (!IsInitialized() || !poll_budget || poll_budget > 4096)
         return std::nullopt;
@@ -228,12 +243,9 @@ void KProcess::Finalize() {
 
 Result KProcess::Initialize(const Svc::CreateProcessParameter& params, KResourceLimit* res_limit,
                             bool is_real) {
-    // Kernel service processes have no initial guest PageTable. Their creation and
-    // subsequent host callbacks require a separate close-and-join protocol.
-    if (!is_real) return InitializeCommon(params, res_limit, false);
     auto initialization = m_kernel.TryEnterGuestProcessInitialization();
     R_UNLESS(initialization.has_value(), ResultBusy);
-    R_RETURN(InitializeCommon(params, res_limit, true));
+    R_RETURN(InitializeCommon(params, res_limit, is_real));
 }
 
 Result KProcess::InitializeCommon(const Svc::CreateProcessParameter& params,
@@ -991,6 +1003,8 @@ size_t KProcess::GetTotalNonSystemUserPhysicalMemorySize() const {
 }
 
 Result KProcess::Run(s32 priority, size_t stack_size) {
+    auto publication = m_kernel.ProcessPublicationDomain()->EnterCold();
+    R_UNLESS(publication.has_value(), ResultBusy);
     // Lock ourselves, to prevent concurrent access.
     KScopedLightLock lk(m_state_lock);
 
@@ -1231,12 +1245,16 @@ Result KProcess::GetThreadList(s32* out_num_threads, KProcessAddress out_thread_
 
 void KProcess::Switch(KProcess* cur_process, KProcess* next_process) {}
 
-KProcess::KProcess(KernelCore& kernel)
+KProcess::KProcess(KernelCore& kernel) try
     : KAutoObjectWithSlabHeapAndContainer(kernel), m_owner_registration{kernel},
       m_page_table{kernel}, m_state_lock{kernel},
       m_list_lock{kernel}, m_cond_var{kernel.System()}, m_address_arbiter{kernel.System()},
       m_handle_table{kernel}, m_exclusive_monitor{}, m_memory{kernel.System()} {
     m_owner_registration.id = m_kernel.RegisterProcessOwner(this);
+} catch (...) {
+    // Member construction/registration refusal must not leave global bookkeeping.
+    kernel.UnregisterKernelObject(this);
+    throw;
 }
 KProcess::OwnerRegistration::~OwnerRegistration() {
     if (id) kernel.CompleteProcessOwnerRetirement(id);
@@ -1263,6 +1281,8 @@ void KProcess::Destroy() {
 
 Result KProcess::LoadFromMetadata(const FileSys::ProgramMetadata& metadata, std::size_t code_size,
                                   KProcessAddress aslr_space_start, bool is_hbl) {
+    auto publication = m_kernel.ProcessPublicationDomain()->EnterCold();
+    R_UNLESS(publication.has_value(), ResultBusy);
     // Create a resource limit for the process.
     const auto pool = static_cast<KMemoryManager::Pool>(metadata.GetPoolPartition());
     const auto physical_memory_size = m_kernel.MemoryManager().GetSize(pool);
@@ -1346,6 +1366,8 @@ Result KProcess::LoadFromMetadata(const FileSys::ProgramMetadata& metadata, std:
 }
 
 void KProcess::LoadModule(CodeSet code_set, KProcessAddress base_addr) {
+    auto publication = m_kernel.ProcessPublicationDomain()->EnterCold();
+    if (!publication) throw Core::Memory::ControlledMappingPublication::Refused("process module publication closed");
     const auto ReprotectSegment = [&](const CodeSet::Segment& segment,
                                       Svc::MemoryPermission permission) {
         m_page_table.SetProcessMemoryPermission(segment.addr + base_addr, segment.size, permission);
@@ -1380,6 +1402,8 @@ void KProcess::LoadModule(CodeSet code_set, KProcessAddress base_addr) {
 }
 
 void KProcess::InitializeInterfaces() {
+    auto publication = m_kernel.ProcessPublicationDomain()->EnterCold();
+    if (!publication) throw Core::Memory::ControlledMappingPublication::Refused("process interface publication closed");
     m_exclusive_monitor =
         Core::MakeExclusiveMonitor(this->GetMemory(), Core::Hardware::NUM_CPU_CORES);
 
