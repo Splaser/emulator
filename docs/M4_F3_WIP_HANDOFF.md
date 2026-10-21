@@ -1,5 +1,31 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-21: retain the actual running backend owners
+
+The global stop previously retained only its requesting KProcess. It now captures
+each actual running process under that core's try-locked context before halt,
+retains its PageTable/Memory lifetime with the requester and validates identity
+before acknowledgement. Occupied owner slots refuse before effects. Moving a
+request transfers all references; closure destruction precedes owner release.
+Captured owners remain held after unsupported requests and late backend exits,
+for the handle lifetime. This does not create a durable Unknown GPU registry.
+
+Linux actual-body tests pass three repeats and three assertion mutants, including
+removing the pre-halt foreign-owner reference. Cases cover two running owners and
+a third requester, delayed UnlockThread, move and exact final release, invalid
+output slots and unsupported/late-exit retention. Existing ProducerDrain tests
+and all fifteen assertion mutants pass. Real production stop/core and native
+test translation units pass local Linux syntax checks with actual project types.
+The new cross-process Dynarmic CTest is pending remote runtime acceptance; it is
+an eighth CTest process, preserving the original unchecked-loop refusal separately.
+
+See the running-owner resource table in
+[the implementation record](M4_F3_PROCESS_GUEST_EXCLUSION.md). This retains only
+the observed backend cohort. Full process birth/publication/retirement closure,
+ordinary Memory and service writes, escaped pointers, storage pins, all aliases
+and GPU owners remain Open. Do not use the OS wrapper's process list as a complete
+roster or hold its mutex across drain. GuestBackingAdmission remains Unknown.
+
 ## 2026-10-21: complete Linux baseline accepted
 
 Run [39528346917](https://github.com/Splaser/emulator/actions/runs/39528346917)

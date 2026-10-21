@@ -10,6 +10,7 @@
 
 #include "core/arm/arm_interface.h"
 #include "common/producer_drain.h"
+#include "core/hle/kernel/k_auto_object.h"
 
 namespace Kernel {
 class KernelCore;
@@ -40,7 +41,9 @@ public:
     enum class StopRequest { Requested, Contended, Unsupported };
     // Normal owner context only, after ALL execution entries have been closed.
     // No wait on m_guard; unsupported platform handshakes do not run here.
-    StopRequest TryRequestGuestStop();
+    // Capture the actual running process under m_guard, before issuing the halt.
+    // The caller supplies an empty owner slot and retains it through drainage.
+    StopRequest TryRequestGuestStop(KScopedAutoObject<KProcess>& running_owner);
 
     // Copy context from thread to current core.
     void LoadContext(const KThread* thread);

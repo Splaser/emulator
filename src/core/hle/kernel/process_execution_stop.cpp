@@ -20,11 +20,20 @@ ProcessExecutionStop::~ProcessExecutionStop() = default;
 
 bool ProcessExecutionStop::OwnerCurrent() const {
     const auto* owner = process.GetPointerUnsafe();
-    return owner && !released && owner_thread == std::this_thread::get_id() &&
-           owner->IsInitialized() &&
-           backing && backing->alive.load(std::memory_order_acquire) &&
-           kernel.System().DeviceMemory().buffer.BackingEpoch() == backing &&
-           std::addressof(owner->GetPageTable().GetImpl()) == page_table;
+    if (!owner || released || owner_thread != std::this_thread::get_id() ||
+        !owner->IsInitialized() || !backing || !backing->alive.load(std::memory_order_acquire) ||
+        kernel.System().DeviceMemory().buffer.BackingEpoch() != backing ||
+        std::addressof(owner->GetPageTable().GetImpl()) != page_table) {
+        return false;
+    }
+    for (size_t i = 0; i < running_owners.size(); ++i) {
+        const auto* running = running_owners[i].GetPointerUnsafe();
+        if (running && (!running->IsInitialized() ||
+                        std::addressof(running->GetPageTable().GetImpl()) != running_page_tables[i])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 ProcessExecutionStop::Result ProcessExecutionStop::Poll() {
@@ -41,13 +50,19 @@ ProcessExecutionStop::Result ProcessExecutionStop::Poll() {
     bool pending = false;
     for (size_t i = 0; i < requested.size(); ++i) {
         if (requested[i]) continue;
-        const auto result = kernel.PhysicalCore(i).TryRequestGuestStop();
+        const auto result = kernel.PhysicalCore(i).TryRequestGuestStop(running_owners[i]);
+        if (auto* running = running_owners[i].GetPointerUnsafe())
+            running_page_tables[i] = std::addressof(running->GetPageTable().GetImpl());
         if (result == PhysicalCore::StopRequest::Unsupported) {
             Quarantine();
             return Result::Unknown;
         }
         requested[i] = result == PhysicalCore::StopRequest::Requested;
         pending |= !requested[i];
+    }
+    if (!OwnerCurrent()) {
+        Quarantine();
+        return Result::Unknown;
     }
     const auto drained = execution.Poll();
     if (drained == Common::ProducerDrain::Result::Unknown) {

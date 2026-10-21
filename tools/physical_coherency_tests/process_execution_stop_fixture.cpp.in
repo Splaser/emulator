@@ -41,6 +41,7 @@ struct Backend final : Core::ArmInterface {
     bool supported=true,svc=false,throws=false;
     std::promise<void>* unlock_entered{};
     std::shared_future<void> unlock_release;
+    std::function<void()> on_request;
     void Initialize() override {++initializations;}
     void LockThread(Kernel::KThread*) override {++locks;}
     void UnlockThread(Kernel::KThread*) override {
@@ -58,6 +59,7 @@ struct Backend final : Core::ArmInterface {
     Core::HaltReason StepThread(Kernel::KThread* thread) override {return RunThread(thread);}
     void SignalInterrupt(Kernel::KThread*) override {halt=true;}
     bool RequestNonblockingGuestStop(Kernel::KThread* thread) override {
+        if(on_request) on_request();
         ++requests;if(!supported) return false;SignalInterrupt(thread);return true;
     }
 };
@@ -125,6 +127,41 @@ template<class Predicate> void Until(Predicate predicate) {
 }
 int main() {
     using R=Kernel::ProcessExecutionStop::Result;
+    { // The requester does not own either running core; a caller-only pin is insufficient.
+        Kernel::KernelCore kernel;
+        Kernel::KProcess caller{kernel},first{kernel},second{kernel};
+        Kernel::KThread one{first},two{second};
+        {
+            Kernel::KScopedAutoObject<Kernel::KProcess> occupied{&caller};
+            assert(kernel.PhysicalCore(0).TryRequestGuestStop(occupied)==
+                   Kernel::PhysicalCore::StopRequest::Unsupported);
+            assert(caller.refs==2); // Refusal preserves the supplied owner and core entry state.
+        }
+        std::promise<void> unlocking_one,unlocking_two,release;
+        auto released=release.get_future().share();
+        first.backend.unlock_entered=&unlocking_one;first.backend.unlock_release=released;
+        second.backend.unlock_entered=&unlocking_two;second.backend.unlock_release=released;
+        first.backend.on_request=[&] {
+            assert(first.refs==2 && "running backend owner must be retained before halt request");
+        };
+        second.backend.on_request=[&] {
+            assert(second.refs==2 && "running backend owner must be retained before halt request");
+        };
+        std::thread cpu_one{[&] {kernel.PhysicalCore(0).RunThread(&one);}};
+        std::thread cpu_two{[&] {kernel.PhysicalCore(2).RunThread(&two);}};
+        Until([&] {return first.backend.running && second.backend.running;});
+        auto stop=caller.TryStopGuestExecution(4096);assert(stop && caller.refs==2);
+        assert(stop->Poll()==R::Pending && "halt request must not acknowledge running backend");
+        unlocking_one.get_future().wait();unlocking_two.get_future().wait();
+        assert(first.refs==2 && second.refs==2);
+        auto moved=std::make_optional(std::move(*stop));stop.reset();
+        assert(first.refs==2 && second.refs==2 && caller.refs==2);
+        release.set_value();cpu_one.join();cpu_two.join();
+        assert(moved->Poll()==R::BackendsStopped && moved->CancelNoEffects());
+        assert(first.refs==2 && second.refs==2); // Held through the request lifetime.
+        moved.reset();
+        assert(first.refs==1 && second.refs==1 && caller.refs==1);
+    }
     for(bool step:{false,true}) { // Actual Run/Step: request is not acknowledgement.
         Kernel::KernelCore kernel;Kernel::KProcess process{kernel};Kernel::KThread thread{process};
         thread.step=step ? Kernel::StepState::StepPending : Kernel::StepState::None;
@@ -162,14 +199,19 @@ int main() {
         assert(stop->CancelNoEffects());Kernel::Svc::callback={};
     }
     { // Unsupported (e.g. blocking NCE signal handshake) is sticky Unknown, never synthetic success.
-        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};Kernel::KThread thread{process};
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel},process{kernel};Kernel::KThread thread{process};
         process.backend.supported=false;
+        process.backend.on_request=[&] {
+            assert(process.refs==2 && "running backend owner must be retained before halt request");
+        };
         std::thread cpu{[&] {kernel.PhysicalCore(0).RunThread(&thread);}};
         Until([&] {return process.backend.running.load();});
-        auto stop=process.TryStopGuestExecution();assert(stop);
+        auto stop=caller.TryStopGuestExecution();assert(stop);
         assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
+        assert(process.refs==2);
         kernel.PhysicalCore(0).Interrupt();cpu.join();
         assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
+        assert(process.refs==2); // A late backend exit cannot drop the captured foreign owner.
     }
     { // No wait on a core lock; budget exhaustion keeps closure quarantined.
         Kernel::KernelCore kernel;Kernel::KProcess process{kernel};

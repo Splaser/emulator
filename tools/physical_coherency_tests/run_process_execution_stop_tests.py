@@ -43,10 +43,12 @@ namespace Kernel {
 template<class T> class KScopedAutoObject {
  T* object{};
 public:
+ KScopedAutoObject()=default;
  explicit KScopedAutoObject(T* ptr):object{ptr} {if(object) object->Open();}
  KScopedAutoObject(KScopedAutoObject&& other):object{std::exchange(other.object,nullptr)} {}
  KScopedAutoObject(const KScopedAutoObject&)=delete;
  ~KScopedAutoObject() {if(object) object->Close();}
+ void Reset(T* ptr) {KScopedAutoObject fresh{ptr};std::swap(object,fresh.object);}
  T* GetPointerUnsafe() const {return object;}
 };}
 ''')
@@ -111,6 +113,10 @@ fake = methods.replace('    const auto drained = execution.Poll();',
 assert fake != methods
 execute('request-is-acknowledgement', source.replace(methods, fake),
         'halt request must not acknowledge running backend')
+retention = '    running_owner.Reset(m_current_thread->GetOwnerProcess());'
+assert request.count(retention) == 1
+execute('omit-running-owner-retention', source.replace(request, request.replace(retention, '')),
+        'running backend owner must be retained before halt request')
 paths = [core, 'src/core/hle/kernel/physical_core.h', 'src/core/hle/kernel/k_process.cpp',
          'src/core/hle/kernel/kernel.cpp', 'src/core/hle/kernel/process_execution_stop.h',
          'src/core/hle/kernel/process_execution_stop.cpp', 'src/common/producer_drain.h',
@@ -118,7 +124,8 @@ paths = [core, 'src/core/hle/kernel/physical_core.h', 'src/core/hle/kernel/k_pro
          'tools/physical_coherency_tests/run_process_execution_stop_tests.py']
 (out / 'extraction.json').write_text(json.dumps({
     'positive_repeats': 3,
-    'assertion_mutants': ['count-suspended-svc-as-backend', 'request-is-acknowledgement'],
+    'assertion_mutants': ['count-suspended-svc-as-backend', 'request-is-acknowledgement',
+                         'omit-running-owner-retention'],
     'sha256': {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths},
     'boundary': 'Actual execution/stop bodies; injected backend/kernel, no NCE or guest admission proof',
 }, indent=2) + '\n')

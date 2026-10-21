@@ -27,6 +27,11 @@ class ProcessExecutionStop {
     KernelCore& kernel;
     Common::PageTable* page_table;
     std::shared_ptr<const Common::GuestBackingEpoch> backing;
+    // The requester need not own the backends running on these global cores.
+    // Keep their real process/PageTable/Memory owners alongside the requester.
+    std::array<KScopedAutoObject<KProcess>, Core::Hardware::NUM_CPU_CORES> running_owners;
+    std::array<Common::PageTable*, Core::Hardware::NUM_CPU_CORES> running_page_tables{};
+    // Seal/quarantine the execution closures before releasing any retained owner.
     GuestExecutionDrain execution;
     std::array<bool, Core::Hardware::NUM_CPU_CORES> requested{};
     std::thread::id owner_thread{std::this_thread::get_id()};

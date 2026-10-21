@@ -154,7 +154,7 @@ void EndThread(Kernel::KThread* thread) {
     thread->Close();
 }
 
-void ProcessExecutionStopWitness(bool fast_link) {
+void ProcessExecutionStopWitness(bool fast_link, bool cross_process = false) {
 #if defined(__linux__) && defined(ARCHITECTURE_x86_64)
     Settings::values.use_multi_core.SetValue(true);
     Settings::values.use_asynchronous_gpu_emulation.SetValue(true);
@@ -168,11 +168,15 @@ void ProcessExecutionStopWitness(bool fast_link) {
     });
     SCOPE_EXIT { system.ShutdownMainProcess(); };
     Process owner{system};
-    auto* process = owner.process;
+    std::unique_ptr<Process> other_owner;
+    if (cross_process) other_owner = std::make_unique<Process>(system);
+    auto* requester = owner.process;
+    auto* process = other_owner ? other_owner->process : requester;
     process->InitializeInterfaces();
     auto& memory = process->GetMemory();
-    const auto code = owner.heap + 4096;
-    const auto data = owner.heap + 8192;
+    const auto heap = other_owner ? other_owner->heap : owner.heap;
+    const auto code = heap + 4096;
+    const auto data = heap + 8192;
     // Keep the original unchecked B -8 as a refusal witness. The success case
     // uses TBNZ w1,#0,-8: odd counter +2 remains odd, and this checked branch
     // gives the pinned JIT a real halt observation point without changing options.
@@ -195,7 +199,7 @@ void ProcessExecutionStopWitness(bool fast_link) {
     context.pc = GetInteger(code);
     context.r[0] = GetInteger(data);
     context.r[1] = 1;
-    context.sp = GetInteger(owner.heap + 65536);
+    context.sp = GetInteger(heap + 65536);
     process->GetArmInterface(0)->SetContext(context);
     auto& core = system.Kernel().PhysicalCore(0);
     core.ClearInterrupt();
@@ -215,9 +219,10 @@ void ProcessExecutionStopWitness(bool fast_link) {
     }));
     REQUIRE(Access::BackendRunning(core));
     const auto refs = process->GetReferenceCount();
-    auto stop = process->TryStopGuestExecution(fast_link ? 64 : 4096);
+    const auto requester_refs = requester->GetReferenceCount();
+    auto stop = requester->TryStopGuestExecution(fast_link ? 64 : 4096);
     REQUIRE(stop.has_value());
-    REQUIRE(process->GetReferenceCount() >= refs + 1);
+    REQUIRE(requester->GetReferenceCount() >= requester_refs + 1);
     Kernel::ProcessExecutionStop::Result result{};
     unsigned polls = 0;
     REQUIRE(Until([&] {
@@ -250,6 +255,7 @@ void ProcessExecutionStopWitness(bool fast_link) {
     backend.join();
     if (error) std::rethrow_exception(error);
     REQUIRE_FALSE(Access::BackendRunning(core));
+    REQUIRE(process->GetReferenceCount() >= refs + 1);
     const auto value = memory.Read32(data);
     REQUIRE(value != 0);
     std::this_thread::sleep_for(10ms);
@@ -258,11 +264,17 @@ void ProcessExecutionStopWitness(bool fast_link) {
     core.RunThread(thread); // Closed real entry cannot restart the store loop.
     REQUIRE(memory.Read32(data) == value);
     REQUIRE(stop->CancelNoEffects());
-    auto next = process->TryStopGuestExecution(64);
+    auto next = requester->TryStopGuestExecution(64);
     REQUIRE(next.has_value());
     REQUIRE_FALSE(stop->CancelNoEffects()); // Old operation cannot reopen the new domain.
     REQUIRE(next->Poll() == Kernel::ProcessExecutionStop::Result::BackendsStopped);
     REQUIRE(next->CancelNoEffects());
+    if (cross_process) {
+        stop.reset();
+        REQUIRE(process->GetReferenceCount() == refs);
+        std::cout << "PASS native cross-process stop retains the actual running process, "
+                     "PageTable and Memory through halt/exit, releasing its reference once\n";
+    }
     std::cout << "PASS native process-owned checked-branch Dynarmic execution halt/exit, stable real guest backing, "
                  "closed re-entry and stale-cancel isolation; service/GPU exclusion remains Unknown\n";
 #else
@@ -278,6 +290,11 @@ TEST_CASE("Process stop acknowledges a checked-branch Dynarmic store loop",
 TEST_CASE("Unchecked Dynarmic fast-link loop retains Unknown until process termination",
           "[.][process-execution-stop-fast-link]") {
     ProcessExecutionStopWitness(true);
+}
+
+TEST_CASE("Global backend stop retains a process different from its requester",
+          "[.][process-execution-stop-cross-process]") {
+    ProcessExecutionStopWitness(false, true);
 }
 
 TEST_CASE("Controlled writes cross real guest fibers and process finalization",

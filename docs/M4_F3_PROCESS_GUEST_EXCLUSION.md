@@ -102,6 +102,45 @@ controls only; subsequent running-owner changes require a new run.
 Neither result closes services/GPU or proves a complete alias census; the harness drives the real backend on a dedicated
 host thread, not as an ARM application dispatched by the scheduler.
 
+## Running-owner retention follow-up
+
+The stop requester is not necessarily the process executing on any PhysicalCore.
+After all execution entries close, each core now captures its actual running
+KProcess under the same try-locked context that issues the halt request. The
+stop handle retains those strong references and their PageTable identities,
+including when a backend refuses the nonblocking request. A late exit does not
+discard them. Moving the handle transfers the references; the execution closures
+are sealed before references are destroyed. An occupied output slot refuses
+before interrupt effects so no unrelated last reference is dropped under m_guard.
+
+| Observation | Retention and disposition |
+| --- | --- |
+| Core lock contended | No owner snapshot or halt; retry within the existing budget |
+| Core idle | No running owner to retain; still wait for the closed execution count |
+| Running owner captured | Open its real reference before invoking backend halt; retain requester separately |
+| Unsupported or uncertain backend | Keep captured owners for the handle lifetime and leave closure Unknown |
+| Backend and UnlockThread exit | Validate retained PageTable identities; still no guest admission |
+| Known cancellation | Reopen only owned execution closures; retain references until handle destruction |
+
+The actual-body fixture covers two different running processes plus a third
+requester, pre-halt reference capture, delayed UnlockThread, move/release exactly
+once, occupied-slot refusal and foreign-owner retention after unsupported stop
+and late exit. A third assertion mutant removes the capture and must fail at
+the pre-halt retention assertion. A new isolated native CTest requests from A
+while real Dynarmic executes a checked store loop in B, then checks retained
+ownership through exit and exact reference release. Remote runtime acceptance
+for this follow-up is pending; the accepted baseline predates it.
+
+This is the running-backend cohort, not a complete process/backing owner roster.
+KernelCore::GetProcessList is populated by the OS process wrapper and is not an
+exhaustive allocation/publication census. Constructor/initialization, registration,
+all Memory views, teardown and independent service ownership must be closed and
+joined before a full cohort can be certified. No process-list mutex is held across
+halt/drain: those locks can be needed by lifecycle work. The epoch still does not
+pin storage, and the handle cannot transfer to async GPU work. Callers retain
+System/Kernel/HostMemory and an uncertain handle; a future durable Unknown registry
+is still required. Original unchecked-loop/NCE/service/raw-alias/GPU blockers remain.
+
 ## Next gates (still Open)
 
 1. **Process guest exclusion.** Attach ordinary Memory CPU writes and mapping
