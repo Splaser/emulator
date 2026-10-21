@@ -1,5 +1,41 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-21: clarify direct C++ versus Close unregister ownership
+
+Implementation source: `9c816d1c9f9230e485ba43fe2b88400e706ae2a0`.
+Linux-only validation is
+[run 39556788293](https://github.com/Splaser/emulator/actions/runs/39556788293),
+in progress at this checkpoint; Android is skipped. Do not duplicate dispatch.
+
+KProcess's C++ destructor now unregisters kernel bookkeeping only inside the
+live-registration branch. Slab Destroy consumes the registration and leaves
+unregister to KAutoObject::Close. Production slab Free never calls the C++
+destructor, so the earlier normal Close path did not actually double-unregister;
+this is explicit ownership cleanup rather than a claim of that production bug.
+The source-extraction witness now compiles the actual inherited slab Destroy
+body, actual Close/UnregisterWithKernel and both KProcess lifecycle methods,
+while injecting allocator/Finalize/kernel registry counters. It proves exactly
+one unregister for Close and direct C++ destruction separately, including later
+fixture storage cleanup after a consumed registration.
+
+Local Linux checks passed: production KProcess syntax; three roster positives;
+the previous four mutants and two new precise unregister mutants (unconditional
+destructor unregister and omitted direct-destructor unregister). The roster suite
+now has six negatives. The ignored artifact verifier selects four or six from the
+exact committed runner, and requires the expanded source hashes. No ordinary
+Guest admission or roster-to-ProcessExecutionStop adoption was added: IsCurrent
+remains an instantaneous revision check, requiring continuously held creation,
+initialization/publication closures before any future cohort authorization.
+
+Post-upstream-merge run 39550694175 at 5956cbe934 completed successfully. Its artifact
+12325147067 has expected archive digest
+`81e09009acfa75ef769b0e751513c74e0a7c10806b5481474659e8301af28223`, but independent
+download/hash verification is still pending: `.diagnostics/ci-39550694175/` has a
+partial archive and no verification.json. Recovery tool session 14972 was lost;
+OS python/gh processes were still active (PIDs 25608/30584/27216 when checked).
+Inspect them/output before restarting `.diagnostics/recover_linux_run.py` to avoid
+a duplicate download. Do not describe this archive as independently verified yet.
+
 ## 2026-10-21: merge upstream PRs 404, 405 and 406
 
 Upstream main `5b543e71769bdd4c116c8b66a8974224d0c1e1e8` was merged into
