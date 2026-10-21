@@ -16,6 +16,7 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <chrono>
 #include <mutex>
 #include <regex>
 
@@ -393,8 +394,21 @@ std::unique_lock<std::mutex> EmulationSession::AcquireSessionLock() {
     return std::unique_lock{m_mutex};
 }
 
-const Core::PerfStatsResults& EmulationSession::PerfStats() {
-    m_perf_stats = m_system.GetAndResetPerfStats();
+Core::PerfStatsResults EmulationSession::PerfStats() {
+    // Reading the stats also resets them, and three overlays read them: two
+    // in EmulationFragment and the one on the second screen. Each was dividing
+    // the frames since the previous reader's reset by however many
+    // milliseconds had passed, so a steady 30 showed up as 0, 15, 20 or 80
+    // depending on who read last. Give every reader the same one-second window.
+    static std::mutex perf_mutex;
+    static std::chrono::steady_clock::time_point last_reset{};
+    std::scoped_lock lock{perf_mutex};
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_reset >= std::chrono::seconds{1}) {
+        m_perf_stats = m_system.GetAndResetPerfStats();
+        last_reset = now;
+    }
+    // A copy taken under the lock, so a reader never sees the next refresh half written.
     return m_perf_stats;
 }
 
@@ -1320,8 +1334,13 @@ jstring Java_org_citron_citron_1emu_NativeLibrary_getCpuBackend(JNIEnv* env, jcl
 }
 
 jstring Java_org_citron_citron_1emu_NativeLibrary_getGpuDriver(JNIEnv* env, jobject jobj) {
-    return Common::Android::ToJString(
-        env, EmulationSession::GetInstance().System().GPU().Renderer().GetDeviceVendor());
+    // The second screen asks for this as soon as the activity resumes, which is before the
+    // renderer exists.
+    if (EmulationSession::GetInstance().IsRunning()) {
+        return Common::Android::ToJString(
+            env, EmulationSession::GetInstance().System().GPU().Renderer().GetDeviceVendor());
+    }
+    return Common::Android::ToJString(env, "");
 }
 
 void Java_org_citron_citron_1emu_NativeLibrary_applySettings(JNIEnv* env, jobject jobj) {

@@ -47,7 +47,7 @@ public:
     void RunEmulation();
     void ShutdownEmulation();
 
-    const Core::PerfStatsResults& PerfStats();
+    Core::PerfStatsResults PerfStats();
     void ConfigureFilesystemProvider(const std::string& filepath);
     void InitializeSystem(bool reload);
     void RefreshContentSystem();
