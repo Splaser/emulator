@@ -90,7 +90,15 @@ int main() {
     {
         DeviceFixture dev;Tegra::MemoryManager memory{dev};
         dev.Map(D,0);dev.Map(D+P,3*P);
+        memory.page_table.allow=false;
+        assert(memory.Map(G,D,2*P)==0);
+        assert(memory.MapGeneration()==2 && memory.page_table.reservations==1);
+        assert(!memory.GpuToCpuAddress(G) && !memory.GpuToCpuAddress(G+P));
+        assert(memory.page_table[G>>12]==0 && memory.page_table[(G+P)>>12]==0);
+        assert(!memory.PinPhysicalRanges(G,2*P));
+        memory.page_table.allow=true;
         memory.Map(G,D,2*P);
+        assert(memory.MapGeneration()==4 && memory.page_table.reservations==2);
         retained=memory.PinPhysicalRanges(G+10,P+10);
         assert(retained && retained->Size()==P+10 && retained->Segments().size()==2);
         assert(retained->Segments()[0].logical_offset==0 && retained->Segments()[0].storage.PhysicalOffset()==10);

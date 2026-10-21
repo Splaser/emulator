@@ -1,5 +1,24 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-21: office continuation recovered the final regression failure
+
+Run [39518766603](https://github.com/Splaser/emulator/actions/runs/39518766603)
+at `89f034d20b9b3e956bb5570ec198ddc9a9fd64f1` completed with a failure in
+`run_gpu_plan_tests.py`: its shared resolver fixture still modeled the small-page
+table as a vector without the production `ReserveRange` API. The complete build,
+all seven CTests, synchronization/mutation controls, repeated Vulkan witnesses,
+F2/F3 negative controls and real Linux HostMemory checks passed before this failure.
+This is partial evidence, not full-workflow acceptance.
+
+The shared resolver fixture now models reservation success/refusal; both the
+resolver and real-HostMemory GPU-plan tests check multi-page refusal before any
+PTE publication, even generation restoration and successful retry. GPU plans
+also refuse to pin the unpublished range. The production reservation guard stays
+unchanged. Local Linux GPU-plan positives and existing paired-remap mutation,
+resolver and physical-shadow checks pass. The remaining regression batch and
+fresh exact-source remote Linux validation must complete before broader M4 work.
+No Android validation or ordinary guest admission is enabled.
+
 ## 2026-10-21 08:20 Asia/Taipei: paused for office-machine continuation
 
 User requested a progress marker and no further development. This is a

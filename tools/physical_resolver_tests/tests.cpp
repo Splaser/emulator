@@ -74,8 +74,20 @@ public:
     std::mutex& page_table_guard{mapping_lifetime.Get()->mutex};
     std::atomic<u64>& map_generation{mapping_lifetime.Get()->generation};
     std::mutex mapping_update_guard, guard;
-    std::vector<u32> page_table = std::vector<u32>(1ULL << 16),
-                     big_page_table_dev = std::vector<u32>(1ULL << 12);
+    // Allocation is modeled here; the extracted PageTableOp still decides
+    // whether reservation succeeded before publishing any mapping entries.
+    struct {
+        std::vector<u32> entries = std::vector<u32>(1ULL << 16);
+        bool allow = true;
+        unsigned reservations = 0;
+        bool ReserveRange(u64, size_t) {
+            ++reservations;
+            return allow;
+        }
+        u32& operator[](size_t index) { return entries[index]; }
+        const u32& operator[](size_t index) const { return entries[index]; }
+    } page_table;
+    std::vector<u32> big_page_table_dev = std::vector<u32>(1ULL << 12);
     std::vector<u64> entries = std::vector<u64>((1ULL << 16) / 32),
                      big_entries = std::vector<u64>((1ULL << 12) / 32),
                      big_page_continuous = std::vector<u64>((1ULL << 12) / 64);
@@ -149,7 +161,16 @@ int main() {
     DeviceFixture dev;
     MemoryManager gpu{dev};
     dev.Map(D, 0x5000, 3 * P);
+    gpu.page_table.allow = false;
+    assert(gpu.Map(G, D, 3 * P) == 0);
+    assert(gpu.MapGeneration() == 2 && gpu.page_table.reservations == 1);
+    for (u64 offset = 0; offset < 3 * P; offset += P) {
+        assert(!gpu.GpuToCpuAddress(G + offset));
+        assert(gpu.page_table[(G + offset) >> 12] == 0);
+    }
+    gpu.page_table.allow = true;
     gpu.Map(G, D, 3 * P);
+    assert(gpu.MapGeneration() == 4 && gpu.page_table.reservations == 2);
     auto one = gpu.ResolvePhysicalRanges(G, P);
     require(one);
     assert(one.segments.size() == 1 && one.segments[0].physical->physical_offset == 0x5000);
