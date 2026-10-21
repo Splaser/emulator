@@ -4,6 +4,7 @@
 
 #include <random>
 #include <stdexcept>
+#include <utility>
 #include "common/scope_exit.h"
 #include "common/settings.h"
 #include "core/arm/dynarmic/arm_dynarmic.h"
@@ -1231,10 +1232,30 @@ Result KProcess::GetThreadList(s32* out_num_threads, KProcessAddress out_thread_
 void KProcess::Switch(KProcess* cur_process, KProcess* next_process) {}
 
 KProcess::KProcess(KernelCore& kernel)
-    : KAutoObjectWithSlabHeapAndContainer(kernel), m_page_table{kernel}, m_state_lock{kernel},
+    : KAutoObjectWithSlabHeapAndContainer(kernel), m_owner_registration{kernel},
+      m_page_table{kernel}, m_state_lock{kernel},
       m_list_lock{kernel}, m_cond_var{kernel.System()}, m_address_arbiter{kernel.System()},
-      m_handle_table{kernel}, m_exclusive_monitor{}, m_memory{kernel.System()} {}
-KProcess::~KProcess() = default;
+      m_handle_table{kernel}, m_exclusive_monitor{}, m_memory{kernel.System()} {
+    m_owner_registration.id = m_kernel.RegisterProcessOwner(this);
+}
+KProcess::OwnerRegistration::~OwnerRegistration() {
+    if (id) kernel.CompleteProcessOwnerRetirement(id);
+}
+KProcess::~KProcess() {
+    if (m_owner_registration.id) m_kernel.BeginProcessOwnerRetirement(m_owner_registration.id);
+    m_kernel.UnregisterKernelObject(this);
+}
+
+void KProcess::Destroy() {
+    auto& kernel = m_kernel;
+    const auto registration = std::exchange(m_owner_registration.id, 0);
+    kernel.BeginProcessOwnerRetirement(registration);
+    // Finalize can throw. Keep its retiring record on failure, without claiming
+    // recovery or allowing a future snapshot to omit those retained resources.
+    KAutoObjectWithSlabHeapAndContainer<KProcess, KWorkerTask>::Destroy();
+    // Do not touch this after Free. Another object may already reuse its address.
+    kernel.CompleteProcessOwnerRetirement(registration);
+}
 
 Result KProcess::LoadFromMetadata(const FileSys::ProgramMetadata& metadata, std::size_t code_size,
                                   KProcessAddress aslr_space_start, bool is_hbl) {

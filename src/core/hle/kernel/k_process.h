@@ -70,6 +70,14 @@ private:
     using TLPIterator = TLPTree::iterator;
 
 private:
+    struct OwnerRegistration {
+        KernelCore& kernel;
+        u64 id{};
+        ~OwnerRegistration();
+    };
+    // First member: normal C++ destruction completes retirement only AFTER
+    // PageTable/Memory and all other members have finished destruction.
+    OwnerRegistration m_owner_registration;
     KProcessPageTable m_page_table;
     std::atomic<size_t> m_used_kernel_memory_size{};
     TLPTree m_fully_used_tlp_tree{};
@@ -157,6 +165,7 @@ private:
 public:
     explicit KProcess(KernelCore& kernel);
     ~KProcess() override;
+    void Destroy() override;
 
     Result Initialize(const Svc::CreateProcessParameter& params, KResourceLimit* res_limit,
                       bool is_real);

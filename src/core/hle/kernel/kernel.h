@@ -18,6 +18,7 @@
 #include "core/hle/kernel/k_typed_address.h"
 #include "core/hle/kernel/svc_common.h"
 #include "core/hle/kernel/guest_execution_drain.h"
+#include "core/hle/kernel/process_owner_roster.h"
 
 namespace Core {
 class ExclusiveMonitor;
@@ -273,6 +274,10 @@ public:
     [[nodiscard]] std::optional<Common::ProducerDrain::Closure>
     TryCloseGuestProcessInitialization(u32 poll_budget = 64);
 
+    // Retention only; callers must separately close/join initialization, ordinary
+    // writers, services and publication. A current snapshot grants no admission.
+    [[nodiscard]] std::optional<ProcessOwnerRoster::Snapshot> TryRetainProcessOwners() const;
+
     /// Exceptional exit application process.
     void ExceptionalExitApplication();
 
@@ -312,6 +317,10 @@ public:
 private:
     friend class KProcess;
     friend class KThread;
+
+    u64 RegisterProcessOwner(KProcess* process);
+    void BeginProcessOwnerRetirement(u64 id);
+    void CompleteProcessOwnerRetirement(u64 id);
 
     [[nodiscard]] std::optional<Common::ProducerDrain::Entry>
     TryEnterGuestProcessInitialization();

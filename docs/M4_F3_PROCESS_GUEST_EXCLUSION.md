@@ -178,7 +178,11 @@ and the real epoch fails at the precise premature-storage-release witness.
 The stop actual-body fixture separately checks failed capture before closure,
 old allocation retention after replacement and storage surviving process Close.
 Production/native syntax and the existing full HostMemory mapping-freeze controls
-pass locally. New-source native runtime/full-workflow acceptance is pending.
+pass locally. The later combined source a09bf27bb4 passed Linux run 39540116589,
+including this storage owner and initialization closure. Its independently
+verified artifact 12320539901 contains 180 source hash entries, 103 unique files,
+16 manifests and all eight CTests, with archive SHA256
+`6267209c50becfca1166b8f15b3025fca0e7386157ed79f0bb61e45a3f3fb5a7`.
 
 ## Guest process initialization closure follow-up
 
@@ -207,8 +211,8 @@ fail specifically at the early halt request. The native checked/unchecked stop
 witnesses now call all three real-process Initialize overloads while closed and
 require ResultBusy, no initialized publication and unchanged resource-limit
 references. Checked witnesses also create and tear down a real mapped process
-after known cancellation. Linux native runtime acceptance for this follow-up is
-pending.
+after known cancellation. Linux run 39540116589 at a09bf27bb4 passed the full
+workflow; the exact-source artifact and eight CTest markers were independently verified.
 
 This closes initial PageTable/TLS construction only. Kernel service-process
 creation (is_real=false), later metadata/interface/module setup, publication of
@@ -217,6 +221,49 @@ contexts, service callbacks and teardown remain independent obligations. In
 particular, initialization drainage supplies neither an exhaustive retained owner
 roster nor proof that all users of previously published backing have stopped.
 All GuestBackingAdmission results remain Unknown.
+
+## Lifecycle inventory prerequisite (implemented, not admission)
+
+KernelCore now has a separate ProcessOwnerRoster. KProcess registers after its
+constructor-owned Memory is ready and before any caller can initialize/publish
+its initial PageTable. This includes kernel service processes and initialized
+processes that never enter the OS wrapper list. Normal C++ destruction removes
+the exact registration only after all PageTable/Memory/member destruction and
+unregisters the object's kernel bookkeeping; slab
+Destroy marks it retiring before inherited Finalize/Free. If Finalize throws,
+the retiring record remains and future captures refuse without dereferencing it.
+Completion uses a monotonic registration ID rather than an address, because
+another process may reuse the slab slot before the old Destroy returns.
+
+TryRetainProcessOwners captures actual KScopedAutoObject references using a new
+checked TryOpen: a constructor with reference count zero or an owner whose final
+Close already won cannot be adopted/resurrected. Snapshot capture/validation use
+one mutex try-lock. Partial pins release after that lock, including when their
+release invokes finalization. Snapshot moves transfer pins. Its revision becomes
+stale on registration/retirement; stale validation does not release those pins.
+Counter overflow poisons validation instead of permitting identity/revision reuse.
+Cold reference opening/allocation is not a bounded stop or signal-handler API.
+
+The standalone Linux witness compiles the actual roster, scoped reference type,
+KAutoObject Open/Close and extracted KProcess Destroy/destructor, with injected
+slab/Finalize collaborators. Three repeats cover zero refs, real final-reference
+retention, partial capture racing the caller's last Close, reentrant cleanup,
+Finalize failure, lock contention, stale/moved snapshots and address reuse.
+Four precise mutants omit pinning, ignore retiring owners, omit registration
+revision and erase by reused address. Native checked/unchecked execution witnesses
+also retain an actual unpublished KProcess/PageTable/Memory through termination
+and final release, reject a zero-ref constructor, and reacquire the roster after
+real finalization. Full native runtime acceptance for this component is pending.
+
+The roster itself retains neither arbitrary Memory contexts nor GPU/device
+resources. It does not freeze PageTables, close raw pointer loans, stop service
+creation/callbacks or join a process whose failed initialization left effects.
+ProcessExecutionStop does not yet adopt its snapshot: integrating a cohort needs
+continuous initialization/publication closure and a defined response to new
+service owners, plus ordinary writes and teardown exclusion. An IsCurrent check
+alone cannot authorize an asynchronous operation; creation could follow it.
+Keep the captured cohort owned through all future drains/Unknown isolation rather
+than returning raw pointers or enumerating GetProcessList under a long-held lock.
 
 ## Next gates (still Open)
 

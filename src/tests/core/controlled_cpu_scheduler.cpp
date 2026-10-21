@@ -172,6 +172,39 @@ void ProcessExecutionStopWitness(bool fast_link, bool cross_process = false) {
     if (cross_process) other_owner = std::make_unique<Process>(system);
     auto* requester = owner.process;
     auto* process = other_owner ? other_owner->process : requester;
+    { // Real lifecycle census includes KProcesses absent from the OS wrapper list.
+        auto& kernel = system.Kernel();
+        const auto caller_refs = requester->GetReferenceCount();
+        Process retiring{system};
+        auto* retained = retiring.process;
+        auto snapshot = kernel.TryRetainProcessOwners();
+        REQUIRE(snapshot.has_value());
+        REQUIRE(snapshot->IsCurrent());
+        REQUIRE(snapshot->Retains(requester));
+        REQUIRE(snapshot->Retains(process));
+        REQUIRE(snapshot->Retains(retained));
+        REQUIRE(requester->GetReferenceCount() == caller_refs + 1);
+        auto published = kernel.GetProcessList();
+        REQUIRE(std::ranges::none_of(published, [retained](const auto& entry) {
+            return entry.GetPointerUnsafe() == retained;
+        }));
+        {
+            Kernel::KProcess constructing{kernel};
+            REQUIRE_FALSE(snapshot->IsCurrent());
+            REQUIRE_FALSE(kernel.TryRetainProcessOwners().has_value()); // Ref count is still zero.
+        }
+        retiring.Close(); // The snapshot keeps the real PageTable/Memory alive.
+        REQUIRE(retained->GetReferenceCount() == 1);
+        REQUIRE(snapshot->Retains(retained));
+        snapshot.reset(); // Last Close finalizes and frees outside the roster lock.
+        REQUIRE(requester->GetReferenceCount() == caller_refs);
+        auto after = kernel.TryRetainProcessOwners();
+        REQUIRE(after.has_value());
+        REQUIRE(after->IsCurrent());
+        REQUIRE_FALSE(after->Retains(retained));
+        std::cout << "PASS native process owner roster retains unpublished KProcess/PageTable/Memory, "
+                     "rejects zero-ref construction and releases final owners outside its lock\n";
+    }
     process->InitializeInterfaces();
     auto& memory = process->GetMemory();
     const auto heap = other_owner ? other_owner->heap : owner.heap;

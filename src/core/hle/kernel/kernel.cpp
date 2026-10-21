@@ -806,6 +806,7 @@ struct KernelCore::Impl {
 
     std::unique_ptr<Common::ProducerDrain> guest_process_initialization =
         std::make_unique<Common::ProducerDrain>();
+    ProcessOwnerRoster process_owners;
 
     // OS wrapper publication list, not an exhaustive KProcess/backing owner census.
     std::mutex process_list_lock;
@@ -1306,6 +1307,19 @@ std::optional<Common::ProducerDrain::Entry> KernelCore::TryEnterGuestProcessInit
 std::optional<Common::ProducerDrain::Closure>
 KernelCore::TryCloseGuestProcessInitialization(u32 poll_budget) {
     return impl->guest_process_initialization->TryClose(poll_budget);
+}
+
+u64 KernelCore::RegisterProcessOwner(KProcess* process) {
+    return impl->process_owners.Register(process);
+}
+void KernelCore::BeginProcessOwnerRetirement(u64 id) {
+    impl->process_owners.BeginRetirement(id);
+}
+void KernelCore::CompleteProcessOwnerRetirement(u64 id) {
+    impl->process_owners.CompleteRetirement(id);
+}
+std::optional<ProcessOwnerRoster::Snapshot> KernelCore::TryRetainProcessOwners() const {
+    return impl->process_owners.TryCapture();
 }
 
 void KernelCore::ShutdownCores() {
