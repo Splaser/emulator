@@ -223,5 +223,5 @@ reservation_guard = """        if (!page_table.ReserveRange(gpu_addr, size)) {
             return 0;
         }"""
 assert body.count(reservation_guard) == 1
-run('remap-reservation-mutant', head + body.replace(reservation_guard, '') + tail,
+run('remap-reservation-mutant', head + body.replace(reservation_guard, '        (void)page_table.ReserveRange(gpu_addr, size);') + tail,
     'mm.Map(192,3000,8,PTEKind::Pitch,false)==0')
