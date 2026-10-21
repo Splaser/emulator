@@ -1,5 +1,67 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-21: phase-one sustained cohort integration (not a separate milestone)
+
+The user consolidated remaining M4 work into THREE phases: (1) retained process
+cohort plus sustained creation/initialization/publication closure and actual
+execution drainage; (2) every independent CPU/native/service/raw-alias/GPU
+producer closed and joined; (3) actual ordinary Guest-backed Vulkan admission,
+checked completion and safe release/durable Unknown retirement. Do not count
+individual lifecycle fixes as new milestones. All three phases remain unfinished.
+
+Implementation source: `f9e39ecaa4a1f042b02fcb9ad6b9de3b275d6996`.
+Exact-source Linux validation:
+[run 39562678761](https://github.com/Splaser/emulator/actions/runs/39562678761),
+in progress at the early mapping verification step, no failures when checked.
+Android is excluded. This workflow now has NINE CTests, including the new native
+process-cohort case; do not duplicate dispatch. The ignored artifact verifier
+detects the ninth test/new cohort manifest and requires its four precise mutants.
+
+TryStopProcessCohort is a new prerequisite API; the old backend-only API remains.
+The new API owns an atomic-with-Register creation closure, all initialization
+(including is_real=false service setup) and a shared cold publication closure.
+It drains initialization/publication BEFORE closing CPU entry, captures actual
+roster references BEFORE issuing halt, then drives real ProcessExecutionStop.
+It continues to hold the gates, cohort and real backing through move/poll/Unknown.
+No snapshot IsCurrent observation is converted into permission without those
+continuously owned closures. No asynchronous GPU work can adopt this handle.
+
+Every ordinary Memory binds the shared cold publication domain at construction:
+context/map/unmap/protect/debug use BeginCold, reset/move use parent-only entry
+before joining local state. Run, metadata/module/interface setup, OS loading,
+process-list and application-process publication are also gated. Cold count
+contention yields/retries rather than spuriously failing normal publishers;
+that API is never used in a fault handler/backend entry/stop poll. Constructor
+refusal rolls back kernel bookkeeping and its popped slab slot. The OS wrapper
+propagates blocked load/run instead of reporting success. Requesters without a
+real Guest PageTable refuse. Existing owner teardown capabilities remain distinct.
+
+Local Linux: three cohort positives/four mutants (late capture, omitted publication
+drain, omitted creation gate, unrelated publication gate); concurrent cold-entry
+stress; move/stale cancel, zero refs, timeout/late exit and post-stop sealing.
+Existing stop positives/four mutants, roster positives/six mutants, full mapping
+wrapper controls, teardown, cross-call ownership and ProducerDrain regressions pass.
+Actual cohort/process/kernel/Memory/OS-loader production TUs and the expanded native
+test TU pass syntax. Logs: `.diagnostics/m4-cohort-{integration,stop,roster,mapping,
+teardown,ownership,primitive}-regression.log`, `m4-cohort-{native-,}syntax.log`.
+Native runtime is pending: its real checked Dynarmic loop also checks creation/
+slab rollback, cold publication/reset/move/interface/module/OS refusal and mapping
+after known cancellation. Keep the original unchecked-loop negative unchanged.
+
+IMPORTANT: phase one is NOT complete. Cache/fault-related RasterizerMarkRegionCached
+still uses the original independent Begin path; the fixture intentionally proves
+this bypass. No NCE fault wait/parking was added. Ordinary scalar/bulk/atomic writes,
+host callbacks, escaped pointers, unmanaged alias/HostMemory paths, GPU work and
+its cache/DAddr publication remain independent producers. Scheduler/teardown and
+partial-initialization owner protocols still need integration/audit. BackendsStopped
+is not Guest Exclusion. GuestBackingAdmission remains Unknown. There is no durable
+async Unknown GPU registry or successful ordinary Guest Vulkan admission yet.
+
+Previous cleanup run 39556788293 at 9c816d1c9f completed successfully (confirmed
+live this turn). Post-upstream source 5956cbe934/run 39550694175 also passed, but
+its separate artifact recovery still has no verification.json; do not call that
+archive independently verified. The known earlier a09bf27bb4 acceptance is below.
+
 ## 2026-10-21: clarify direct C++ versus Close unregister ownership
 
 Implementation source: `9c816d1c9f9230e485ba43fe2b88400e706ae2a0`.
