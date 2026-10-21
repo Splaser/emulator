@@ -1,5 +1,109 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-21 08:20 Asia/Taipei: paused for office-machine continuation
+
+User requested a progress marker and no further development. This is a
+**documentation-only pause**, not full acceptance. Continue on
+`origin/codex/issue-372-fixes` (Splaser/emulator; upstream PR #375).
+Latest code/test commit is **89f034d20b9b3e956bb5570ec198ddc9a9fd64f1**;
+the checkpoint commit adds only documentation. Personal main and the CI helper
+checkout remain separate; do not merge/promote this M4 work merely to resume.
+
+### First action on the next machine
+
+Inspect local modifications, remotes, worktrees and the PR head before syncing.
+Use the existing issue-372 checkout, then fetch and fast-forward only if safe.
+Read this section before starting new F2/F3 work.
+
+```powershell
+git status --short --branch
+git remote -v
+git worktree list
+git fetch origin
+git pull --ff-only origin codex/issue-372-fixes
+gh run view 39518766603 --repo Splaser/emulator
+gh run view 39518766603 --repo Splaser/emulator --log-failed
+```
+
+Run the pull command only while already on the intended branch. Recover the
+existing run before dispatching any duplicate native validation:
+[Linux run 39518766603](https://github.com/Splaser/emulator/actions/runs/39518766603)
+is testing exact source **89f034d20b9b3e956bb5570ec198ddc9a9fd64f1**.
+At pause: production CLI/shader/tests build and all seven CTest processes passed;
+`Validate unsupported synchronization evidence and mutation controls` is still
+running. Later repeated native witnesses, HostMemory and the final regression
+batch have **not yet been accepted on this source**. Android is intentionally
+skipped. Leave this run running when changing machines.
+
+### Changes since the previous checkpoint
+
+- `ac3fa60a68`, `883e7f904b`, `10e58d6545`: restored pinned Dynarmic include
+  compatibility and tuple/pair default hashing without modifying its sources or
+  pin. Descriptor/std::hash and explicit caller hashers remain intact.
+- `b10519eea5`: selectively restored stable syncpoint waiter handles after the
+  upstream revert; the retained cancellation regression now passes.
+- `51266b64ef`: checked TBNZ native stop witness plus the original unchecked
+  fast-link continued-write refusal witness in a separate OS process. This does
+  not repair arbitrary unchecked-loop stop or enable guest admission.
+- `f14d696718`: free-area fixture extracts actual ASSERT as well as R_ASSERT;
+  validates report-and-continue behavior and failed-query guard sensitivity.
+- `1acf6cbf9b`, corrected by `89f034d20b`: remap fixture models the existing
+  ReserveRange API, refusal without PTE publication and successful retry. Its
+  negative control keeps the reserve call and ignores only its result so it
+  fails at the intended refusal assertion, not an earlier call-count check.
+
+Today's changes after `51266b64ef` are tests/documentation only; no production
+source, dependency pin, optimization or scheduler behavior changed.
+Windows fixture positives and both new negative controls pass. The 24-case
+candidate passed three repeats with actual ThreadManager. ThreadManager,
+scheduler cancellation, presentation, fencing and completion lifecycle fixtures
+passed ten repeats. A broader Windows sweep was not a full pass: Boost/Vulkan/fmt
+headers are missing here and dependent fixtures then refuse stale prerequisites.
+The Linux workflow is the remaining acceptance boundary; do not label those
+local dependency failures as successful Windows validation.
+
+### Evidence already recovered, and what remains
+
+Run `39432258674` at **51266b64efd77033d9bd1abac4d8c3c270c1e544** compiled all
+requested production targets and passed all seven CTests (119 ordinary cases),
+synchronization/mutation controls, repeated native witnesses and real Linux
+HostMemory/backing import checks. It failed only when the last regression batch
+reached the stale free-area ASSERT fixture; the remap fixture drift was then
+found locally. Runs `39518428253` and `39518727858` were cancelled as superseded;
+use `39518766603` for current-source acceptance.
+
+The old run's artifact **12272700625** was downloaded and independently checked:
+ZIP digest **sha256:eb4e23135035065af3edde8c6805e0ff7d522df57ae23bb2ff353bc9aef2d395**;
+109 source hash entries / 78 unique source files / 12 manifests matched its exact
+Git tree. All seven CTest results and five process-stop positive/mutant logs were
+present. This is partial-run evidence, not a successful full workflow.
+
+On successful completion of the current run, download its artifact, verify the
+archive digest against the GitHub artifact API, source.txt against the exact
+run SHA, the unchanged Dynarmic gitlink, every extraction manifest source hash,
+all seven CTest markers and the process-stop positive/negative logs. Also inspect
+the final regression log for both new fixture controls and retained F2/F3 defect
+witnesses. Record artifact ID/digest and actual hash counts, then update this
+handoff and M4_F3_PROCESS_GUEST_EXCLUSION.md with qualified acceptance. Do not
+reuse the old artifact's counts or digest for the new run. If it fails, inspect
+the first actual diagnostic before changing code or dispatching another run.
+
+Local downloaded ZIPs, generated binaries, logs and verifier under `.diagnostics/`
+are ignored and are **not pushed**; use the remote workflow logs/artifacts on the
+next machine. The tracked handoff contains all identifiers needed to recover them.
+
+### Scope still blocked
+
+F2/F3 remain Open. GuestBackingAdmission remains Unknown. The checked-loop native
+stop success does not close the unchecked LinkBlockFast counterexample, NCE,
+independent service/raw-pointer writers, mapping/export aliases or GPU producers.
+The original unchecked loop continues stores after budget exhaustion, refuses
+cancel/re-entry and retains owners until OS termination via the isolated test
+process; no successful in-process join/cleanup is claimed. HostMemory remains a
+high-risk module and lazy VMA merging remains disabled pending mapping-use and
+target evidence. Do not enable ordinary guest admission or broaden producer
+routing from these controlled results.
+
 ## 2026-10-21: final regression fixture recovery
 
 Linux run `39432258674` at `51266b64ef` compiled all requested production

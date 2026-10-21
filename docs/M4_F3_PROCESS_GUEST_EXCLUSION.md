@@ -85,8 +85,12 @@ and retained owners until OS termination. A checked TBNZ loop separately tests
 successful actual Dynarmic/KProcess/KThread/PhysicalCore exit and stable backing.
 The counter stays odd so that loop cannot exit naturally. No global optimization
 change or forced in-process cleanup disguises the original counterexample.
-Both new results are pending native validation. Neither closes services/GPU or
-proves a complete alias census; the harness drives the real backend on a dedicated
+Both native results passed in run 39432258674 at 51266b64ef, with all seven
+CTest logs and exact-source artifact hashes independently recovered. That run
+later failed a stale extraction fixture, so it is not full-workflow acceptance.
+Replacement run 39518766603 at 89f034d20b passed build/CTest and is still running
+at the 2026-10-21 office handoff; recover its final regressions/artifact first.
+Neither result closes services/GPU or proves a complete alias census; the harness drives the real backend on a dedicated
 host thread, not as an ARM application dispatched by the scheduler.
 
 ## Next gates (still Open)
