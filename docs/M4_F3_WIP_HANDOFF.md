@@ -38,12 +38,21 @@ download live under ignored `.diagnostics/ci-39518766603/` and
 This verified partial evidence still does not make the failed workflow a pass.
 
 The local final-regression sweep completed all 33 commands: 28 passed directly,
-and five dependent commands exposed the assertion-stub drift. Four affected
-commands passed after repair, along with the repeated first-registration controls.
-The repaired registration pipeline's main case passed ten repeats; its remaining
-mutation/observer controls are still running locally at this checkpoint. A fresh
-Linux-only workflow is dispatched for the committed fixture repairs. Recover its
-result before claiming complete acceptance or extending guest admission.
+and all five affected commands passed after the assertion-stub repairs. The
+first-registration controls and repaired registration pipeline passed ten positive
+repeats and all their required negative controls. The final observer, Unknown
+retention and physical-coverage controls also passed. Local logs are retained in
+ignored `.diagnostics/resume-linux-regressions/` and
+`.diagnostics/resume-*-fixed.log`; the initial sweep's five failures remain in its
+original results.json, with repair reruns recorded separately.
+
+Current remote acceptance attempt:
+[Linux run 39528346917](https://github.com/Splaser/emulator/actions/runs/39528346917),
+exact code/test source `9fdec2afa12775caf402c1dd7b59d41bb3cc403b` (fixture fixes
+`c160ad1fc9` and `9fdec2afa1`). It is still in progress; Android is skipped.
+Recover that run and independently verify its exact-source artifact before
+claiming complete acceptance or extending M4. The local sweep is standalone
+fixture evidence, not another native Vulkan run or ordinary guest admission.
 
 ## 2026-10-21 08:20 Asia/Taipei: paused for office-machine continuation
 
