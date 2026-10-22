@@ -33,6 +33,8 @@ direct_cpu=gpu_source.index('    bool OnCPUWrite(DAddr addr, u64 size) {')
 direct_cpu=gpu_source[direct_cpu:gpu_source.index('\n    }',direct_cpu)+len('\n    }')]
 direct_read=gpu_source.index('    VideoCore::RasterizerDownloadArea OnCPURead(DAddr addr, u64 size) {')
 direct_read=gpu_source[direct_read:gpu_source.index('\n    }',direct_read)+len('\n    }')]
+direct_flush=gpu_source.index('    void FlushCommands() {')
+direct_flush=gpu_source[direct_flush:gpu_source.index('\n    }',direct_flush)+len('\n    }')]
 body = production[production.index('namespace VideoCommon::GPUThread {'):]
 # Rendezvous signals only: the copied production wait and cancellation still run.
 assert body.count('state.cv.wait(lk);') == 1
@@ -125,10 +127,12 @@ struct RasterizerInterface {
     std::atomic<unsigned> invalidations{};
     std::function<void()> invalidate;
     std::function<bool()> cpu_write;
+    std::function<RasterizerDownloadArea(DAddr,u64)> query;
     void FlushRegion(DAddr,u64) {}
     void OnCacheInvalidation(DAddr,u64) {++invalidations;if(invalidate)invalidate();}
     bool OnCPUWrite(DAddr,u64) {++invalidations;return cpu_write?cpu_write():false;}
-    RasterizerDownloadArea GetFlushArea(DAddr addr,u64 size) {++invalidations;return {addr,addr+size,true};}
+    RasterizerDownloadArea GetFlushArea(DAddr addr,u64 size) {++invalidations;return query?query(addr,size):RasterizerDownloadArea{addr,addr+size,true};}
+    void FlushCommands() {++invalidations;}
 };
 struct RendererBase { RasterizerInterface rasterizer; RasterizerInterface* ReadRasterizer() { return &rasterizer; } };
 }
@@ -150,8 +154,8 @@ struct GpuFacade {
     VideoCore::RasterizerInterface* rasterizer;
     VideoCommon::GPUThread::ThreadManager& gpu_thread;
     template<class F> u64 RequestSyncOperation(F&&) {throw std::runtime_error("unexpected fixture sync request");}
-    void WaitForSyncOperation(u64) {throw std::runtime_error("unexpected fixture sync wait");}
-'''+direct_cpu+'\n'+direct_read+'\n};\n'
+    bool WaitForSyncOperation(u64) {throw std::runtime_error("unexpected fixture sync wait");}
+'''+direct_cpu+'\n'+direct_read+'\n'+direct_flush+'\n};\n'
 tail = r'''
 using VideoCommon::GPUThread::ThreadManager;
 void full_queue_stop() {
@@ -307,14 +311,64 @@ void entered_owner_invalidation_during_stop() {
     stopping.Wait();release.Set();Ready(active);Ready(stop);stop_requested=nullptr;
     Require(renderer.rasterizer.invalidations==2,"Stop rejected invalidation from an already entered GPU owner");
 }
-void unmanaged_cpu_read_negative() {
+void unmanaged_flush_commands_negative() {
     Core::System system;VideoCore::RendererBase renderer;
     Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler scheduler;
     ThreadManager manager{system,true};manager.StartThread(renderer,context,scheduler);manager.Stop();
     GpuFacade facade{&renderer.rasterizer,manager};
+    facade.FlushCommands();
+    Require(renderer.rasterizer.invalidations==1,
+            "unmanaged GPU FlushCommands bypass counterexample disappeared");
+}
+void direct_read_query_lifetime(bool async) {
+    Core::System system;VideoCore::RendererBase renderer;
+    Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler scheduler;
+    ThreadManager manager{system,async};GpuFacade facade{&renderer.rasterizer,manager};
     auto area=facade.OnCPURead(4096,4096);
-    Require(renderer.rasterizer.invalidations==1 && area.preemtive,
-            "unmanaged GPU OnCPURead bypass counterexample disappeared");
+    Require(renderer.rasterizer.invalidations==0,"pre-start CPU-read query touched rasterizer");
+    Require(area.start_address==0 && area.end_address==0 && !area.preemtive,
+            "closed CPU-read returned reusable interval");
+    manager.StartThread(renderer,context,scheduler);
+    renderer.rasterizer.query=[](DAddr,u64)->VideoCore::RasterizerDownloadArea {
+        throw std::runtime_error("query injection");
+    };
+    bool threw=false;try {facade.OnCPURead(4096,4096);}catch(const std::runtime_error&) {threw=true;}
+    Require(threw,"CPU-read query swallowed callback exception");
+    for(bool preemptive:{false,true}) {
+        renderer.rasterizer.query=[&](DAddr,u64) {return VideoCore::RasterizerDownloadArea{2048,12288,preemptive};};
+        auto query=manager.TryGetFlushArea(4096,4096);
+        Require(query && query->start_address==2048 && query->end_address==12288 && query->preemtive==preemptive,
+                "CPU-read query changed rasterizer geometry or preemptive result");
+    }
+    Event entered,release,joined;worker_joined=&joined;
+    renderer.rasterizer.query=[&](DAddr,u64) {
+        entered.Set();release.Wait();return VideoCore::RasterizerDownloadArea{2048,12288,true};
+    };
+    auto call=std::async(std::launch::async,[&] {return facade.OnCPURead(4096,4096);});entered.Wait();
+    auto stop=std::async(std::launch::async,[&] {manager.Stop();});joined.Wait();
+    const bool early=stop.wait_for(100ms)==std::future_status::ready;
+    release.Set();area=Ready(call);Ready(stop);worker_joined=nullptr;
+    Require(!early,"Stop failed to join direct CPU-read query");
+    Require(area.start_address==2048 && area.end_address==12288 && area.preemtive,
+            "entered CPU-read query result lost during Stop");
+    const auto before=renderer.rasterizer.invalidations.load();area=facade.OnCPURead(4096,4096);
+    Require(renderer.rasterizer.invalidations==before,"post-stop CPU-read query touched rasterizer");
+    Require(area.start_address==0 && area.end_address==0 && !area.preemtive,
+            "closed CPU-read returned reusable interval");
+}
+void direct_read_query_owner() {
+    Core::System system;VideoCore::RendererBase renderer;
+    Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler scheduler;
+    ThreadManager manager{system,true};GpuFacade facade{&renderer.rasterizer,manager};
+    manager.StartThread(renderer,context,scheduler);
+    Event entered,release,stopping;stop_requested=&stopping;VideoCore::RasterizerDownloadArea area{};
+    auto active=std::async(std::launch::async,[&] {manager.RunOnGpuThread([&] {
+        entered.Set();release.Wait();area=facade.OnCPURead(4096,4096);
+    });});
+    entered.Wait();auto stop=std::async(std::launch::async,[&] {manager.Stop();});
+    stopping.Wait();release.Set();Ready(active);Ready(stop);stop_requested=nullptr;
+    Require(area.start_address==4096 && area.end_address==8192 && area.preemtive,
+            "Stop rejected query from an already entered GPU owner");
 }
 void direct_cpu_write_lifetime(bool async) {
     Core::System system;VideoCore::RendererBase renderer;
@@ -395,7 +449,8 @@ int main() {
         direct_count_contention_and_exception();direct_join_after_capture_cancellation();delayed_direct_entry();
         entered_owner_invalidation_during_stop();
         direct_cpu_write_lifetime(true);direct_cpu_write_lifetime(false);direct_cpu_write_owner_and_exception();
-        unmanaged_cpu_read_negative();
+        direct_read_query_lifetime(true);direct_read_query_lifetime(false);direct_read_query_owner();
+        unmanaged_flush_commands_negative();
         std::cout<<"PASS actual ThreadManager: full-queue cancellation, active join, suspended retry, sync/async inline, pre/post-start rejection\n";
     } catch(const std::exception& e) { std::cerr<<"FAIL "<<e.what()<<"\n"; return 1; }
 }
@@ -418,7 +473,7 @@ manifest={
         'src/common/bounded_threadsafe_queue.h','tools/gpu_lifecycle_tests/run_thread_tests.py']},
     'production': ['ThreadManager class', 'RunThread and all ThreadManager definitions', 'MPSCQueue/SPSCQueue', 'stop-token wait'],
     'fixtures': ['renderer/engine/scheduler/platform/Core/System'],
-    'boundary': 'Terminal worker, direct invalidations and GPU OnCPUWrite only; actual OnCPURead bypass remains; no live GPU freeze or Vulkan completion',
+    'boundary': 'Terminal worker, direct invalidations, GPU OnCPUWrite and read query only; actual FlushCommands bypass remains; no live GPU freeze or Vulkan completion',
     'positive_repeats': args.repeat,
 }
 for i in range(args.repeat):
@@ -466,9 +521,26 @@ cpu_write_controls=[
 ]
 forward='return gpu_thread.OnCPUWrite(addr, size);'
 assert head.count(forward)==1
-for name,changed,override,expected in direct_controls+cpu_write_controls:
+query_guard=guard.replace('return;','return std::nullopt;')
+assert body.count(query_guard)==1
+query_controls=[
+    ('direct-query-bypasses-manager',body,None,'pre-start CPU-read query touched rasterizer'),
+    ('direct-query-released-early',body.replace(query_guard,'    {\n'+query_guard+'    }\n'),None,
+     'Stop failed to join direct CPU-read query'),
+    ('direct-query-closed-coverage',body.replace('if (!owner && !entry) return std::nullopt;',
+     'if (!owner && !entry) return VideoCore::RasterizerDownloadArea{addr,addr+size,true};'),None,
+     'closed CPU-read returned reusable interval'),
+    ('direct-query-rejects-owner',body.replace(query_guard,query_guard.replace('IsGpuThread()','false')),None,
+     'Stop rejected query from an already entered GPU owner'),
+]
+query_forward='const auto area = gpu_thread.TryGetFlushArea(addr, size);'
+assert head.count(query_forward)==1
+for name,changed,override,expected in direct_controls+cpu_write_controls+query_controls:
     control_head=(head.replace(forward,'return rasterizer->OnCPUWrite(addr, size);')
                   if name=='direct-cpu-write-bypasses-manager' else head)
+    if name=='direct-query-bypasses-manager':
+        control_head=control_head.replace(query_forward,
+            'const auto area = std::optional{rasterizer->GetFlushArea(addr, size)};')
     assert changed!=body or override is not None or control_head!=head
     control=out/(name+'.cpp');control.write_text(control_head+changed+tail)
     mutant=out/(name+('.exe' if os.name=='nt' else ''))
@@ -483,6 +555,7 @@ for name,changed,override,expected in direct_controls+cpu_write_controls:
     print('PASS terminal direct invalidation control: '+name,flush=True)
 manifest['direct_control_mutants']=[entry[0] for entry in direct_controls]
 manifest['cpu_write_control_mutants']=[entry[0] for entry in cpu_write_controls]
+manifest['read_query_control_mutants']=[entry[0] for entry in query_controls]
 if args.handoff_controls:
     admission = '++state.last_fence;\n    return true;'
     assert body.count(admission) == 1

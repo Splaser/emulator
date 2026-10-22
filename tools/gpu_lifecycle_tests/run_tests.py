@@ -70,6 +70,7 @@ head = r'''
 #include <iostream>
 #include <list>
 #include <memory>
+#include <optional>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -138,6 +139,8 @@ struct Syncpoints {
 struct Host { Syncpoints points; Syncpoints& GetSyncpointManager() { return points; } };
 struct Manager {
     Life* life=nullptr; std::jthread worker; std::function<void()> tick=[]{};
+    std::function<std::optional<VideoCore::RasterizerDownloadArea>(u64,u64)> query;
+    auto TryGetFlushArea(u64 addr,u64 size) { return query(addr,size); }
     void Start(Life& l) {
         life=&l; worker=std::jthread([&l] { l.entered.Set(); l.release.Wait(); l.exited=true; });
         l.entered.Wait();
@@ -166,7 +169,9 @@ struct Impl {
     std::unique_ptr<Scheduler> scheduler=std::make_unique<Scheduler>();
     std::deque<size_t> free_swap_counters,request_swap_counters;
     std::mutex request_swap_mutex;
-    explicit Impl(Host& h):host1x(h) {}
+    explicit Impl(Host& h):host1x(h) {
+        gpu_thread.query=[this](u64 addr,u64 size) {return rasterizer->GetFlushArea(addr,size);};
+    }
 '''
 
 tail = r'''
@@ -224,8 +229,9 @@ void cpu_read() {
     Event tick; gpu.gpu_thread.tick=[&]{tick.Set();};
     auto caller=std::async(std::launch::async,[&]{return gpu.OnCPURead(100,8);});
     tick.Wait(); gpu.NotifyShutdown(); auto area=Ready(caller); gpu.TickWork();
-    Require(area.start_address==100 && area.end_address==108 && raster.flushes==0,
-            "cancelled read retained borrowed output or executed a flush");
+    Require(area.start_address==0 && area.end_address==0 && !area.preemtive,
+            "cancelled CPU read advertised flushed coverage");
+    Require(raster.flushes==0,"cancelled read executed a flush");
 }
 void presentation() {
     Host host; auto gpu=std::make_unique<Impl>(host); auto renderer=gpu->renderer;
@@ -341,4 +347,21 @@ for case in cases:
             print(result.stdout+result.stderr, end=''); failed=True; break
     else:
         print(f'PASS {case} ({args.repeat} repetitions)')
+if not failed and not args.revision:
+    read_method=next(m for m in methods if ' OnCPURead(' in m)
+    checked_wait='''        if (!WaitForSyncOperation(fence)) {
+            // Do not cache coverage for a flush cancelled during shutdown.
+            return {};
+        }'''
+    assert read_method.count(checked_wait)==1
+    mutant_methods=[m.replace(checked_wait,'        WaitForSyncOperation(fence);') if m==read_method else m
+                    for m in methods]
+    control=out/'cancelled_read_coverage.cpp'
+    control.write_text(head+extra+'\n'.join(mutant_methods)+tail)
+    mutant=out/('cancelled_read_coverage.exe' if os.name=='nt' else 'cancelled_read_coverage')
+    subprocess.run(flags+[str(control),'-o',str(mutant)],check=True)
+    result=subprocess.run([str(mutant),'cpu_read'],capture_output=True,text=True,timeout=20)
+    log=result.stdout+result.stderr;(out/'cancelled-read-coverage.log').write_text(log)
+    assert result.returncode!=0 and 'FAIL cancelled CPU read advertised flushed coverage' in log,log
+    print('PASS cancelled CPU-read coverage mutation control')
 raise SystemExit(1 if failed else 0)

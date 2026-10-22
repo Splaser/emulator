@@ -268,6 +268,14 @@ bool ThreadManager::OnCPUWrite(DAddr addr, u64 size) {
     return rasterizer->OnCPUWrite(addr, size);
 }
 
+std::optional<VideoCore::RasterizerDownloadArea> ThreadManager::TryGetFlushArea(DAddr addr, u64 size) {
+    const bool owner = IsGpuThread();
+    auto entry = owner ? std::optional<Common::TerminalIngress::Entry>{}
+                       : direct_invalidations.TryEnter();
+    if (!owner && !entry) return std::nullopt;
+    return rasterizer->GetFlushArea(addr, size);
+}
+
 u64 ThreadManager::PushCommand(CommandData&& command_data, bool block) {
     if (!is_async) {
         // In synchronous GPU mode, block the caller until the command has executed

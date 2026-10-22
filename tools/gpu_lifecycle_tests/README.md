@@ -239,10 +239,19 @@ through the same counter; four additional controls catch the old facade bypass,
 early entry release, false dirty-collection success on closed entry, and refusal
 of an entered GPU-owner callback. Its true/false return and exception propagate
 unchanged while healthy. Closed entry returns false, which only skips collection
-and is not CPU-store authorization or quiescence. A successful actual-body
-preemptive GPU::OnCPURead/GetFlushArea bypass counterexample remains independent.
-This terminal guard covers neither all rasterizer ingress nor native device
-completion and is not live M4 admission.
+and is not CPU-store authorization or quiescence.
+
+GPU::OnCPURead now queries optional geometry through ThreadManager::TryGetFlushArea
+under that same terminal counter. Query entry ends before any queued readback
+wait. Four query mutation controls catch the old facade bypass, early entry
+release, closed-interval invention and entered-owner refusal. The facade returns
+an empty area on closed query or cancelled flush, preventing new cached coverage
+for unperformed work. The actual sync-request suite also rejects the old ignored
+WaitForSyncOperation result while preserving normal completed readback behavior.
+A successful actual-body GPU::FlushCommands bypass remains independent. This
+terminal guard covers neither all rasterizer ingress nor native device completion
+and is not live M4 admission. Existing cached geometry and underlying guest loads
+are outside this change.
 
 For isolated local validation, both run_thread_tests.py and run_tests.py accept
 `--output-dir <temporary-directory>`. Their normal CI output paths are unchanged.

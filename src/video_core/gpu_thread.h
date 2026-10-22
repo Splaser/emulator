@@ -17,6 +17,7 @@
 #include "common/polyfill_thread.h"
 #include "common/terminal_ingress.h"
 #include "video_core/framebuffer_config.h"
+#include "video_core/rasterizer_download_area.h"
 
 namespace Tegra {
 struct FramebufferConfig;
@@ -145,6 +146,10 @@ public:
     /// Notify caches before a CPU write. False after terminal closure means no
     /// dirty collection request, not successful cache work or permission to store.
     bool OnCPUWrite(DAddr addr, u64 size);
+
+    /// Query cache readback geometry while retaining terminal rasterizer lifetime.
+    /// Closed ingress returns no area, never a reusable flushed interval.
+    std::optional<VideoCore::RasterizerDownloadArea> TryGetFlushArea(DAddr addr, u64 size);
 
     /// Notify rasterizer that any caches of the specified region should be flushed and invalidated
     void FlushAndInvalidateRegion(DAddr addr, u64 size);

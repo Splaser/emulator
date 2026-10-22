@@ -1,5 +1,30 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: terminal readback query and cancelled coverage
+
+GPU::Impl::OnCPURead now gets optional geometry through
+ThreadManager::TryGetFlushArea under the same terminal cache-entry counter.
+External queries are joined through callback return/exception; entered GPU-owner
+queries may finish under worker join. The value leaves no entry held across the
+separate sync-request flush wait. Closed query returns no area, and unsuccessful
+WaitForSyncOperation also returns an empty area, so Memory cannot cache the
+requested interval as newly flushed coverage on shutdown cancellation.
+
+Windows actual-body ThreadManager and GPU lifecycle suites pass three repeats,
+with all original controls plus four query controls and one cancelled-read
+coverage mutation. Production gpu_thread.cpp Windows syntax passes. See
+[the retained Windows conclusion](M4_F3_CPU_READ_TERMINAL_VALIDATION.md).
+Temporary outputs are removed after verification per user request. No new remote
+workflow or Android build is dispatched for this local check.
+
+The former successful OnCPURead query bypass is now a precise mutation rejection.
+An actual-body FlushCommands bypass remains successful against a live fixture
+rasterizer after Stop. Existing cached geometry is not revoked and guest loads
+are not stopped by empty results. Other services/raw entry points, parked work
+and native GPU execution still need owned closure/completion/Unknown retention.
+All THREE M4 phases remain unfinished and ordinary GuestBackingAdmission stays
+Unknown. Keep main unchanged until M7's final zero-copy merge.
+
 ## 2026-10-22: terminal CPU-write cache callback ownership
 
 Linux-only run [39729352143](https://github.com/Splaser/emulator/actions/runs/39729352143)

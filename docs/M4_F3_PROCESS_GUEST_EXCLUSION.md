@@ -238,6 +238,42 @@ independent: not all rasterizer ingress is closed. See
 [Windows validation](M4_F3_CPU_WRITE_TERMINAL_VALIDATION.md) for the test boundary.
 None of the three M4 phases is completed by this terminal lifetime extension.
 
+### Follow-up: terminal readback geometry queries and cancelled coverage
+
+GPU::Impl::OnCPURead now asks ThreadManager::TryGetFlushArea for an optional
+geometry result. Query uses the same terminal entry counter, retaining the
+rasterizer through its synchronous result/exception. The value returned to the
+facade owns no Entry: a non-preemptive read must release this query guard before
+queuing or waiting for its separate flush. Worker join and sync-request shutdown
+still own flush execution and cancellation. Already executing GPU-owner queries
+may finish inline after external closure. Healthy geometry and the preemptive
+flag are preserved; closed query returns no area before touching the rasterizer.
+Facade lifetime remains externally owned, including work before/after the query;
+joining this callback alone does not join the entire OnCPURead caller.
+
+The facade returns a zero-initialized area on closed query or unsuccessful
+WaitForSyncOperation, rather than publishing a reusable requested interval for a
+cancelled flush. Memory::HandleRasterizerDownload caches only the returned
+geometry; an empty result cannot cover a later nonempty access. This is neither
+CPU-read cancellation nor checked device completion: the underlying load and
+other producers remain independently owned. Existing cached geometry is not
+revoked by this change.
+
+Actual-body fixtures cover sync/async query ownership, preserved geometry and
+preemptive results, exceptions, external callbacks surviving worker exit, entered
+GPU-owner queries after close, and closed facade calls. Four query mutations
+restore the facade bypass, release its entry early, invent closed coverage, or
+reject an entered owner. A separate actual sync-request mutation ignores failed
+flush completion and must fail the cancelled-read coverage assertion. Normal
+readback still waits for completed flush execution.
+
+The previous successful OnCPURead bypass is superseded by those rejection
+controls. A successful actual GPU::Impl::FlushCommands bypass against a live
+fixture rasterizer remains after Stop. Direct services/raw pointers, other
+rasterizer routes, suspended work and device submissions remain independent.
+No reversible owner stop, backing/alias freeze, or durable Unknown retirement
+authority is created. All THREE M4 phases remain unfinished.
+
 ## Evidence and limits
 
 The actual-body Linux fixture covers Run and Step, a halt request followed by a

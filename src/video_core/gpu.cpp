@@ -338,7 +338,13 @@ struct GPU::Impl {
     }
 
     VideoCore::RasterizerDownloadArea OnCPURead(DAddr addr, u64 size) {
-        auto raster_area = rasterizer->GetFlushArea(addr, size);
+        // Retain the direct cache query only. Its entry must not span a queued
+        // flush wait; worker join/cancellation owns that separate execution.
+        const auto area = gpu_thread.TryGetFlushArea(addr, size);
+        if (!area) {
+            return {};
+        }
+        auto raster_area = *area;
         if (raster_area.preemtive) {
             return raster_area;
         }
@@ -348,7 +354,10 @@ struct GPU::Impl {
                                     raster_area.end_address - raster_area.start_address);
         });
         gpu_thread.TickGPU();
-        WaitForSyncOperation(fence);
+        if (!WaitForSyncOperation(fence)) {
+            // Do not cache coverage for a flush cancelled during shutdown.
+            return {};
+        }
         return raster_area;
     }
 
