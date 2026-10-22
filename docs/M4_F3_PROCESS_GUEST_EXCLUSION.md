@@ -130,6 +130,43 @@ their own closure/join/freeze facts. It adds no GPU adoption, checked completion
 or durable backing/resource quarantine registry. Ordinary Guest admission remains
 Unknown, and all three M4 phases remain unfinished.
 
+## Cache publication owner routing and remaining ingress (phase one/two)
+
+DeviceMemoryManager::UpdatePagesCachedCount now advances its current ASID together
+with its Memory interface, after flushing pending spans to the previous interface.
+Previously the discriminator remained the first ASID: for a contiguous A-B-A
+device range, the last A span could be published into B's PageTable. The actual
+counter/Maxwell forwarding/cache publication bodies now have a real HostMemory/PTE
+regression for A-B-A, B-A-B, repeated B spans and a third owner, in both cache and
+uncache directions. Every coalesced callback is expanded and compared to its exact
+owner/address; unrelated PTEs must remain unchanged. Original ASID behavior,
+switch-before-flush and omitted owner-boundary flush are separate negative controls.
+Translation layout is injected; this proves routing, not KProcess lifetime pins.
+
+The remaining cache/fault route cannot safely be enrolled by changing Begin to
+BeginCold at the Memory wrapper. Actual callers have already changed state:
+
+| Producer/call site | State preceding Memory publication | Required boundary |
+| --- | --- | --- |
+| ShaderCache::Register | Entry lists, invalidation cache and shader storage updated while cache locks are held | Close producer before registry effects and drain entered work |
+| TextureCache::TrackImage/UntrackImage | Tracked flag changed; sparse segments may already have completed | Retain image/segments and account for partial publication |
+| Buffer cache word tracking | Page tracking calls the device cache counter | Close tracker ingress before bookkeeping effects |
+| DeviceMemoryManager::UpdatePagesCachedCount | Range lock held, page counts incremented/decremented, earlier spans possibly published | Exact owner retention plus transaction or pre-effect exclusion |
+| NCE access fault -> Memory::InvalidateNCE -> GPU::InvalidateRegion | Direct rasterizer invalidation, including paths outside GPU command enqueue | Actual NCE pause and direct rasterizer ingress close-and-join |
+
+ThreadManager::Synchronize only fences earlier queue dispatch. The owner loop can
+still retain suspended channels and pending CPU-write continuations after a barrier;
+it also does not prove Vulkan completion. InvalidateRegion and
+FlushAndInvalidateRegion invoke the rasterizer directly outside PushCommand's
+admission lock. Closing command enqueue alone therefore cannot freeze cache PTEs.
+
+Keep the successful cache-bypass counterexample in the cohort suite. Next work
+must close actual owner/direct-service ingress before its first bookkeeping effect,
+join entered work (including parked continuations), and hold native GPU resources
+through checked completion before publishing a cache/mapping freeze capability.
+No new fault-handler wait, broad throwing gate, queue-barrier admission certificate,
+or ordinary Guest admission is introduced by this routing correction.
+
 ## Evidence and limits
 
 The actual-body Linux fixture covers Run and Step, a halt request followed by a

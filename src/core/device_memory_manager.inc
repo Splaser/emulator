@@ -685,6 +685,7 @@ void DeviceMemoryManager<Traits>::UpdatePagesCachedCount(DAddr addr, size_t size
 
         if (asid.id != asid_2.id) [[unlikely]] {
             release_pending();
+            asid = asid_2;
             memory_device_inter = registered_processes[asid_2.id];
         }
 

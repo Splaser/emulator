@@ -114,6 +114,8 @@ jobs:
             -DCITRON_ROOM=OFF -DCITRON_TESTS=ON -DCITRON_CRASH_DUMPS=OFF
       - name: Verify controlled outer PTE and mapping publication closure
         run: python tools/physical_coherency_tests/run_mapping_publication_tests.py
+      - name: Verify cache publication targets across process ASID transitions
+        run: python tools/physical_coherency_tests/run_device_cache_owner_tests.py
       - name: Verify process unmap reference cleanup on refusal and uncertainty
         run: python tools/physical_coherency_tests/run_process_unmap_tests.py
       - name: Verify cross-call mapping ownership and finalization bookkeeping
@@ -293,6 +295,7 @@ jobs:
             .diagnostics/m4-controlled-owner/*
             .diagnostics/m4-cpu-preparation-owner/*
             .diagnostics/m4-mapping-publication/*
+            .diagnostics/m4-device-cache-owner/*
             .diagnostics/m4-process-unmap/*
             .diagnostics/m4-cross-call-audit/*
             .diagnostics/m4-process-teardown/*

@@ -1,11 +1,49 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: repair CI negative control and cache ASID owner routing
+
+The atomic-cancellation run
+[39713592657](https://github.com/Splaser/emulator/actions/runs/39713592657)
+FAILED at controlled arena verification. All early batch/stop/cohort/mapping/owner
+checks passed, but native production compilation and later validation were skipped.
+Do not report that run as a successful build. The closure-drop mutant stored zero
+into a word containing an active entry count. The next entry exit underflowed it,
+invented Grouped membership with no gate owner, and crashed (-11) before its intended
+assertion. Commit `aafe57079b` fixes the negative control by clearing only Closed/
+Unknown and preserving count/membership; the arena runner now requires the precise
+unfinished-closure ownership assertion. Full real HostMemory arena positives/eleven
+mutants and ProducerDrain regressions pass locally in
+`.diagnostics/m4-arena-drop{,-primitive}-regression.log`.
+
+Cache ingress audit found a real production owner-routing bug, not merely an
+unclosed route: UpdatePagesCachedCount changed memory_device_inter on an ASID
+transition but left the discriminator at the first ASID. A contiguous A-B-A range
+therefore routed its final A span to B. It now flushes to the previous owner, then
+advances both ASID and Memory. The new run_device_cache_owner_tests.py reuses the
+generated actual Memory mapping/cache bodies and links real HostMemory/PageTable,
+extracting the actual device counter body and Maxwell forwarding method. Injected
+translation/counter layout plus a recording-only callback annotation test A-B-A,
+B-A-B, A-B-B-A, A-B-C-A, cache and uncache, exact callback owner/address and untouched
+PTEs in other processes. Three positives/three precise mutants (old discriminator,
+switch-before-flush, missing boundary flush) pass locally:
+`.diagnostics/m4-device-cache-owner-regression.log`. The workflow runs this directly
+after mapping verification and uploads its extraction manifest/logs.
+
+This is routing evidence, not process lifetime retention or cache/fault closure.
+Actual cache producers mutate tracking/counters under cache/range locks BEFORE
+the Memory wrapper. NCE fault invalidation and direct ThreadManager rasterizer
+calls bypass command enqueue; Synchronize can leave suspended channels/CPU-write
+continuations and proves no Vulkan completion. Do not replace Begin with BeginCold
+here or claim the GPU drained from a queue barrier. Detailed producer/effect table
+is in M4_F3_PROCESS_GUEST_EXCLUSION.md. Ordinary Guest admission stays Unknown;
+all three M4 phases remain unfinished and the cache bypass negative remains intact.
+
 ## 2026-10-22: atomic no-effects release across managed domains (phase one)
 
 Implementation source: `e64b7f2b28e6672e7f20aeb65145f4c925084663`, pushed to
 `codex/issue-372-fixes`. Exact-source Linux-only validation
 [39713592657](https://github.com/Splaser/emulator/actions/runs/39713592657)
-is in progress; do not duplicate dispatch. Android is excluded. Independent
+failed at the controlled-arena negative control described above. Android was excluded. Independent
 artifact verification must require the new batch manifest/four mutants, cohort
 eight mutants, and stop five mutants, selected from the exact committed runners.
 The ignored artifact recovery helper has been updated for these source variants.
