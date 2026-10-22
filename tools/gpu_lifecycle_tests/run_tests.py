@@ -13,11 +13,13 @@ p.add_argument('--case', action='append')
 p.add_argument('--repeat', type=int, default=10)
 p.add_argument('--sanitize', choices=['address', 'thread'])
 p.add_argument('--revision', help='Extract an earlier git revision for a failing baseline control')
+p.add_argument('--output-dir', type=Path, help='Isolated temporary fixture/output directory')
 args = p.parse_args()
 if args.repeat < 1:
     p.error('--repeat must be positive')
 root = Path(__file__).resolve().parents[2]
-out = root / '.diagnostics/gpu-lifecycle' / ('windows' if os.name == 'nt' else 'linux')
+out = (args.output_dir.resolve() if args.output_dir else
+       root / '.diagnostics/gpu-lifecycle' / ('windows' if os.name == 'nt' else 'linux'))
 if args.revision:
     out = out / ('baseline-' + hashlib.sha256(args.revision.encode()).hexdigest()[:12])
 out.mkdir(parents=True, exist_ok=True)

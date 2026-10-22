@@ -127,8 +127,8 @@ public:
     void StartThread(VideoCore::RendererBase& renderer, Core::Frontend::GraphicsContext& context,
                      Tegra::Control::Scheduler& scheduler);
 
-    /// Owner-thread teardown: close queue/direct invalidation ingress, stop/join,
-    /// cancel queued captures, then join entered external invalidation callbacks.
+    /// Owner-thread teardown: close queue/direct cache ingress, stop/join,
+    /// cancel queued captures, then join entered external cache callbacks.
     /// The renderer, control scheduler and channels must remain alive until this returns.
     /// Caller/facade lifetime remains externally owned. This is not a live GPU freeze.
     void Stop();
@@ -141,6 +141,10 @@ public:
 
     /// Notify rasterizer that any caches of the specified region should be invalidated
     void InvalidateRegion(DAddr addr, u64 size);
+
+    /// Notify caches before a CPU write. False after terminal closure means no
+    /// dirty collection request, not successful cache work or permission to store.
+    bool OnCPUWrite(DAddr addr, u64 size);
 
     /// Notify rasterizer that any caches of the specified region should be flushed and invalidated
     void FlushAndInvalidateRegion(DAddr addr, u64 size);
@@ -164,7 +168,7 @@ private:
     const bool is_async;
     VideoCore::RasterizerInterface* rasterizer = nullptr;
 
-    // Outlives worker and entered direct invalidations. No GPU completion claim.
+    // Outlives worker and entered direct cache calls. No GPU completion claim.
     Common::TerminalIngress direct_invalidations;
 
     SynchState state;

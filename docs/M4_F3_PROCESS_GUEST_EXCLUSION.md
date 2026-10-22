@@ -212,6 +212,32 @@ GPU freeze, Guest admission, alias/backing pin or durable Unknown registry is ad
 This is one closed terminal ingress family within phase two, not a new milestone
 or completion of any of the three M4 phases.
 
+### Follow-up: terminal CPU-write cache callbacks
+
+GPU::Impl::OnCPUWrite now delegates to ThreadManager::OnCPUWrite, using the same
+terminal counter as both direct invalidation methods. An external entry lives
+through the rasterizer's result or exception. Stop's existing worker join, queued
+capture retirement and external join order therefore also covers these cache
+callbacks. The already executing GPU owner may finish inline after external close.
+No new wait, allocation or contention refusal is introduced on the calling path.
+
+The original true/false rasterizer return passes through unchanged. Closed entry
+returns false before touching rasterizer: in Memory::HandleRasterizerWrite this
+only skips dirty collection for that call. It neither stops nor grants permission
+to perform the CPU store. A cache callback may also leave asynchronous native work
+pending; its return is not checked completion or release authority for backing.
+
+Tests use the actual GPU forwarding body as well as actual ThreadManager code,
+covering pre-start/post-stop refusal, both results, sync/async modes, exception
+exit, external calls surviving worker exit, and entered GPU-owner work after
+close. Four precise mutation controls restore the old facade bypass, release the
+entry early, invent a true result on closure, or reject entered-owner work.
+The old successful OnCPUWrite bypass described above is superseded by that mutation
+control. A successful actual-body preemptive OnCPURead/GetFlushArea bypass remains
+independent: not all rasterizer ingress is closed. See
+[Windows validation](M4_F3_CPU_WRITE_TERMINAL_VALIDATION.md) for the test boundary.
+None of the three M4 phases is completed by this terminal lifetime extension.
+
 ## Evidence and limits
 
 The actual-body Linux fixture covers Run and Step, a halt request followed by a

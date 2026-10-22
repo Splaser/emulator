@@ -12,11 +12,13 @@ p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--repeat', type=int, default=10)
 p.add_argument('--sanitize', choices=['address', 'thread'])
 p.add_argument('--handoff-controls', action='store_true')
+p.add_argument('--output-dir', type=Path, help='Isolated temporary fixture/output directory')
 args = p.parse_args()
 if args.repeat < 1:
     p.error('--repeat must be positive')
 root = Path(__file__).resolve().parents[2]
-out = root / '.diagnostics/gpu-lifecycle' / ('windows' if os.name == 'nt' else 'linux')
+out = (args.output_dir.resolve() if args.output_dir else
+       root / '.diagnostics/gpu-lifecycle' / ('windows' if os.name == 'nt' else 'linux'))
 out.mkdir(parents=True, exist_ok=True)
 shim = out/'shims/video_core'
 shim.mkdir(parents=True, exist_ok=True)
@@ -29,6 +31,8 @@ production = (root/'src/video_core/gpu_thread.cpp').read_text()
 gpu_source=(root/'src/video_core/gpu.cpp').read_text()
 direct_cpu=gpu_source.index('    bool OnCPUWrite(DAddr addr, u64 size) {')
 direct_cpu=gpu_source[direct_cpu:gpu_source.index('\n    }',direct_cpu)+len('\n    }')]
+direct_read=gpu_source.index('    VideoCore::RasterizerDownloadArea OnCPURead(DAddr addr, u64 size) {')
+direct_read=gpu_source[direct_read:gpu_source.index('\n    }',direct_read)+len('\n    }')]
 body = production[production.index('namespace VideoCommon::GPUThread {'):]
 # Rendezvous signals only: the copied production wait and cancellation still run.
 assert body.count('state.cv.wait(lk);') == 1
@@ -67,6 +71,7 @@ head = r'''
 #include <thread>
 #include <vector>
 #include "video_core/gpu_thread.h"
+#include "video_core/rasterizer_download_area.h"
 #include "video_core/buffer_cache/gather_alias.h"
 #include "video_core/buffer_cache/controlled_conflict.h"
 #define LOG_ERROR(category, format, reason) ((void)(reason))
@@ -119,9 +124,11 @@ namespace VideoCore {
 struct RasterizerInterface {
     std::atomic<unsigned> invalidations{};
     std::function<void()> invalidate;
+    std::function<bool()> cpu_write;
     void FlushRegion(DAddr,u64) {}
     void OnCacheInvalidation(DAddr,u64) {++invalidations;if(invalidate)invalidate();}
-    bool OnCPUWrite(DAddr,u64) {++invalidations;return false;}
+    bool OnCPUWrite(DAddr,u64) {++invalidations;return cpu_write?cpu_write():false;}
+    RasterizerDownloadArea GetFlushArea(DAddr addr,u64 size) {++invalidations;return {addr,addr+size,true};}
 };
 struct RendererBase { RasterizerInterface rasterizer; RasterizerInterface* ReadRasterizer() { return &rasterizer; } };
 }
@@ -138,7 +145,13 @@ struct Scheduler {
 };
 }
 '''
-head+='\nstruct UnmanagedGpuFacade { VideoCore::RasterizerInterface* rasterizer;\n'+direct_cpu+'\n};\n'
+head+='''
+struct GpuFacade {
+    VideoCore::RasterizerInterface* rasterizer;
+    VideoCommon::GPUThread::ThreadManager& gpu_thread;
+    template<class F> u64 RequestSyncOperation(F&&) {throw std::runtime_error("unexpected fixture sync request");}
+    void WaitForSyncOperation(u64) {throw std::runtime_error("unexpected fixture sync wait");}
+'''+direct_cpu+'\n'+direct_read+'\n};\n'
 tail = r'''
 using VideoCommon::GPUThread::ThreadManager;
 void full_queue_stop() {
@@ -294,12 +307,54 @@ void entered_owner_invalidation_during_stop() {
     stopping.Wait();release.Set();Ready(active);Ready(stop);stop_requested=nullptr;
     Require(renderer.rasterizer.invalidations==2,"Stop rejected invalidation from an already entered GPU owner");
 }
-void unmanaged_cpu_write_negative() {
+void unmanaged_cpu_read_negative() {
     Core::System system;VideoCore::RendererBase renderer;
     Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler scheduler;
     ThreadManager manager{system,true};manager.StartThread(renderer,context,scheduler);manager.Stop();
-    UnmanagedGpuFacade facade{&renderer.rasterizer};facade.OnCPUWrite(4096,4096);
-    Require(renderer.rasterizer.invalidations==1,"unmanaged GPU OnCPUWrite bypass counterexample disappeared");
+    GpuFacade facade{&renderer.rasterizer,manager};
+    auto area=facade.OnCPURead(4096,4096);
+    Require(renderer.rasterizer.invalidations==1 && area.preemtive,
+            "unmanaged GPU OnCPURead bypass counterexample disappeared");
+}
+void direct_cpu_write_lifetime(bool async) {
+    Core::System system;VideoCore::RendererBase renderer;
+    Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler scheduler;
+    ThreadManager manager{system,async};GpuFacade facade{&renderer.rasterizer,manager};
+    Require(!facade.OnCPUWrite(4096,4096),"closed CPU-write falsely requested dirty collection");
+    Require(renderer.rasterizer.invalidations==0,"pre-start CPU-write touched rasterizer");
+    manager.StartThread(renderer,context,scheduler);
+    renderer.rasterizer.cpu_write=[] {return true;};
+    Require(facade.OnCPUWrite(4096,4096),"CPU-write lost true rasterizer result");
+    renderer.rasterizer.cpu_write=[] {return false;};
+    Require(!facade.OnCPUWrite(4096,4096),"CPU-write lost false rasterizer result");
+    Event entered,release,joined;worker_joined=&joined;
+    renderer.rasterizer.cpu_write=[&] {entered.Set();release.Wait();return true;};
+    auto call=std::async(std::launch::async,[&] {return facade.OnCPUWrite(4096,4096);});entered.Wait();
+    auto stop=std::async(std::launch::async,[&] {manager.Stop();});joined.Wait();
+    const bool early=stop.wait_for(100ms)==std::future_status::ready;
+    release.Set();const bool result=Ready(call);Ready(stop);worker_joined=nullptr;
+    Require(!early,"Stop failed to join direct CPU-write");
+    Require(result,"entered CPU-write result lost during Stop");
+    const auto before=renderer.rasterizer.invalidations.load();
+    Require(!facade.OnCPUWrite(4096,4096),"closed CPU-write falsely requested dirty collection");
+    Require(renderer.rasterizer.invalidations==before,"post-stop CPU-write touched rasterizer");
+}
+void direct_cpu_write_owner_and_exception() {
+    Core::System system;VideoCore::RendererBase renderer;
+    Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler scheduler;
+    ThreadManager manager{system,true};GpuFacade facade{&renderer.rasterizer,manager};
+    manager.StartThread(renderer,context,scheduler);
+    renderer.rasterizer.cpu_write=[]()->bool {throw std::runtime_error("cpu-write injection");};
+    bool threw=false;try {facade.OnCPUWrite(4096,4096);}catch(const std::runtime_error&) {threw=true;}
+    Require(threw,"CPU-write swallowed callback exception");
+    renderer.rasterizer.cpu_write=[] {return true;};
+    Event entered,release,stopping;stop_requested=&stopping;bool result=false;
+    auto active=std::async(std::launch::async,[&] {manager.RunOnGpuThread([&] {
+        entered.Set();release.Wait();result=facade.OnCPUWrite(4096,4096);
+    });});
+    entered.Wait();auto stop=std::async(std::launch::async,[&] {manager.Stop();});
+    stopping.Wait();release.Set();Ready(active);Ready(stop);stop_requested=nullptr;
+    Require(result,"Stop rejected CPU-write from an already entered GPU owner");
 }
 void direct_join_after_capture_cancellation() {
     Core::System system;VideoCore::RendererBase renderer;
@@ -338,7 +393,9 @@ int main() {
         nonblocking_cpu_continuation();
         direct_invalidation_lifetime(false);direct_invalidation_lifetime(true);
         direct_count_contention_and_exception();direct_join_after_capture_cancellation();delayed_direct_entry();
-        entered_owner_invalidation_during_stop();unmanaged_cpu_write_negative();
+        entered_owner_invalidation_during_stop();
+        direct_cpu_write_lifetime(true);direct_cpu_write_lifetime(false);direct_cpu_write_owner_and_exception();
+        unmanaged_cpu_read_negative();
         std::cout<<"PASS actual ThreadManager: full-queue cancellation, active join, suspended retry, sync/async inline, pre/post-start rejection\n";
     } catch(const std::exception& e) { std::cerr<<"FAIL "<<e.what()<<"\n"; return 1; }
 }
@@ -361,7 +418,7 @@ manifest={
         'src/common/bounded_threadsafe_queue.h','tools/gpu_lifecycle_tests/run_thread_tests.py']},
     'production': ['ThreadManager class', 'RunThread and all ThreadManager definitions', 'MPSCQueue/SPSCQueue', 'stop-token wait'],
     'fixtures': ['renderer/engine/scheduler/platform/Core/System'],
-    'boundary': 'Terminal worker and two direct invalidation entries only; no live GPU freeze or Vulkan completion',
+    'boundary': 'Terminal worker, direct invalidations and GPU OnCPUWrite only; actual OnCPURead bypass remains; no live GPU freeze or Vulkan completion',
     'positive_repeats': args.repeat,
 }
 for i in range(args.repeat):
@@ -396,9 +453,24 @@ direct_controls=[
     ('direct-rejects-entered-owner',body.replace('const bool owner = IsGpuThread();','const bool owner = false;'),None,
      'Stop rejected invalidation from an already entered GPU owner'),
 ]
-for name,changed,override,expected in direct_controls:
-    assert changed!=body or override is not None
-    control=out/(name+'.cpp');control.write_text(head+changed+tail)
+cpu_guard=guard.replace('return;','return false;')
+assert body.count(cpu_guard)==1
+cpu_write_controls=[
+    ('direct-cpu-write-bypasses-manager',body,None,'pre-start CPU-write touched rasterizer'),
+    ('direct-cpu-write-released-early',body.replace(cpu_guard,'    {\n'+cpu_guard+'    }\n'),None,
+     'Stop failed to join direct CPU-write'),
+    ('direct-cpu-write-closed-success',body.replace('if (!owner && !entry) return false;',
+     'if (!owner && !entry) return true;'),None,'closed CPU-write falsely requested dirty collection'),
+    ('direct-cpu-write-rejects-owner',body.replace(cpu_guard,
+     cpu_guard.replace('IsGpuThread()','false')),None,'Stop rejected CPU-write from an already entered GPU owner'),
+]
+forward='return gpu_thread.OnCPUWrite(addr, size);'
+assert head.count(forward)==1
+for name,changed,override,expected in direct_controls+cpu_write_controls:
+    control_head=(head.replace(forward,'return rasterizer->OnCPUWrite(addr, size);')
+                  if name=='direct-cpu-write-bypasses-manager' else head)
+    assert changed!=body or override is not None or control_head!=head
+    control=out/(name+'.cpp');control.write_text(control_head+changed+tail)
     mutant=out/(name+('.exe' if os.name=='nt' else ''))
     injected=out/'shims/common/terminal_ingress.h'
     try:
@@ -410,6 +482,7 @@ for name,changed,override,expected in direct_controls:
     finally: injected.write_text(terminal_header)
     print('PASS terminal direct invalidation control: '+name,flush=True)
 manifest['direct_control_mutants']=[entry[0] for entry in direct_controls]
+manifest['cpu_write_control_mutants']=[entry[0] for entry in cpu_write_controls]
 if args.handoff_controls:
     admission = '++state.last_fence;\n    return true;'
     assert body.count(admission) == 1

@@ -1,12 +1,48 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: terminal CPU-write cache callback ownership
+
+Linux-only run [39729352143](https://github.com/Splaser/emulator/actions/runs/39729352143)
+completed successfully at `d8b0c3897de6cbd57f10c9d02bcfa27a35086637`, including
+production build/unit tests, native Vulkan/F2/F3 controls and integration regressions.
+Android was skipped. Independent downloaded artifact verification is not complete.
+The subsequent clean upstream merge `e5a1ffe362` adds only the ScarletNX game-list
+feature from upstream `f942c35679`; it was not the source of that CI run.
+
+GPU::Impl::OnCPUWrite now forwards through ThreadManager and shares the terminal
+direct-invalidation entry counter. External callbacks retain the entry until return
+or exception; Stop closes entry, joins the worker, retires queued captures, then
+joins external callbacks before the renderer may shut down. Already executing GPU
+owner callbacks remain covered by worker join. True/false rasterizer results pass
+through unchanged. Before start/after close, false requests no dirty collection;
+it is not successful cache work and does not stop or authorize the CPU store.
+
+Windows MinGW GCC 15.2 local actual-body ThreadManager tests pass three repeats,
+the five previous direct-ingress controls, four new CPU-write controls, and the
+blocking-handoff dependency control. GPU lifecycle cases also pass three repeats;
+the production gpu_thread.cpp translation unit passes Windows syntax checking.
+See [the retained validation conclusion](M4_F3_CPU_WRITE_TERMINAL_VALIDATION.md).
+Per user request, temporary Windows fixture executables and related outputs are
+removed after verification, retaining the Markdown conclusion and reproducible
+test sources. No Android or new remote build is needed for this local check.
+
+The previous successful OnCPUWrite bypass is now an explicit failing mutation
+control. The actual preemptive OnCPURead/GetFlushArea route remains a successful
+independent bypass against a live fixture rasterizer after Stop. Native CPU stores,
+raw pointers, other services, suspended channels and native device work remain
+outside this terminal counter. It adds no reversible stop, device completion,
+backing/alias freeze, or durable Unknown owner. All THREE M4 phases remain
+unfinished and ordinary GuestBackingAdmission remains Unknown. Do not merge
+intermediate work into main: the user now wants the final M7 zero-copy version.
+
 ## 2026-10-22: terminal direct invalidation ingress (within phase two)
 
 Implementation source: `d8b0c3897de6cbd57f10c9d02bcfa27a35086637`, pushed to
 `codex/issue-372-fixes`. Exact-source Linux-only run
 [39729352143](https://github.com/Splaser/emulator/actions/runs/39729352143)
-is in progress; Android is excluded. Do not report its production build, native
-Vulkan tests or artifact verification as passed until independently checked.
+completed successfully, including production build/unit tests, native Vulkan
+controls and integration regressions. Android was excluded; independent artifact
+verification remains incomplete.
 
 The previous Linux-only run
 [39717929077](https://github.com/Splaser/emulator/actions/runs/39717929077)

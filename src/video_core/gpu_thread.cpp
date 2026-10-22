@@ -260,6 +260,14 @@ void ThreadManager::FlushAndInvalidateRegion(DAddr addr, u64 size) {
     rasterizer->OnCacheInvalidation(addr, size);
 }
 
+bool ThreadManager::OnCPUWrite(DAddr addr, u64 size) {
+    const bool owner = IsGpuThread();
+    auto entry = owner ? std::optional<Common::TerminalIngress::Entry>{}
+                       : direct_invalidations.TryEnter();
+    if (!owner && !entry) return false;
+    return rasterizer->OnCPUWrite(addr, size);
+}
+
 u64 ThreadManager::PushCommand(CommandData&& command_data, bool block) {
     if (!is_async) {
         // In synchronous GPU mode, block the caller until the command has executed

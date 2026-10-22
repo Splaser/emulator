@@ -358,7 +358,7 @@ struct GPU::Impl {
     }
 
     bool OnCPUWrite(DAddr addr, u64 size) {
-        return rasterizer->OnCPUWrite(addr, size);
+        return gpu_thread.OnCPUWrite(addr, size);
     }
 
     /// Notify rasterizer that any caches of the specified region should be flushed and invalidated

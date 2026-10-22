@@ -234,6 +234,17 @@ is still alive. Already executing GPU-owner calls are covered by the worker join
 and remain able to finish. The entry guard never waits, retries a CAS, allocates,
 or refuses ordinary reader-count contention; only the cold terminal owner waits.
 Caller/facade lifetime remains externally owned. The actual-thread suite includes
-five precise negative controls for this boundary and a successful sibling
-GPU::OnCPUWrite bypass counterexample. This terminal guard covers neither all
-rasterizer ingress nor native device completion and is not live M4 admission.
+five precise negative controls for this boundary. GPU::OnCPUWrite now forwards
+through the same counter; four additional controls catch the old facade bypass,
+early entry release, false dirty-collection success on closed entry, and refusal
+of an entered GPU-owner callback. Its true/false return and exception propagate
+unchanged while healthy. Closed entry returns false, which only skips collection
+and is not CPU-store authorization or quiescence. A successful actual-body
+preemptive GPU::OnCPURead/GetFlushArea bypass counterexample remains independent.
+This terminal guard covers neither all rasterizer ingress nor native device
+completion and is not live M4 admission.
+
+For isolated local validation, both run_thread_tests.py and run_tests.py accept
+`--output-dir <temporary-directory>`. Their normal CI output paths are unchanged.
+After reviewing results, remove temporary binaries/fixtures and retain the
+Markdown validation conclusion when requested; the test sources reproduce them.
