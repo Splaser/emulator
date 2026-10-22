@@ -67,6 +67,8 @@ namespace VideoCore {struct RasterizerInterface {std::function<void()> initializ
 };}
 namespace Tegra {
 struct MemoryManager {
+    bool unmap_failed=false;
+    bool HasUnmapFailure() const {return unmap_failed;}
     inline static int live=0;int id;int writes=0;
     explicit MemoryManager(int value):id{value} {++live;}~MemoryManager() {--live;}
     void BindRasterizer(VideoCore::RasterizerInterface*) {}
@@ -166,6 +168,15 @@ struct Fixture {
                 &channel().maxwell_3d->memory==original.gmmu.get(),"actual engine construction lost GMMU identity");
     }
 };
+void QuarantinedAddressSpace() {
+    Fixture f;f.original.gmmu->unmap_failed=true;
+    Require(f.original.BindChannel(f.params)==NvResult::InvalidState && !f.channel().memory_manager,
+            "quarantined GMMU was attached to a cold channel");
+    f.original.gmmu->unmap_failed=false;f.BindOriginal();f.Setup(false);
+    f.original.gmmu->unmap_failed=true;
+    Require(f.original.BindChannel(f.params)==NvResult::InvalidState &&
+            f.channel().memory_manager==f.original.gmmu,"quarantined GMMU accepted ready idempotent binding");
+}
 void ColdAndNoop() {
     Fixture f;IoctlAllocGpfifoEx deferred;
     Require(f.module.device->SetupGPFIFOChannel(deferred,1)==NvResult::Success &&
@@ -226,7 +237,7 @@ void RaceInitialization(bool failed) {
     Ready(join_task);
 }
 int main() {
-    ColdAndNoop();
+    QuarantinedAddressSpace();ColdAndNoop();
     for(bool failed:{false,true})for(bool null_target:{false,true})Materialized(failed,null_target);
     RaceInitialization(false);RaceInitialization(true);
     Require(Tegra::MemoryManager::live==0,"fixture manager owners leaked");
@@ -260,6 +271,9 @@ materialized_guard = '''        if ((channel.initialized || channel.initializati
 '''
 assert bind.count(materialized_guard) == 1
 controls = [
+    ('quarantined-gmmu-binding',source.replace(
+        '        if (gmmu && gmmu->HasUnmapFailure()) return NvResult::InvalidState;', ''),
+     'quarantined GMMU was attached to a cold channel'),
     ('omit-ready',source.replace(ready_guard,'channel.initialization_failed'),'ready channel rebound its GMMU'),
     ('omit-partial',source.replace(ready_guard,'channel.initialized'),'partial channel rebound its GMMU'),
     ('reject-same-owner',source.replace(identity_guard,'(!same_gmmu_owner || channel.memory_manager == gmmu)'),'same-owner materialized binding was rejected'),

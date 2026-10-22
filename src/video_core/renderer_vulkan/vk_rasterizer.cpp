@@ -24,6 +24,7 @@
 #include "common/scope_exit.h"
 #include "common/settings.h"
 #include "video_core/acknowledged_callback.h"
+#include "video_core/unmap_failure.h"
 #include "video_core/arm64_register_guard.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/control/channel_state.h"
@@ -1545,19 +1546,31 @@ void RasterizerVulkan::InvalidateGPUCache() {
 }
 
 void RasterizerVulkan::UnmapMemory(DAddr addr, u64 size) {
-    gpu.RunOnGpuThread([this, addr, size] {
-        // Publish completed CPU writes before any unmap readback. Their exact ranges
-        // must be removed from GPU dirty intervals even when notifications were deferred.
-        gpu.InvalidateGPUCache();
-        {
-            std::scoped_lock lock{texture_cache.mutex};
-            texture_cache.UnmapMemory(addr, size);
-        }
-        {
-            RunBufferCacheCpuWrite(addr, size, false, true);
-        }
-        pipeline_cache.OnCacheInvalidation(addr, size);
-    });
+    VideoCommon::CallbackOutcome outcome;
+    try {
+        outcome = VideoCommon::RunAcknowledgedCallback(
+            [this](std::function<void()> callback) { gpu.RunOnGpuThread(std::move(callback)); },
+            [this, addr, size] {
+                gpu.InvalidateGPUCache();
+                {
+                    std::scoped_lock lock{texture_cache.mutex};
+                    texture_cache.UnmapMemory(addr, size);
+                }
+                // optional false is a valid completed WriteMemory result. Only
+                // nullopt means preservation could not be acknowledged.
+                if (!TryRunBufferCacheCpuWrite(addr, size, false, true).has_value()) {
+                    throw VideoCommon::UnmapFailure{VideoCommon::CallbackOutcome::Failed, true};
+                }
+                pipeline_cache.OnCacheInvalidation(addr, size);
+            });
+    } catch (...) {
+        // Includes inline GPU-owner callback failure and dispatch/allocation
+        // failure. Neither permits the caller to release mapping ownership.
+        throw VideoCommon::UnmapFailure{VideoCommon::CallbackOutcome::Failed, true};
+    }
+    if (outcome != VideoCommon::CallbackOutcome::Completed) {
+        throw VideoCommon::UnmapFailure{outcome, outcome == VideoCommon::CallbackOutcome::Failed};
+    }
 }
 
 void RasterizerVulkan::ModifyGPUMemory(size_t as_id, GPUVAddr addr, u64 size) {

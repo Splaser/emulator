@@ -20,6 +20,7 @@
 #include "video_core/control/channel_state.h"
 #include "video_core/gpu.h"
 #include "video_core/memory_manager.h"
+#include "video_core/unmap_failure.h"
 #include "video_core/rasterizer_interface.h"
 
 namespace Service::Nvidia::Devices {
@@ -165,6 +166,10 @@ NvResult nvhost_as_gpu::AllocateSpace(IoctlAllocSpace& params) {
 
     std::scoped_lock lock(mutex);
 
+    if (gmmu && gmmu->HasUnmapFailure()) {
+        return NvResult::InvalidState;
+    }
+
     if (!vm.initialised) {
         return NvResult::BadValue;
     }
@@ -215,6 +220,14 @@ NvResult nvhost_as_gpu::AllocateSpace(IoctlAllocSpace& params) {
 void nvhost_as_gpu::FreeMappingLocked(u64 offset) {
     auto mapping{mapping_map.at(offset)};
 
+    // Sparse mappings shouldn't be fully unmapped, just returned to their sparse state
+    // Only FreeSpace can unmap them fully
+    if (mapping->sparse_alloc) {
+        gmmu->MapSparse(offset, mapping->size, mapping->big_page);
+    } else {
+        gmmu->Unmap(offset, mapping->size);
+    }
+
     if (!mapping->fixed) {
         auto& allocator{mapping->big_page ? *vm.big_page_allocator : *vm.small_page_allocator};
         u32 page_size_bits{mapping->big_page ? vm.big_page_size_bits : VM::PAGE_SIZE_BITS};
@@ -226,14 +239,6 @@ void nvhost_as_gpu::FreeMappingLocked(u64 offset) {
     }
 
     nvmap.UnpinHandle(mapping->handle);
-
-    // Sparse mappings shouldn't be fully unmapped, just returned to their sparse state
-    // Only FreeSpace can unmap them fully
-    if (mapping->sparse_alloc) {
-        gmmu->MapSparse(offset, mapping->size, mapping->big_page);
-    } else {
-        gmmu->Unmap(offset, mapping->size);
-    }
 
     mapping_map.erase(offset);
 }
@@ -247,12 +252,17 @@ NvResult nvhost_as_gpu::FreeSpace(IoctlFreeSpace& params) {
     LOG_DEBUG(Service_NVDRV, "called, offset={:X}, pages={:X}, page_size={:X}", params.offset,
               params.pages, params.page_size);
 
-    std::scoped_lock lock(mutex);
+    std::unique_lock lock(mutex);
+
+    if (gmmu && gmmu->HasUnmapFailure()) {
+        return NvResult::InvalidState;
+    }
 
     if (!vm.initialised) {
         return NvResult::BadValue;
     }
 
+    bool unmap_started = false;
     try {
         auto allocation{allocation_map[params.offset]};
 
@@ -261,6 +271,7 @@ NvResult nvhost_as_gpu::FreeSpace(IoctlFreeSpace& params) {
             return NvResult::BadValue;
         }
 
+        unmap_started = true;
         for (const auto& mapping : allocation.mappings) {
             FreeMappingLocked(mapping->offset);
         }
@@ -278,8 +289,23 @@ NvResult nvhost_as_gpu::FreeSpace(IoctlFreeSpace& params) {
         allocator.Free(static_cast<u32>(params.offset >> page_size_bits),
                        static_cast<u32>(allocation.size >> page_size_bits));
         allocation_map.erase(params.offset);
+    } catch (const VideoCommon::UnmapFailure&) {
+        lock.unlock();
+        system.GPU().NotifyShutdown();
+        return NvResult::InvalidState;
     } catch (const std::out_of_range&) {
+        if (unmap_started) {
+            gmmu->QuarantineUnmap();
+            lock.unlock();
+            system.GPU().NotifyShutdown();
+            return NvResult::InvalidState;
+        }
         return NvResult::BadValue;
+    } catch (...) {
+        gmmu->QuarantineUnmap();
+        lock.unlock();
+        system.GPU().NotifyShutdown();
+        return NvResult::InvalidState;
     }
 
     return NvResult::Success;
@@ -294,6 +320,10 @@ NvResult nvhost_as_gpu::Remap(std::span<IoctlRemapEntry> entries) {
     LOG_DEBUG(Service_NVDRV, "called, num_entries=0x{:X}", entries.size());
 
     std::scoped_lock lock(mutex);
+
+    if (gmmu && gmmu->HasUnmapFailure()) {
+        return NvResult::InvalidState;
+    }
 
     if (!vm.initialised) {
         return NvResult::BadValue;
@@ -355,6 +385,10 @@ NvResult nvhost_as_gpu::MapBufferEx(IoctlMapBufferEx& params) {
               params.offset);
 
     std::scoped_lock lock(mutex);
+
+    if (gmmu && gmmu->HasUnmapFailure()) {
+        return NvResult::InvalidState;
+    }
 
     if (!vm.initialised) {
         return NvResult::BadValue;
@@ -458,22 +492,20 @@ NvResult nvhost_as_gpu::UnmapBuffer(IoctlUnmapBuffer& params) {
 
     LOG_DEBUG(Service_NVDRV, "called, offset=0x{:X}", params.offset);
 
-    std::scoped_lock lock(mutex);
+    std::unique_lock lock(mutex);
+
+    if (gmmu && gmmu->HasUnmapFailure()) {
+        return NvResult::InvalidState;
+    }
 
     if (!vm.initialised) {
         return NvResult::BadValue;
     }
 
+    bool unmap_started = false;
     try {
         auto mapping{mapping_map.at(params.offset)};
-
-        if (!mapping->fixed) {
-            auto& allocator{mapping->big_page ? *vm.big_page_allocator : *vm.small_page_allocator};
-            u32 page_size_bits{mapping->big_page ? vm.big_page_size_bits : VM::PAGE_SIZE_BITS};
-
-            allocator.Free(static_cast<u32>(mapping->offset >> page_size_bits),
-                           static_cast<u32>(mapping->size >> page_size_bits));
-        }
+        unmap_started = true;
 
         // Sparse mappings shouldn't be fully unmapped, just returned to their sparse state
         // Only FreeSpace can unmap them fully
@@ -483,11 +515,34 @@ NvResult nvhost_as_gpu::UnmapBuffer(IoctlUnmapBuffer& params) {
             gmmu->Unmap(params.offset, mapping->size);
         }
 
+        if (!mapping->fixed) {
+            auto& allocator{mapping->big_page ? *vm.big_page_allocator : *vm.small_page_allocator};
+            u32 page_size_bits{mapping->big_page ? vm.big_page_size_bits : VM::PAGE_SIZE_BITS};
+
+            allocator.Free(static_cast<u32>(mapping->offset >> page_size_bits),
+                           static_cast<u32>(mapping->size >> page_size_bits));
+        }
+
         nvmap.UnpinHandle(mapping->handle);
 
         mapping_map.erase(params.offset);
+    } catch (const VideoCommon::UnmapFailure&) {
+        lock.unlock();
+        system.GPU().NotifyShutdown();
+        return NvResult::InvalidState;
     } catch (const std::out_of_range&) {
+        if (unmap_started) {
+            gmmu->QuarantineUnmap();
+            lock.unlock();
+            system.GPU().NotifyShutdown();
+            return NvResult::InvalidState;
+        }
         LOG_WARNING(Service_NVDRV, "Couldn't find region to unmap at 0x{:X}", params.offset);
+    } catch (...) {
+        gmmu->QuarantineUnmap();
+        lock.unlock();
+        system.GPU().NotifyShutdown();
+        return NvResult::InvalidState;
     }
 
     return NvResult::Success;
@@ -507,6 +562,7 @@ NvResult nvhost_as_gpu::BindChannel(IoctlBindChannel& params) {
     std::shared_ptr<Tegra::MemoryManager> previous;
     {
         std::scoped_lock lock(mutex, gpu_channel_device->channel_mutex);
+        if (gmmu && gmmu->HasUnmapFailure()) return NvResult::InvalidState;
         const auto& channel = *gpu_channel_device->channel_state;
         const bool same_gmmu_owner = channel.memory_manager && gmmu &&
                                      channel.memory_manager.get() == gmmu.get() &&

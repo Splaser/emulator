@@ -16,6 +16,7 @@
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_base.h"
 #include "video_core/rasterizer_binding_state.h"
+#include "video_core/unmap_failure.h"
 
 namespace Tegra {
 using Tegra::Memory::GuestMemoryFlags;
@@ -304,6 +305,9 @@ GPUVAddr MemoryManager::Map(GPUVAddr gpu_addr, DAddr dev_addr, std::size_t size,
         return 0;
     }
     std::scoped_lock update{mapping_update_guard};
+    if (HasUnmapFailure()) {
+        throw VideoCommon::UnmapFailure{VideoCommon::CallbackOutcome::Failed, true};
+    }
     if (is_big_pages) [[likely]] {
         NotifyMappingChange<true, EntryType::Mapped>(gpu_addr, size);
         const auto write = AcquireMappingRead();
@@ -316,6 +320,9 @@ GPUVAddr MemoryManager::Map(GPUVAddr gpu_addr, DAddr dev_addr, std::size_t size,
 
 GPUVAddr MemoryManager::MapSparse(GPUVAddr gpu_addr, std::size_t size, bool is_big_pages) {
     std::scoped_lock update{mapping_update_guard};
+    if (HasUnmapFailure()) {
+        throw VideoCommon::UnmapFailure{VideoCommon::CallbackOutcome::Failed, true};
+    }
     if (is_big_pages) [[likely]] {
         NotifyMappingChange<true, EntryType::Reserved>(gpu_addr, size);
         const auto write = AcquireMappingRead();
@@ -331,18 +338,33 @@ void MemoryManager::Unmap(GPUVAddr gpu_addr, std::size_t size) {
         return;
     }
     std::scoped_lock update{mapping_update_guard};
-    GetSubmappedRangeImpl<false>(gpu_addr, size, page_stash);
-
-    for (const auto& [map_addr, map_size] : page_stash) {
-        rasterizer->UnmapMemory(map_addr, map_size);
+    if (HasUnmapFailure()) {
+        throw VideoCommon::UnmapFailure{VideoCommon::CallbackOutcome::Failed, true};
     }
-    page_stash.clear();
+    size_t completed_ranges = 0;
+    try {
+        GetSubmappedRangeImpl<false>(gpu_addr, size, page_stash);
+        for (const auto& [map_addr, map_size] : page_stash) {
+            rasterizer->UnmapMemory(map_addr, map_size);
+            ++completed_ranges;
+        }
+        page_stash.clear();
 
-    NotifyMappingChange<true, EntryType::Free>(gpu_addr, size);
-    NotifyMappingChange<false, EntryType::Free>(gpu_addr, size);
-    const auto write = AcquireMappingRead();
-    BigPageTableOp<EntryType::Free>(gpu_addr, 0, size, PTEKind::INVALID);
-    PageTableOp<EntryType::Free>(gpu_addr, 0, size, PTEKind::INVALID);
+        NotifyMappingChange<true, EntryType::Free>(gpu_addr, size);
+        NotifyMappingChange<false, EntryType::Free>(gpu_addr, size);
+        const auto write = AcquireMappingRead();
+        BigPageTableOp<EntryType::Free>(gpu_addr, 0, size, PTEKind::INVALID);
+        PageTableOp<EntryType::Free>(gpu_addr, 0, size, PTEKind::INVALID);
+    } catch (const VideoCommon::UnmapFailure& failure) {
+        page_stash.clear();
+        unmap_failed.store(true, std::memory_order_release);
+        throw VideoCommon::UnmapFailure{failure.Outcome(),
+                                       failure.PotentialEffects() || completed_ranges != 0};
+    } catch (...) {
+        page_stash.clear();
+        unmap_failed.store(true, std::memory_order_release);
+        throw VideoCommon::UnmapFailure{VideoCommon::CallbackOutcome::Failed, true};
+    }
 }
 
 std::optional<DAddr> MemoryManager::GpuToCpuAddress(GPUVAddr gpu_addr) const {

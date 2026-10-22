@@ -7,9 +7,10 @@ import subprocess
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--cxx', default=os.environ.get('CXX', 'c++'))
+parser.add_argument('--output-dir', type=Path)
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
-out = root / '.diagnostics/physical-resolver-tests' / ('windows' if os.name == 'nt' else 'linux')
+out = (args.output_dir or root / '.diagnostics/physical-resolver-tests' / ('windows' if os.name == 'nt' else 'linux')).resolve()
 out.mkdir(parents=True, exist_ok=True)
 
 def function(source, marker, template=False, inline=False):

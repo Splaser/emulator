@@ -155,7 +155,12 @@ public:
     GPUVAddr Map(GPUVAddr gpu_addr, DAddr dev_addr, std::size_t size,
                  PTEKind kind = PTEKind::INVALID, bool is_big_pages = true);
     GPUVAddr MapSparse(GPUVAddr gpu_addr, std::size_t size, bool is_big_pages = true);
+    // Throws UnmapFailure on cancellation/failure. Remaining mapping owners must
+    // stay retained; this lifetime is terminally quarantined until teardown.
     void Unmap(GPUVAddr gpu_addr, std::size_t size);
+    bool HasUnmapFailure() const noexcept { return unmap_failed.load(std::memory_order_acquire); }
+    // Failure-only publication for callers with partial metadata/cleanup effects.
+    void QuarantineUnmap() noexcept { unmap_failed.store(true, std::memory_order_release); }
 
     void FlushRegion(GPUVAddr gpu_addr, size_t size,
                      VideoCommon::CacheType which = VideoCommon::CacheType::All) const;
@@ -197,6 +202,7 @@ private:
     friend class GPU;
     // Only the GPU's retained publication path may perform first enrollment.
     bool AttachRasterizer(std::shared_ptr<RasterizerBindingState> binding);
+    std::atomic_bool unmap_failed{};
     std::mutex rasterizer_binding_mutex;
     std::atomic<std::shared_ptr<RasterizerBindingState>> rasterizer_binding;
 

@@ -355,3 +355,19 @@ missing refusal, early release, missing Remap lock or missing GPU Join. This is
 NV service lifetime evidence, not a certificate for direct GMMU calls, raw loans,
 callback execution after cancellation or native completion. See the
 [audit and validation report](../../docs/M4_F3_GMMU_MAPPING_LIFETIME.md).
+
+Checked unmap is validated by `run_checked_unmap_tests.py --repeat 3` (real
+ThreadManager/RunThread/queue and actual Vulkan unmap body) and
+`run_unmap_ownership_tests.py --repeat 3` (actual GMMU/NV/NvMap bodies with controlled
+resource bookkeeping). They distinguish completion, queued cancellation, active
+shutdown, worker/inline failure, partial physical/batch prefixes, low-area owner
+retention, failed last-pin allocation, cleanup failure and quarantine races.
+Five worker and nine ownership mutation controls require named runtime failures.
+The mapping/channel suites also cover failure quarantine. Fixtures do not prove
+native Vulkan completion, guest backing authority or independent SMMU lifetimes.
+See [the checked-unmap report](../../docs/M4_F3_CHECKED_UNMAP.md).
+
+The Windows object compiler now defaults to nine units, including the Vulkan
+rasterizer, GPU thread and NvMap. Initialize the repository's pinned Vulkan-Headers,
+VulkanMemoryAllocator, Vulkan-Utility-Libraries, SPIRV-Headers, sirit and
+unordered_dense submodules before this check. Existing Boost/fmt requirements remain.

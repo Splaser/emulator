@@ -10,6 +10,7 @@ import sys
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--repeat', type=int, default=3)
+p.add_argument('--emit-only', action='store_true', help='Emit the actual-body fixture without compiling/running')
 p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--case', choices=['closed', 'all'], default='all')
 p.add_argument('--control-prefix', action='append', default=[])
@@ -73,6 +74,7 @@ memory = read('src/video_core/memory_manager.cpp')
 mapping_methods = '\n'.join(method(memory, signature).replace('MemoryManager::', '') for signature in (
     'GPUVAddr MemoryManager::Map(', 'GPUVAddr MemoryManager::MapSparse(', 'void MemoryManager::Unmap('))
 mapping_methods = mapping_methods.replace('bool is_big_pages)', 'bool is_big_pages = true)')
+mapping_methods = mapping_methods.replace('PTEKind kind,', 'PTEKind kind = PTEKind::INVALID,')
 notify = method(memory, 'void MemoryManager::NotifyMappingChange(').replace('MemoryManager::', '')
 structures = '\n'.join(method(header, '    struct ' + name + ' {').replace(
     'NvCore::NvMap::Handle::Id', 'u32') + ';' for name in (
@@ -82,6 +84,8 @@ vm = method(header, '    struct VM {').replace('Common::FlatAllocator<u32, 0, 32
 
 fixture = r'''
 struct PublicGpu {Impl* impl;std::function<void()> acquired_hook;
+    inline static std::function<void()> shutdown_observer;
+    void NotifyShutdown() {if(shutdown_observer)shutdown_observer();impl->NotifyShutdown();}
 ''' + forward + r'''
 };
 struct System {PublicGpu& gpu;PublicGpu& GPU() {return gpu;}};
@@ -100,6 +104,10 @@ enum class PTEKind {INVALID};
 struct MemoryManager {
     enum class EntryType {Free,Reserved,Mapped};
     VideoCore::Rasterizer* rasterizer;
+    std::atomic_bool unmap_failed{};
+    bool HasUnmapFailure() const {return unmap_failed.load();}
+    void QuarantineUnmap() {unmap_failed=true;}
+    std::vector<std::pair<u64,u64>> subranges;
     std::mutex mapping_update_guard,page_table_guard;
     u64 address_space_size=1ULL<<40,page_size=4096,big_page_size=65536;
     size_t unique_identifier=17;int generation=0;
@@ -114,6 +122,7 @@ struct MemoryManager {
         return PageTableOp<E>(gpu,dev,size,kind);
     }
     template<bool> void GetSubmappedRangeImpl(u64 addr,size_t size,auto& output) {
+        if(!subranges.empty()) {output.insert(output.end(),subranges.begin(),subranges.end());return;}
         if(GetEntry<true>(addr)==EntryType::Mapped)output.emplace_back(addr,size);
     }
     template<bool is_big_page,EntryType entry_type>
@@ -251,8 +260,8 @@ void ExceptionsAndBatch() {
         AddressSpace as{system,raster};Prepare(as,variant);
         auto fail=[] {throw std::runtime_error("injected callback failure");};
         if(variant==0)raster.mapping_hook=fail;else as.nvmap.hook=fail;
-        bool threw=false;try {Invoke(as,variant);}catch(const std::runtime_error&) {threw=true;}
-        Require(threw,"injected mapping exception did not execute");
+        bool failed=false;try {failed=Invoke(as,variant)==NvResult::InvalidState;}catch(const std::runtime_error&) {failed=true;}
+        Require(failed,"injected mapping exception did not execute");
         raster.mapping_hook={};as.nvmap.hook={};gpu.NotifyShutdown();
         auto joined=std::async(std::launch::async,[&] {gpu.owner_publications.Join();});Ready(joined);
         // This proves guard release, not rollback of earlier allocator/pin effects.
@@ -285,7 +294,7 @@ int main(int argc,char** argv) {
     }catch(const std::exception& e) {std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}
 }
 '''
-source = '#include <array>\n#include <bit>\n#include <map>\n#include <span>\n#include <tuple>\n#include <cstdlib>\n#include "common/alignment.h"\n#include "common/swap.h"\n' + base + fixture + tests
+source = '#include \"video_core/unmap_failure.h\"\n#include <array>\n#include <bit>\n#include <map>\n#include <span>\n#include <tuple>\n#include <cstdlib>\n#include "common/alignment.h"\n#include "common/swap.h"\n' + base + fixture + tests
 flags = [a.cxx, '-std=c++23', '-O1', '-g', '-pthread', '-Wall', '-Wextra', '-Werror', '-I', str(root / 'src')]
 
 
@@ -297,6 +306,10 @@ def compile_source(name, text):
     return exe
 
 
+if a.emit_only:
+    (out / 'mapping.cpp').write_text(source)
+    print('Emitted actual NV/GMMU mapping fixture')
+    raise SystemExit(0)
 exe = compile_source('mapping', source)
 for i in range(a.repeat):
     result = subprocess.run([str(exe), a.case], capture_output=True, text=True, timeout=45)

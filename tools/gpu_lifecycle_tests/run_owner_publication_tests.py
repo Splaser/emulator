@@ -64,6 +64,7 @@ struct TestAllocator {
 };
 namespace Tegra {
 struct MemoryManager {
+    bool HasUnmapFailure() const {return false;}
     inline static int live=0,binds=0; inline static bool fail=false;
     inline static std::function<void()> bind_hook,raw_bind_hook,before_raw_enter;
     std::mutex rasterizer_binding_mutex;

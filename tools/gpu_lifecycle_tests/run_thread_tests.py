@@ -10,6 +10,7 @@ import subprocess
 p = argparse.ArgumentParser()
 p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--repeat', type=int, default=10)
+p.add_argument('--emit-only', action='store_true', help='Emit the actual-body fixture without compiling/running')
 p.add_argument('--sanitize', choices=['address', 'thread'])
 p.add_argument('--handoff-controls', action='store_true')
 p.add_argument('--output-dir', type=Path, help='Isolated temporary fixture/output directory')
@@ -113,6 +114,7 @@ std::function<void()> direct_join_observer, direct_enter_observer;
 void ObserveDirectJoin() {if(direct_join_observer)direct_join_observer();}
 void ObserveDirectEnter() {if(direct_enter_observer)direct_enter_observer();}
 #include "video_core/acknowledged_callback.h"
+#include "video_core/unmap_failure.h"
 namespace Common {
 enum class ThreadPriority { Critical };
 void SetCurrentThreadName(const char*) {}
@@ -549,6 +551,9 @@ int main() {
 }
 '''
 cpp=out/'gpu_thread.cpp'; cpp.write_text(head+body+tail)
+if args.emit_only:
+    print('Emitted actual ThreadManager fixture: '+str(cpp))
+    raise SystemExit(0)
 exe=out/('gpu_thread.exe' if os.name=='nt' else 'gpu_thread')
 flags=[args.cxx,'-std=c++23','-O1','-g','-Wall','-Wextra','-Werror','-Wno-unused-variable','-pthread',
        '-I',str(out/'shims'),'-I',str(root/'src')]

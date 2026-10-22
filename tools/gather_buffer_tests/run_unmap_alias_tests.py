@@ -8,9 +8,10 @@ import subprocess
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--cxx', default=os.environ.get('CXX', 'c++'))
+parser.add_argument('--output-dir', type=Path)
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
-out = root / '.diagnostics/unmap-alias-tests'
+out = (args.output_dir or root / '.diagnostics/unmap-alias-tests').resolve()
 out.mkdir(parents=True, exist_ok=True)
 
 def literal(path, name):
@@ -25,7 +26,7 @@ def extract(path, marker, template=False):
     return source[start:source.index('\n}\n', pos) + 3]
 
 fixture = Path(__file__).with_name('run_tests.py')
-head = '#include <thread>\n#include <cassert>\n#include "video_core/acknowledged_callback.h"\n#define LOG_WARNING(...) ((void)0)\n' + literal(fixture, 'head')
+head = '#include <thread>\n#include <cassert>\n#include "video_core/acknowledged_callback.h"\n#include "video_core/unmap_failure.h"\n#define LOG_WARNING(...) ((void)0)\n' + literal(fixture, 'head')
 head = head.replace('gpu.erase(d + i);', '/* CPU and GPU flags are separate in WordManager. */')
 head = head.replace('if (gpu.contains(d + i))', 'if (gpu.contains(d + i) && !cpu.contains(d + i))')
 head = head.replace('struct Tracker {', '''struct Tracker {
@@ -266,7 +267,7 @@ void partial_and_failure() {
         c.MarkWrittenBuffer(id,A,4); c.MarkWrittenBuffer(id,A+8,4);
         c.runtime.fail_copy=true;
         bool failed=false;
-        try { r.UnmapMemory(A,1); } catch(const std::runtime_error&) { failed=true; }
+        try { r.UnmapMemory(A,1); } catch(const VideoCommon::UnmapFailure& e) { failed=e.Outcome()==VideoCommon::CallbackOutcome::Failed && e.PotentialEffects(); }
         assert(failed && c.memory_tracker.IsRegionGpuModified(A,4) && c.ram[A]==10 && c.unmap_readback_count==0);
         bool dirty=false; c.gpu_modified_ranges.ForEachInRange(A,4,[&](auto,auto) { dirty=true; });
         assert(dirty); c.runtime.fail_copy=false;

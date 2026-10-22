@@ -6,6 +6,7 @@
 #include <latch>
 #include <thread>
 #include "video_core/physical_memory.h"
+#include "video_core/unmap_failure.h"
 
 #define LOG_ERROR(...) ((void)0)
 namespace Common {
@@ -99,6 +100,8 @@ public:
         void UnmapMemory(u64, u64) {}
     } dummy;
     Rasterizer* rasterizer = &dummy;
+    std::atomic_bool unmap_failed{};
+    bool HasUnmapFailure() const {return unmap_failed.load();}
     std::vector<std::pair<u64, size_t>> page_stash;
     enum class EntryType : u64 { Free = 0, Reserved = 1, Mapped = 2 };
     size_t GetID() const {

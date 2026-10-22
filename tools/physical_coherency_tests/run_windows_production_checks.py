@@ -15,6 +15,9 @@ BOOST_SHA256 = 'af57be25cb4c4f4b413ed692fe378affb4352ea50fbe294a11ef548f4d527d89
 BOOST_URL = 'https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.bz2'
 DEFAULT_SOURCES = [
     'src/video_core/gpu.cpp',
+    'src/video_core/gpu_thread.cpp',
+    'src/video_core/renderer_vulkan/vk_rasterizer.cpp',
+    'src/core/hle/service/nvdrv/core/nvmap.cpp',
     'src/video_core/memory_manager.cpp',
     'src/core/hle/service/nvdrv/devices/nvhost_as_gpu.cpp',
     'src/core/hle/service/nvdrv/devices/nvhost_gpu.cpp',
@@ -28,7 +31,7 @@ p.add_argument('--boost-root', type=Path,
                default=Path.home() / '.cache/citron-deps/boost_1_87_0')
 p.add_argument('--fetch-boost', action='store_true',
                help='Fetch SHA256-pinned Boost 1.87 headers into the default shared cache')
-p.add_argument('--source', action='append', help='Repository-relative production .cpp; default: six GPU/GMMU/NV units')
+p.add_argument('--source', action='append', help='Repository-relative production .cpp; default: nine GPU/Vulkan/GMMU/NV units')
 p.add_argument('--output-dir', type=Path)
 a = p.parse_args()
 if sys.platform != 'win32' or platform.machine().lower() not in ('amd64', 'x86_64'):
@@ -63,6 +66,13 @@ flags = [a.cxx, '-std=c++23', '-O1', '-DNDEBUG', '-DARCHITECTURE_x86_64',
          '-DBOOST_ASIO_DISABLE_CONCEPTS', '-fno-strict-aliasing',
          '-Werror=conversion', '-Wno-sign-conversion', '-I', str(root / 'src'),
          '-isystem', str(boost), '-isystem', str(fmt)]
+# Include real pinned renderer dependencies; no generated fixture headers.
+for name in ('Vulkan-Headers/include', 'VulkanMemoryAllocator/include',
+             'Vulkan-Utility-Libraries/include', 'SPIRV-Headers/include',
+             'sirit/include', 'unordered_dense/include'):
+    path = root / 'externals' / name
+    if path.is_dir():
+        flags += ['-isystem', str(path)]
 records = []
 for index, name in enumerate(a.source or DEFAULT_SOURCES):
     source = (root / name).resolve()
@@ -87,6 +97,10 @@ for index, name in enumerate(a.source or DEFAULT_SOURCES):
 inputs = set(a.source or DEFAULT_SOURCES) | {
     'src/video_core/gpu.h', 'src/common/terminal_ingress.h',
     'src/video_core/memory_manager.h', 'src/video_core/rasterizer_binding_state.h',
+    'src/video_core/unmap_failure.h', 'src/video_core/acknowledged_callback.h',
+    'src/video_core/gpu_thread.h', 'src/video_core/rasterizer_interface.h',
+    'src/video_core/renderer_vulkan/vk_rasterizer.h',
+    'src/core/hle/service/nvdrv/core/nvmap.h',
     'src/core/hle/service/nvdrv/devices/nvhost_gpu.h',
     'src/core/hle/service/nvdrv/devices/nvhost_as_gpu.h',
     'src/video_core/control/channel_state.h',

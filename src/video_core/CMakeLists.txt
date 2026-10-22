@@ -111,6 +111,7 @@ add_library(video_core STATIC
     invalidation_accumulator.h
     memory_manager.cpp
     memory_manager.h
+    unmap_failure.h
     rasterizer_binding_state.h
     precompiled_headers.h
     present.h

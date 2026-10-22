@@ -1,5 +1,37 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: checked UnmapMemory execution and retained failure ownership
+
+UnmapMemory now consumes acknowledged callback completion. Queued rejection or
+cancellation cannot become completed unmap; active callbacks remain waited to
+actual return. optional false is a valid result, nullopt is failure. GMMU unmap
+retains remaining mappings and latches terminal quarantine on failure/partial
+ranges. NV releases allocator/pin owners only after checked unmap; failed suffixes
+keep their allocation records, reject further maps/binds and return InvalidState.
+Post-callback cleanup faults also quarantine. No queue scheduling or teardown
+order change, F2 routing, new remote/device run or main merge.
+
+NvMap low-area FreeHandle/reclamation retains failed queue/handle/SMMU owners,
+restores the failed guest duplicate and notifies shutdown outside service/handle
+locks. A final pin is retained if queue allocation fails. A low-area quarantine
+race cannot publish a new pin; its cold reservation remains with the terminal owner.
+
+Windows results: core positives passed three repetitions; 36 precise controls
+(five worker, nine ownership, twelve mapping and ten channel) plus cancelled-read
+coverage passed. Existing alias/readback/upload and resolver regressions passed.
+Nine real production files, including Vulkan rasterizer, GPU thread and NvMap,
+generated x64 COFF objects without diagnostics. The 57 recorded source hashes
+(29 unique inputs), object hashes and signatures were independently verified.
+Final local evidence is `.diagnostics/m4-unmap-results/` with a committed JSON
+summary. All 84 exe files, 28 objects and other temporary files from this turn
+were removed (554 files). No full app link or native Vulkan/device run is claimed.
+
+See [execution, cancellation, partial effects and Windows validation](M4_F3_CHECKED_UNMAP.md).
+This supersedes the previous void-handoff gap below. It does not certify complete
+guest physical publication, all SMMU/raw/alias users or native completion/retirement.
+All THREE M4 phases remain unfinished and GuestBackingAdmission remains Unknown.
+
+
 ## 2026-10-22: owned NV GMMU mapping operations and remaining entry audit
 
 Audited the remaining direct GMMU read/write, pointer, query, resolver and mapping
