@@ -2,6 +2,12 @@
 
 ## 2026-10-22: terminal direct invalidation ingress (within phase two)
 
+Implementation source: `d8b0c3897de6cbd57f10c9d02bcfa27a35086637`, pushed to
+`codex/issue-372-fixes`. Exact-source Linux-only run
+[39729352143](https://github.com/Splaser/emulator/actions/runs/39729352143)
+is in progress; Android is excluded. Do not report its production build, native
+Vulkan tests or artifact verification as passed until independently checked.
+
 The previous Linux-only run
 [39717929077](https://github.com/Splaser/emulator/actions/runs/39717929077)
 completed successfully at `4786d2de77def3e0a721def442b8c2cb91ce0108`, including
