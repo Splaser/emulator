@@ -308,6 +308,45 @@ semantics are unchanged; no durable Unknown owner or rollback is added. Backend
 FlushCommands may merely submit native work. This is neither device completion
 nor reversible whole-guest exclusion. All THREE M4 phases remain unfinished.
 
+### Follow-up: retained terminal address-space owner publication
+
+InitAddressSpace publishes a raw rasterizer alias into a new GPU MemoryManager.
+Protecting just BindRasterizer would leave a gap before the NV service publishes
+its GMMU and initialized VM. GPU therefore has a separate cold terminal counter:
+open during GPU construction (initialization may precede Start), closed by
+NotifyShutdown without waiting, and joined after GPU worker stop and before
+renderer shutdown. This counter currently covers address-space publication only.
+
+| Transition | Disposition |
+| --- | --- |
+| Candidate construction fails | Local staged VM/allocators/GMMU retire; service owner state remains unchanged |
+| InitAddressSpace entry is closed | No rasterizer binding; NV InvalidState; unpublished candidates retire |
+| Entry precedes Close | Binding and caller's final publication may finish while teardown waits |
+| InitAddressSpace returns | Optional Entry transfers to caller; returning from the bind is not release authority |
+| NV commit | Entry remains held through nothrow VM/GMMU moves and initialized state publication |
+| Renderer teardown | Join must observe final Entry release before raw rasterizer ownership is retired |
+
+The actual NV AllocAsEx implementation now builds pending VM/allocator/GMMU
+owners locally. Refusal cannot leave an initialized service or replace its GMMU.
+The optional Entry is held across the final commit; VM move assignment is checked
+nothrow. No snapshot/IsCurrent result is converted into asynchronous authority.
+
+Windows tests execute actual GPU destructor/NotifyShutdown/publication methods,
+public forwarding, MemoryManager binding assignment, NV VM layout and AllocAsEx
+against fixture allocators/GMMU/renderer/worker. They pause inside the bind and
+after it returns but before service commit, verifying teardown waits in both
+cases. Five precise controls detect omitted Close/Join, early caller release,
+ignored refusal and VM state mutated before admission. Local WSL syntax checks
+also cover the complete production GPU and nvhost_as_gpu translation units.
+
+Candidate allocation before Entry acquisition still relies on external System
+lifetime. Entries/facades require the existing external lifetime/serialization
+contract; this counter does not serialize NV clients, close channel creation or
+initialization, revoke existing mappings/raw aliases, retain renderer ownership
+for later GMMU use, drain native writers, or provide durable Unknown retirement.
+It is terminal and not attached to ProcessCohortStop. All THREE M4 phases remain
+unfinished and ordinary GuestBackingAdmission stays Unknown.
+
 ## Evidence and limits
 
 The actual-body Linux fixture covers Run and Step, a halt request followed by a

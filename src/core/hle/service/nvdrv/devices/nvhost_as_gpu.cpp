@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <cstring>
+#include <type_traits>
 #include <utility>
 
 #include "common/alignment.h"
@@ -100,6 +101,7 @@ NvResult nvhost_as_gpu::AllocAsEx(IoctlAllocAsEx& params) {
         return NvResult::InvalidState;
     }
 
+    VM pending_vm;
     if (params.big_page_size) {
         if (!std::has_single_bit(params.big_page_size)) {
             LOG_ERROR(Service_NVDRV, "Non power-of-2 big page size: 0x{:X}!", params.big_page_size);
@@ -111,34 +113,43 @@ NvResult nvhost_as_gpu::AllocAsEx(IoctlAllocAsEx& params) {
             return NvResult::BadValue;
         }
 
-        vm.big_page_size = params.big_page_size;
-        vm.big_page_size_bits = static_cast<u32>(std::countr_zero(params.big_page_size));
+        pending_vm.big_page_size = params.big_page_size;
+        pending_vm.big_page_size_bits = static_cast<u32>(std::countr_zero(params.big_page_size));
 
-        vm.va_range_start = params.big_page_size << VM::VA_START_SHIFT;
+        pending_vm.va_range_start = params.big_page_size << VM::VA_START_SHIFT;
     }
 
     // If this is unspecified then default values should be used
     if (params.va_range_start) {
-        vm.va_range_start = params.va_range_start;
-        vm.va_range_split = params.va_range_split;
-        vm.va_range_end = params.va_range_end;
+        pending_vm.va_range_start = params.va_range_start;
+        pending_vm.va_range_split = params.va_range_split;
+        pending_vm.va_range_end = params.va_range_end;
     }
 
-    const u64 max_big_page_bits = Common::Log2Ceil64(vm.va_range_end);
+    const u64 max_big_page_bits = Common::Log2Ceil64(pending_vm.va_range_end);
 
-    const auto start_pages{static_cast<u32>(vm.va_range_start >> VM::PAGE_SIZE_BITS)};
-    const auto end_pages{static_cast<u32>(vm.va_range_split >> VM::PAGE_SIZE_BITS)};
-    vm.small_page_allocator = std::make_shared<VM::Allocator>(start_pages, end_pages);
+    const auto start_pages{static_cast<u32>(pending_vm.va_range_start >> VM::PAGE_SIZE_BITS)};
+    const auto end_pages{static_cast<u32>(pending_vm.va_range_split >> VM::PAGE_SIZE_BITS)};
+    pending_vm.small_page_allocator = std::make_shared<VM::Allocator>(start_pages, end_pages);
 
-    const auto start_big_pages{static_cast<u32>(vm.va_range_split >> vm.big_page_size_bits)};
+    const auto start_big_pages{
+        static_cast<u32>(pending_vm.va_range_split >> pending_vm.big_page_size_bits)};
     const auto end_big_pages{
-        static_cast<u32>((vm.va_range_end - vm.va_range_split) >> vm.big_page_size_bits)};
-    vm.big_page_allocator = std::make_unique<VM::Allocator>(start_big_pages, end_big_pages);
+        static_cast<u32>((pending_vm.va_range_end - pending_vm.va_range_split) >>
+                         pending_vm.big_page_size_bits)};
+    pending_vm.big_page_allocator = std::make_unique<VM::Allocator>(start_big_pages, end_big_pages);
 
-    gmmu = std::make_shared<Tegra::MemoryManager>(system, max_big_page_bits, vm.va_range_split,
-                                                  vm.big_page_size_bits, VM::PAGE_SIZE_BITS);
-    system.GPU().InitAddressSpace(*gmmu);
-    vm.initialised = true;
+    auto pending_gmmu = std::make_shared<Tegra::MemoryManager>(
+        system, max_big_page_bits, pending_vm.va_range_split, pending_vm.big_page_size_bits,
+        VM::PAGE_SIZE_BITS);
+    auto publication = system.GPU().InitAddressSpace(*pending_gmmu);
+    if (!publication) {
+        return NvResult::InvalidState;
+    }
+    pending_vm.initialised = true;
+    static_assert(std::is_nothrow_move_assignable_v<VM>);
+    gmmu = std::move(pending_gmmu);
+    vm = std::move(pending_vm);
 
     return NvResult::Success;
 }

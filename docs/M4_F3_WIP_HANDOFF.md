@@ -1,5 +1,30 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: retained GPU address-space owner publication
+
+GPU owns a separate cold terminal address-publication counter, open before Start,
+closed by NotifyShutdown and joined before renderer teardown. InitAddressSpace
+returns an optional owned Entry retained by the actual NV AllocAsEx caller across
+its final VM/GMMU publication. The caller stages candidates locally, returns
+InvalidState on refusal, and commits by nothrow moves only after binding succeeds.
+This closes the former bind-return/caller-commit gap for this entry family.
+
+Windows publication and existing GPU lifecycle suites pass three repeats with
+five new precise controls plus the cancelled-read coverage control. Candidate
+allocation failure, pre-Start success, closed no-effects refusal, bind in flight
+and returned Entry held at caller commit are covered. Complete production gpu.cpp
+and nvhost_as_gpu.cpp translation units pass local WSL syntax. See
+[the retained validation conclusion](M4_F3_ADDRESS_PUBLICATION_VALIDATION.md).
+Temporary binaries/fixtures/logs are removed after inspection. The workflow adds
+this early regression for future runs; no new remote or Android build dispatched.
+
+This covers only terminal address-space publication. Candidate construction
+before entry still relies on System lifetime; other channel creation/init/bind,
+service routes, existing mapping/raw-alias lifetime, native writers and durable
+Unknown owner retention remain open. No reversible ProcessCohortStop linkage or
+Guest admission is added. All THREE M4 phases remain unfinished. Main remains
+unchanged until M7's final zero-copy merge.
+
 ## 2026-10-22: terminal command tail and whole dirty gather
 
 FlushCommands, InvalidateGPUCache and OnCommandListEnd now forward from the actual

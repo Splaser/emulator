@@ -77,6 +77,7 @@ head = r'''
 #include <thread>
 #include <vector>
 #include "common/common_types.h"
+#include "common/terminal_ingress.h"
 using namespace std::chrono_literals;
 void Require(bool ok,const char* reason) { if(!ok) throw std::runtime_error(reason); }
 struct Event {
@@ -161,6 +162,7 @@ struct Impl {
     std::shared_ptr<VideoCore::Renderer> renderer=std::make_shared<VideoCore::Renderer>();
     Host& host1x;
     std::atomic<bool> shutting_down=false;
+    Common::TerminalIngress owner_publications;
     std::mutex sync_mutex; std::condition_variable sync_cv;
     std::deque<std::function<void()>> sync_requests;
     std::atomic<u64> current_sync_fence=0; u64 last_sync_fence=0;
@@ -170,6 +172,7 @@ struct Impl {
     std::deque<size_t> free_swap_counters,request_swap_counters;
     std::mutex request_swap_mutex;
     explicit Impl(Host& h):host1x(h) {
+        owner_publications.Open();
         gpu_thread.query=[this](u64 addr,u64 size) {return rasterizer->GetFlushArea(addr,size);};
     }
 '''

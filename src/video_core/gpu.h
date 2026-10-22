@@ -5,9 +5,11 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 
 #include "common/bit_field.h"
 #include "common/common_types.h"
+#include "common/terminal_ingress.h"
 #include "core/hle/service/nvdrv/nvdata.h"
 #include "video_core/cdma_pusher.h"
 #include "video_core/framebuffer_config.h"
@@ -156,7 +158,10 @@ public:
 
     void ReleaseChannel(Control::ChannelState& to_release);
 
-    void InitAddressSpace(Tegra::MemoryManager& memory_manager);
+    /// Retain the returned terminal publication entry through caller-side owner
+    /// publication. No entry means no binding; this is not guest admission.
+    [[nodiscard]] std::optional<Common::TerminalIngress::Entry>
+    InitAddressSpace(Tegra::MemoryManager& memory_manager);
 
     /// Request a host GPU memory flush from the CPU.
     [[nodiscard]] u64 RequestFlush(DAddr addr, std::size_t size);

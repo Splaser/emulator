@@ -41,13 +41,16 @@ struct GPU::Impl {
     explicit Impl(GPU& gpu_, Core::System& system_, bool is_async_, bool use_nvdec_)
         : gpu{gpu_}, system{system_}, host1x{system.Host1x()}, use_nvdec{use_nvdec_},
           shader_notify{std::make_unique<VideoCore::ShaderNotify>()}, is_async{is_async_},
-          gpu_thread{system_, is_async_}, scheduler{std::make_unique<Control::Scheduler>(gpu)} {}
+          gpu_thread{system_, is_async_}, scheduler{std::make_unique<Control::Scheduler>(gpu)} {
+        owner_publications.Open();
+    }
 
     ~Impl() {
         NotifyShutdown();
         // Join while every object referenced by RunThread is still alive. Member
         // destruction order alone cannot drain work or close callback admission.
         gpu_thread.Stop();
+        owner_publications.Join();
         CloseCompositeRequests();
         if (renderer) {
             renderer->Shutdown();
@@ -83,8 +86,12 @@ struct GPU::Impl {
         rasterizer->InitializeChannel(to_init);
     }
 
-    void InitAddressSpace(Tegra::MemoryManager& memory_manager) {
+    std::optional<Common::TerminalIngress::Entry>
+    InitAddressSpace(Tegra::MemoryManager& memory_manager) {
+        auto publication = owner_publications.TryEnter();
+        if (!publication) return std::nullopt;
         memory_manager.BindRasterizer(rasterizer);
+        return publication;
     }
 
     void ReleaseChannel(Control::ChannelState& to_release) {
@@ -262,6 +269,7 @@ struct GPU::Impl {
     }
 
     void NotifyShutdown() {
+        owner_publications.Close();
         {
             // Both kinds of CPU waiters must be released if GPU execution has failed.
             std::scoped_lock lk{sync_mutex, sync_request_mutex};
@@ -431,6 +439,9 @@ struct GPU::Impl {
     std::unique_ptr<VideoCore::ShaderNotify> shader_notify;
     /// When true, we are about to shut down emulation session, so terminate outstanding tasks
     std::atomic_bool shutting_down{};
+    // Cold publications may precede GPU Start. Closed by NotifyShutdown, joined
+    // before renderer teardown, including the caller's final owner publication.
+    Common::TerminalIngress owner_publications;
     std::atomic_bool controlled_producer_conflict{};
 
     std::array<std::atomic<u32>, Service::Nvidia::MaxSyncPoints> syncpoints{};
@@ -493,8 +504,9 @@ void GPU::ReleaseChannel(Control::ChannelState& to_release) {
     impl->ReleaseChannel(to_release);
 }
 
-void GPU::InitAddressSpace(Tegra::MemoryManager& memory_manager) {
-    impl->InitAddressSpace(memory_manager);
+std::optional<Common::TerminalIngress::Entry>
+GPU::InitAddressSpace(Tegra::MemoryManager& memory_manager) {
+    return impl->InitAddressSpace(memory_manager);
 }
 
 void GPU::BindRenderer(std::unique_ptr<VideoCore::RendererBase> renderer) {

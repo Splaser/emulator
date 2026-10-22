@@ -266,3 +266,21 @@ For isolated local validation, both run_thread_tests.py and run_tests.py accept
 `--output-dir <temporary-directory>`. Their normal CI output paths are unchanged.
 After reviewing results, remove temporary binaries/fixtures and retain the
 Markdown validation conclusion when requested; the test sources reproduce them.
+
+GPU address-space owner publication has a separate cold terminal counter: it may
+start before GPU Start, closes with NotifyShutdown, and joins before renderer
+teardown. InitAddressSpace returns an optional owned Entry, retained by AllocAsEx
+through its final VM/GMMU commit. The NV caller stages both owners locally and
+returns InvalidState on refusal without publishing candidate state. This does
+not close channel creation/initialization, existing mappings, or other raw aliases.
+
+Run `python tools/gpu_lifecycle_tests/run_owner_publication_tests.py --repeat 3`
+for actual GPU close/join/API/forwarding, MemoryManager binding assignment, VM
+layout and AllocAsEx tests. The suite uses the lifecycle fixture, then covers
+pre-Start success, shutdown refusal, candidate allocation failures, and teardown
+while either binding or the caller's final commit is paused. Five controls reject
+missing Close/Join, early caller Entry release, ignored refusal and unstaged VM.
+Its optional `--output-dir` isolates local binaries for subsequent cleanup.
+Allocator/GMMU construction, renderer, worker and complete System lifetime remain
+fixtures; this terminal lease is not reversible Guest admission or native GPU
+completion. Candidate construction before Entry acquisition remains outside it.
