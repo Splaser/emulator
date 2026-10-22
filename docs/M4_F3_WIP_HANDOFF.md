@@ -1,5 +1,32 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: owned NV GMMU mapping operations and remaining entry audit
+
+Audited the remaining direct GMMU read/write, pointer, query, resolver and mapping
+families. Five NV mapping operations still bypassed terminal GPU ownership after
+Close; the failure-first actual-body test compiled and reproduced closed mapping
+success. AllocateSpace, FreeSpace, Remap, MapBufferEx and UnmapBuffer now retain
+the existing publication Entry before locks/resources and through final effects
+and acknowledgement. Remap also uses the shared AS mutex. Admitted operations
+may finish; new closed requests refuse without touching allocator/pins/tables.
+
+Windows: ten mapping variants and ten prerequisite lifecycle cases passed three
+repetitions, twelve precise mapping controls and the cancelled-read control passed.
+Six complete production files generated AMD64 COFF objects without diagnostics;
+24 input hashes (16 unique inputs), object hashes and signatures were matched.
+Final evidence is `.diagnostics/m4-nv-mapping-results/` and the committed JSON
+report. All 33 exe files, twelve objects and other temporary files from this turn
+were removed (206 files). No full app link or native Vulkan acceptance is claimed.
+
+See [audit, protocol and Windows results](M4_F3_GMMU_MAPPING_LIFETIME.md).
+This closes the NV service mapping subset only. Direct GMMU reads/writes/maps,
+escaped pointers and native completion remain open. In particular UnmapMemory's
+void GPU-worker handoff can return after cancellation without proving execution;
+checked cancellation/completion and partial effects are the next explicit boundary.
+No scheduling/shutdown order change, F2 routing, new remote build or main merge.
+All THREE phases remain unfinished; GuestBackingAdmission remains Unknown.
+
+
 ## 2026-10-22: external GMMU binding terminal lifetime
 
 The public BindRasterizer bypass now uses a detached shared terminal state.

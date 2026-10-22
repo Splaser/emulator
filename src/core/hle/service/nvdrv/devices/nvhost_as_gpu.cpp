@@ -155,6 +155,11 @@ NvResult nvhost_as_gpu::AllocAsEx(IoctlAllocAsEx& params) {
 }
 
 NvResult nvhost_as_gpu::AllocateSpace(IoctlAllocSpace& params) {
+    auto publication = system.GPU().AcquireChannelBinding();
+    if (!publication) {
+        return NvResult::InvalidState;
+    }
+
     LOG_DEBUG(Service_NVDRV, "called, pages={:X}, page_size={:X}, flags={:X}", params.pages,
               params.page_size, params.flags);
 
@@ -234,6 +239,11 @@ void nvhost_as_gpu::FreeMappingLocked(u64 offset) {
 }
 
 NvResult nvhost_as_gpu::FreeSpace(IoctlFreeSpace& params) {
+    auto publication = system.GPU().AcquireChannelBinding();
+    if (!publication) {
+        return NvResult::InvalidState;
+    }
+
     LOG_DEBUG(Service_NVDRV, "called, offset={:X}, pages={:X}, page_size={:X}", params.offset,
               params.pages, params.page_size);
 
@@ -276,7 +286,14 @@ NvResult nvhost_as_gpu::FreeSpace(IoctlFreeSpace& params) {
 }
 
 NvResult nvhost_as_gpu::Remap(std::span<IoctlRemapEntry> entries) {
+    auto publication = system.GPU().AcquireChannelBinding();
+    if (!publication) {
+        return NvResult::InvalidState;
+    }
+
     LOG_DEBUG(Service_NVDRV, "called, num_entries=0x{:X}", entries.size());
+
+    std::scoped_lock lock(mutex);
 
     if (!vm.initialised) {
         return NvResult::BadValue;
@@ -326,6 +343,11 @@ NvResult nvhost_as_gpu::Remap(std::span<IoctlRemapEntry> entries) {
 }
 
 NvResult nvhost_as_gpu::MapBufferEx(IoctlMapBufferEx& params) {
+    auto publication = system.GPU().AcquireChannelBinding();
+    if (!publication) {
+        return NvResult::InvalidState;
+    }
+
     LOG_DEBUG(Service_NVDRV,
               "called, flags={:X}, nvmap_handle={:X}, buffer_offset={}, mapping_size={}"
               ", offset={}",
@@ -429,6 +451,11 @@ NvResult nvhost_as_gpu::MapBufferEx(IoctlMapBufferEx& params) {
 }
 
 NvResult nvhost_as_gpu::UnmapBuffer(IoctlUnmapBuffer& params) {
+    auto publication = system.GPU().AcquireChannelBinding();
+    if (!publication) {
+        return NvResult::InvalidState;
+    }
+
     LOG_DEBUG(Service_NVDRV, "called, offset=0x{:X}", params.offset);
 
     std::scoped_lock lock(mutex);

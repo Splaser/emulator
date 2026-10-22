@@ -344,3 +344,14 @@ confirmation never stores a pointer. Six further controls check Close, Join,
 Entry lifetime, target/owner identity and renderer publication retention.
 This supersedes the historical successful raw-binding bypass witness above.
 See [current evidence and limits](../../docs/M4_F3_EXTERNAL_GMMU_BINDING.md).
+
+Run `python tools/gpu_lifecycle_tests/run_address_space_mapping_tests.py --repeat 3`
+for actual NV mapping lifetime across Close and GPU teardown. Five actual NV
+methods, FreeMappingLocked and GMMU mapping/callback bodies run with allocator,
+pin and table fixtures. Ten operation variants cover normal/closed results,
+entry/acknowledgement retention, callback/pin pauses, exception release, Remap AS
+serialization and a batch admitted before Close. Twelve precise controls reject
+missing refusal, early release, missing Remap lock or missing GPU Join. This is
+NV service lifetime evidence, not a certificate for direct GMMU calls, raw loans,
+callback execution after cancellation or native completion. See the
+[audit and validation report](../../docs/M4_F3_GMMU_MAPPING_LIFETIME.md).

@@ -171,9 +171,9 @@ public:
     [[nodiscard]] std::optional<Common::TerminalIngress::Entry>
     InitAddressSpace(Tegra::MemoryManager& memory_manager);
 
-    /// External NV channel/address-space publication only. Retain through lookup,
-    /// service locks, shared-owner replacement and acknowledgement. The caller
-    /// still owns the facade/Module lifetime; this does not stop native producers.
+    /// External NV channel/address-space publication and mapping lifetime. Retain
+    /// through lookup, service locks, pin/unpin, callbacks and acknowledgement.
+    /// The caller still owns the facade/Module lifetime; this does not stop native producers.
     [[nodiscard]] std::optional<Common::TerminalIngress::Entry> AcquireChannelBinding();
 
     /// Request a host GPU memory flush from the CPU.
