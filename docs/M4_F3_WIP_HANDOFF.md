@@ -2,6 +2,13 @@
 
 ## 2026-10-22: reserve roster cancellation before reopening (phase one)
 
+Implementation source: `233cf67b6d58660f4e556eebf26c4c9e561eaabd`, pushed to
+`codex/issue-372-fixes`. Linux-only validation
+[39705537466](https://github.com/Splaser/emulator/actions/runs/39705537466)
+is in progress at container setup; Android is confirmed skipped. Do not duplicate
+dispatch. ProducerDrain regressions also passed locally in
+`.diagnostics/m4-cancel-primitive-regression.log`.
+
 The previous exact-source Linux run
 [39562678761](https://github.com/Splaser/emulator/actions/runs/39562678761)
 completed successfully at `f9e39ecaa4a1f042b02fcb9ad6b9de3b275d6996`,
