@@ -469,9 +469,21 @@ NvResult nvhost_as_gpu::UnmapBuffer(IoctlUnmapBuffer& params) {
 NvResult nvhost_as_gpu::BindChannel(IoctlBindChannel& params) {
     LOG_DEBUG(Service_NVDRV, "called, fd={:X}", params.fd);
 
+    auto publication = system.GPU().AcquireChannelBinding();
+    if (!publication) {
+        return NvResult::InvalidState;
+    }
     auto gpu_channel_device = module.GetDevice<nvhost_gpu>(params.fd);
     if (!gpu_channel_device || !gpu_channel_device->channel_state) return NvResult::InvalidState;
-    gpu_channel_device->channel_state->memory_manager = gmmu;
+    // Serialize the GMMU snapshot with AllocAsEx and replacement with Setup/Submit.
+    // The terminal entry also covers waiting for these service locks.
+    std::shared_ptr<Tegra::MemoryManager> previous;
+    {
+        std::scoped_lock lock(mutex, gpu_channel_device->channel_mutex);
+        previous = std::exchange(gpu_channel_device->channel_state->memory_manager, gmmu);
+    }
+    // Old mapping retirement may need its own locks. Retire outside the service
+    // locks while the publication entry still excludes renderer teardown.
     return NvResult::Success;
 }
 

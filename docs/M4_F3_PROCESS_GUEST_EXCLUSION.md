@@ -421,11 +421,36 @@ exercise wrong-domain entry, rollback omission, lock inversion, factory/Open ear
 release and provider retirement order. Four full production units pass local WSL
 syntax. See [validation](M4_F3_CHANNEL_CREATION_VALIDATION.md).
 
-An existing fd can still publish its address-space binding after Close; the test
-executes that actual route as a separate positive scope counterexample. No native
-GPU completion, reversible ProcessCohortStop coupling, escaped-owner revocation
-or durable Unknown registry is proved. All THREE M4 phases remain unfinished;
-ordinary GuestBackingAdmission remains Unknown.
+The creation-only baseline retained an existing-fd address-space binding bypass.
+The following extension addresses that NV entry family. No native GPU completion,
+reversible ProcessCohortStop coupling or durable Unknown registry follows from it.
+
+### Follow-up: terminal NV channel/address-space binding
+
+AcquireChannelBinding returns an Entry from the same cold GPU publication domain.
+The real NV BindChannel holds it before fd lookup, through both service-lock waits,
+shared-owner replacement and method acknowledgement. Closed entry refuses without
+publishing the GMMU owner. The address-space lock serializes the snapshot with
+AllocAsEx; the existing channel lock serializes replacement with Setup/Submit.
+The previous owner retires after both locks release, while Entry still protects
+it against renderer teardown; mapping retirement may acquire its own mutex.
+
+Windows actual-body positives passed three repeats and all 24 precise controls,
+including seven binding-specific ones. They cover closed refusal, lookup/return/
+old-owner-release teardown pauses, cold/null behavior and both lock waits through
+Close. An independent thread must acquire both service locks during old-owner
+release. ThreadManager regressions also passed three repeats and their terminal/
+blocking-handoff controls. Full production Windows syntax remains blocked by a
+missing Boost dependency; no current-source Linux/device validation is inferred.
+See [the Windows validation boundary](M4_F3_CHANNEL_BINDING_VALIDATION.md).
+
+Externally retained GMMU BindRasterizer remains a successful post-Close actual-body
+scope counterexample. Initialized engines still hold old-manager references; safe
+live-engine rebinding is not established by serializing the service methods.
+Complete facade/Module/service lifetime, output copying, mapping/alias producers,
+native completion and durable Unknown retirement remain separate. This terminal
+counter is not wired into reversible ProcessCohortStop and grants no guest backing
+authority. All THREE M4 phases remain unfinished; ordinary admission stays Unknown.
 
 ## Evidence and limits
 

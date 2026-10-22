@@ -309,5 +309,13 @@ lock order and five teardown pauses from construction through session commit.
 Six controls reject an unrelated gate, missing rollback, inverted locks, early
 factory/Open release and missing fd retirement. Real constructor/destructor,
 factory/Open/session methods execute against fake event/syncpoint providers.
-The retained scope counterexample is now existing-channel address-space binding:
-it still succeeds after Close. Guest admission remains Unknown.
+External NV channel/address-space binding now obtains the same owned Entry before
+fd lookup, serializes the GMMU snapshot and Setup/Submit association, and retires
+the previous owner outside the service locks before releasing the Entry. The
+suite covers post-Close refusal, normal cold/null binding, lookup/acknowledgement/
+retirement teardown pauses and both service-lock waits. Seven additional controls
+require precise refusal/lifetime/lock/retirement failures. The retained independent
+scope witness now calls actual BindRasterizer through an external GMMU after
+Close. Safe live-engine rebind, raw/mapping/native producers, reversible cohort
+stop and durable Unknown retirement are unproved. Guest admission stays Unknown.
+See [the Windows report](../../docs/M4_F3_CHANNEL_BINDING_VALIDATION.md).

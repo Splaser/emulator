@@ -1,5 +1,44 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: Windows continuation — retained NV channel/address-space binding
+
+Synced the clean issue-372 worktree from f1412a1c08 to afternoon head
+`72555967d162e7546eee67c631021dd5538f9a52` with a fast-forward. Existing PR #375,
+other worktrees, main and dependency choices were retained. The current local
+implementation follows the latest retained channel-creation checkpoint.
+
+BindChannel now acquires the GPU's cold terminal publication Entry before fd
+lookup and service locks. Closed entry refuses before owner replacement. It
+serializes the GMMU snapshot with AllocAsEx and replacement with Setup/Submit,
+then releases both service locks before retiring the old shared owner. Entry
+remains held through that retirement and method acknowledgement. No queue wait,
+completion certificate, ordinary guest admission or native engine rebind proof
+is added. Healthy cold and nullable pre-initialization behavior is preserved.
+
+Windows MinGW GCC 13.2/Python 3.14.6 publication positives passed three repeats;
+all 17 prior controls plus seven new binding controls passed their exact failure
+markers. The baseline first failed the closed-binding marker before production
+edits. Lifecycle prerequisites passed ten cases three times plus cancelled-read
+coverage. Actual ThreadManager passed three repeats, 19 terminal controls and
+the blocking-handoff negative topology control. All 15 publication/nine thread
+manifest source hashes matched current sources before removing temporary outputs.
+
+The full production nvhost_as_gpu.cpp Windows syntax attempt is blocked by the
+missing Boost unordered_flat_map.hpp dependency; no full production TU/build or
+new Linux/Android/native Vulkan validation is claimed. Earlier Linux 39729352143
+was independently observed green at d8b0c3897d, not this new source. Reproduce the
+local checks using the commands in the linked validation report. Temporary outputs
+are removed after inspection; retained tests and Markdown are the handoff.
+
+The old post-Close NV binding witness is closed by the candidate. The independent
+actual-body external GMMU BindRasterizer assignment still succeeds after Close.
+Existing initialized engines retain references to their old manager, so safe
+live-engine rebinding remains unproved and must not qualify for admission.
+Facade/Module/service entry lifetime, other mappings/raw aliases, native GPU work
+and durable Unknown retention remain outstanding. All THREE M4 phases remain
+unfinished; ordinary GuestBackingAdmission remains Unknown. Main still waits for
+M7. See [Windows validation and remaining limits](M4_F3_CHANNEL_BINDING_VALIDATION.md).
+
 ## 2026-10-22: retained channel creation through NV fd/session publication
 
 AllocateChannel now returns its channel together with the cold publication Entry.

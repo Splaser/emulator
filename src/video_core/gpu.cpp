@@ -124,6 +124,10 @@ struct GPU::Impl {
         return publication;
     }
 
+    std::optional<Common::TerminalIngress::Entry> AcquireChannelBinding() {
+        return owner_publications.TryEnter();
+    }
+
     void ReleaseChannel(Control::ChannelState& to_release) {
         UNIMPLEMENTED();
     }
@@ -531,6 +535,10 @@ GPU::InitChannel(Control::ChannelState& to_init, u64 program_id, bool allow_defe
 
 void GPU::BindChannel(s32 channel_id) {
     impl->BindChannel(channel_id);
+}
+
+std::optional<Common::TerminalIngress::Entry> GPU::AcquireChannelBinding() {
+    return impl->AcquireChannelBinding();
 }
 
 void GPU::ReleaseChannel(Control::ChannelState& to_release) {
