@@ -1,5 +1,22 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: complete Boost and real Windows production objects
+
+The user asked to resolve the local dependency blocker before further M4 work.
+The incomplete benchmark Boost tree was replaced for validation by a complete,
+SHA256-verified official Boost 1.87.0 cache outside the repository. Project pins
+are unchanged. The new run_windows_production_checks.py helper reproduces the
+check and can fetch the verified shared header cache on another Windows machine.
+
+At production baseline c6034b8e45, gpu.cpp, nvhost_as_gpu.cpp, nvhost_gpu.cpp,
+nvdrv.cpp and channel_state.cpp all generated real Windows x64 COFF objects with
+zero compiler diagnostics. All 11 input hashes and five object digests/signatures
+were independently verified. This closes the prior missing-header/object-compile
+blocker, not an application link or native completion proof. See
+[production compilation evidence](M4_F3_WINDOWS_PRODUCTION_VALIDATION.md).
+No new workflow/Android build or main merge. Continue within the same three phases;
+initialized-engine GMMU replacement is the next concrete ownership boundary.
+
 ## 2026-10-22: Windows continuation — retained NV channel/address-space binding
 
 Synced the clean issue-372 worktree from f1412a1c08 to afternoon head

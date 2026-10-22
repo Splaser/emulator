@@ -73,7 +73,7 @@ and the blocking-handoff negative topology control. Normal CPU-read/composite
 callback and cancellation coverage also remain mandatory in the publication
 suite's lifecycle prerequisite.
 
-Full production nvhost_as_gpu.cpp Windows syntax checking was attempted but
+At the initial checkpoint, full production nvhost_as_gpu.cpp Windows syntax checking was attempted but
 stopped at missing boost/unordered/unordered_flat_map.hpp. No full production
 translation-unit/build, new Linux CI, Android build or native Vulkan acceptance is
 claimed for this source. Earlier Linux run 39729352143 is green at d8b0c3897d,
@@ -86,3 +86,11 @@ All three M4 phases remain unfinished. Reversible ProcessCohortStop linkage,
 independent service/raw/mapping producers, queued/native GPU completion and a
 durable Unknown isolation/retirement registry are still required. Main remains
 unchanged until the requested final M7 zero-copy merge.
+
+## Dependency follow-up
+
+The missing Boost blocker is now resolved. All five real GPU/NV/channel translation
+units compiled into Windows x64 COFF objects at production baseline c6034b8e45,
+with zero diagnostics and matched source/object hashes. See
+[the focused production compilation record](M4_F3_WINDOWS_PRODUCTION_VALIDATION.md).
+This adds object-compilation evidence, not application linking or native execution.
