@@ -12,6 +12,7 @@ namespace Core { struct SchedulerTestAccess; }
 
 namespace Kernel {
 class KProcess;
+class ProcessCohortStop;
 
 // Cold lifecycle inventory, independent of OS process publication. A snapshot
 // retains objects, not writable-alias coverage or permission to access backing.
@@ -31,16 +32,31 @@ class ProcessOwnerRoster {
     std::shared_ptr<State> state{std::make_shared<State>()};
 
 public:
+    class Snapshot;
     class CreationRefused : public std::runtime_error {
     public:
         CreationRefused() : std::runtime_error{"process creation closed"} {}
     };
     class CreationClosure {
         friend class ProcessOwnerRoster;
+        friend class ProcessCohortStop;
         std::shared_ptr<State> state;
         u64 owner;
         bool released{};
         CreationClosure(std::shared_ptr<State> state_, u64 owner_);
+        // Cold cancellation only. Reserve the fallible roster lock before any
+        // other domain is reopened. No callbacks or owner releases while held.
+        class CancelReservation {
+            friend class CreationClosure;
+            CreationClosure* closure;
+            std::unique_lock<std::mutex> lock;
+            CancelReservation(CreationClosure& closure_, std::unique_lock<std::mutex>&& lock_);
+        public:
+            CancelReservation(CancelReservation&&) noexcept = default;
+            CancelReservation(const CancelReservation&) = delete;
+            void Commit() noexcept;
+        };
+        std::optional<CancelReservation> TryReserveCancel(const Snapshot* expected = nullptr);
     public:
         CreationClosure(CreationClosure&&) noexcept;
         CreationClosure(const CreationClosure&) = delete;
@@ -51,6 +67,7 @@ public:
     };
     class Snapshot {
         friend class ProcessOwnerRoster;
+        friend class CreationClosure;
         std::shared_ptr<State> state;
         std::vector<KScopedAutoObject<KProcess>> owners;
         u64 revision{};

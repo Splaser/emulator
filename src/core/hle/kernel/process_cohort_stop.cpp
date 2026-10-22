@@ -64,10 +64,16 @@ ProcessCohortStop::Result ProcessCohortStop::Poll() {
     return result;
 }
 bool ProcessCohortStop::CancelNoEffects() {
-    if (Poll() != Result::BackendsStopped || !execution->CancelNoEffects()) return false;
-    if (!publication.ResumeNoEffects() || !creation.CancelNoEffects()) {
+    if (Poll() != Result::BackendsStopped) return false;
+    // Resolve roster contention BEFORE any reopening. The stopped execution
+    // cancellation below only polls/updates atomics; it cannot call backend or
+    // lifecycle callbacks, release retained owners, or acquire the roster lock.
+    auto reservation = creation.TryReserveCancel(std::addressof(*owners));
+    if (!reservation) { Quarantine(); return false; }
+    if (!execution->CancelNoEffects() || !publication.ResumeNoEffects()) {
         Quarantine(); return false;
     }
+    reservation->Commit();
     released = true;
     return true;
 }

@@ -40,6 +40,9 @@ public:
     Device& DeviceMemory() {return device;}
 };
 struct SchedulerTestAccess {
+    static auto HoldRoster(Kernel::ProcessOwnerRoster& roster) {
+        return std::unique_lock{roster.state->mutex};
+    }
     static auto HoldCore( Kernel::PhysicalCore& core) {return std::unique_lock{core.m_guard};}
     static bool Running(Kernel::PhysicalCore& core) {
         std::scoped_lock lock{core.m_guard};return core.m_arm_interface!=nullptr;

@@ -86,13 +86,32 @@ bool ProcessOwnerRoster::CreationClosure::IsClosed() const {
     return lock.owns_lock() && state->creation_owner == owner &&
            !state->creation_unknown && !state->poisoned;
 }
-bool ProcessOwnerRoster::CreationClosure::CancelNoEffects() {
-    if (!state || released) return false;
+ProcessOwnerRoster::CreationClosure::CancelReservation::CancelReservation(
+    CreationClosure& closure_, std::unique_lock<std::mutex>&& lock_)
+    : closure{&closure_}, lock{std::move(lock_)} {}
+
+void ProcessOwnerRoster::CreationClosure::CancelReservation::Commit() noexcept {
+    // Only the same orchestration thread can quarantine this closure. The held
+    // mutex prevents registration, retirement or poisoning during cancellation.
+    closure->state->creation_owner = 0;
+    closure->released = true;
+}
+
+std::optional<ProcessOwnerRoster::CreationClosure::CancelReservation>
+ProcessOwnerRoster::CreationClosure::TryReserveCancel(const Snapshot* expected) {
+    if (!state || released) return std::nullopt;
     std::unique_lock lock{state->mutex, std::try_to_lock};
     if (!lock.owns_lock() || state->creation_owner != owner || state->creation_unknown || state->poisoned)
-        return false;
-    state->creation_owner = 0;
-    released = true;
+        return std::nullopt;
+    if (expected && (expected->state != state || expected->revision != state->revision))
+        return std::nullopt;
+    return CancelReservation{*this, std::move(lock)};
+}
+
+bool ProcessOwnerRoster::CreationClosure::CancelNoEffects() {
+    auto reservation = TryReserveCancel();
+    if (!reservation) return false;
+    reservation->Commit();
     return true;
 }
 void ProcessOwnerRoster::CreationClosure::Quarantine() {

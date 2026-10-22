@@ -68,6 +68,15 @@ an old or moved-from request cannot reopen a new operation. ProducerDrain's
 moved-from Closure operations now safely refuse instead of dereferencing moved
 state. This does not add a mechanism for cancelling an uncertain GPU operation.
 
+For the sustained cohort wrapper, cancellation reserves the roster mutex before
+reopening any domain and validates its retained snapshot revision under that same
+reservation. Contention or intervening retirement refuses with all those gates
+still closed. The reservation spans only stopped-state validation and atomic gate
+operations; it spans no callbacks, owner destruction, or roster re-entry. This
+removes the fallible late creation-release lock, but does not make sequential
+ProducerDrain resumes atomic against concurrent Seal. Cross-domain cancellation
+and durable Unknown ownership must be resolved before any effect-bearing adoption.
+
 ## Evidence and limits
 
 The actual-body Linux fixture covers Run and Step, a halt request followed by a

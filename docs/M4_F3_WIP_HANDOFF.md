@@ -1,5 +1,40 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: reserve roster cancellation before reopening (phase one)
+
+The previous exact-source Linux run
+[39562678761](https://github.com/Splaser/emulator/actions/runs/39562678761)
+completed successfully at `f9e39ecaa4a1f042b02fcb9ad6b9de3b275d6996`,
+including the native cohort test. Android was excluded. This is GitHub job/test
+success; independent artifact download/hash recovery has not been completed here.
+
+Cohort cancellation previously reopened execution and cold publication before
+trying the roster mutex to reopen creation. Legitimate constructor contention
+could therefore cause a false return after CPUs had already resumed. Cancellation
+now obtains a private, move-only roster cancellation reservation FIRST. The held
+mutex also validates the captured cohort revision, preventing retirement between
+the final Poll and reservation from being accepted as the same cohort. Committing
+creation then needs no further lock acquisition. No backend/lifecycle callback,
+owner Close, or roster re-entry occurs while this reservation is held; the inner
+stop is already latched, and only validation/atomic gate operations run there.
+
+The extracted production fixture deterministically inserts contention/retirement
+immediately after the final successful cancellation Poll. It checks that refused
+cancellation leaves CPU, initialization and cold publication closed. Three normal
+repeats and SIX precise mutants pass, including moving reservation after reopening
+and removing the reserved revision check. Existing stop positives/four mutants,
+roster positives/six mutants and actual roster/cohort production TU syntax pass.
+Logs: `.diagnostics/m4-cancel-{cohort,stop,roster}-regression.log` and
+`.diagnostics/m4-cancel-production-syntax.log`.
+
+This fixes roster-related partial reopening, not atomic cancellation across all
+domains. ProducerDrain Seal can still race the sequential execution/initialization/
+publication resumes; a later failure cannot revoke an earlier successful resume.
+Before any effect-bearing adoption, a genuine cross-domain release protocol and
+durable Unknown owner retention are required. The current types cannot adopt GPU
+work, and ordinary GuestBackingAdmission remains Unknown. All three M4 phases
+remain unfinished; do not count this lifecycle fix as an additional milestone.
+
 ## 2026-10-21: phase-one sustained cohort integration (not a separate milestone)
 
 The user consolidated remaining M4 work into THREE phases: (1) retained process
@@ -12,7 +47,7 @@ individual lifecycle fixes as new milestones. All three phases remain unfinished
 Implementation source: `f9e39ecaa4a1f042b02fcb9ad6b9de3b275d6996`.
 Exact-source Linux validation:
 [run 39562678761](https://github.com/Splaser/emulator/actions/runs/39562678761),
-in progress at the early mapping verification step, no failures when checked.
+completed successfully, including the native process-cohort test.
 Android is excluded. This workflow now has NINE CTests, including the new native
 process-cohort case; do not duplicate dispatch. The ignored artifact verifier
 detects the ninth test/new cohort manifest and requires its four precise mutants.
@@ -44,7 +79,7 @@ wrapper controls, teardown, cross-call ownership and ProducerDrain regressions p
 Actual cohort/process/kernel/Memory/OS-loader production TUs and the expanded native
 test TU pass syntax. Logs: `.diagnostics/m4-cohort-{integration,stop,roster,mapping,
 teardown,ownership,primitive}-regression.log`, `m4-cohort-{native-,}syntax.log`.
-Native runtime is pending: its real checked Dynarmic loop also checks creation/
+Native runtime passed in that run: its real checked Dynarmic loop also checks creation/
 slab rollback, cold publication/reset/move/interface/module/OS refusal and mapping
 after known cancellation. Keep the original unchecked-loop negative unchanged.
 

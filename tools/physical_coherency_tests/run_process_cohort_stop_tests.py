@@ -25,7 +25,12 @@ while depth:
     depth+=(factory_text[end]=='{')-(factory_text[end]=='}');end+=1
 factory='namespace Kernel {\n'+factory_text[start:end]+'\n}\n'
 test='tools/physical_coherency_tests/process_cohort_stop_tests.cpp.in'
-source=head+methods+factory+(root/test).read_text()
+cancel_poll='    if (Poll() != Result::BackendsStopped) return false;'
+assert methods.count(cancel_poll)==1
+# Deterministic scheduler interleaving only: the extracted lock/gate bodies are
+# unchanged. A constructor holds the roster just after the final successful Poll.
+methods=methods.replace(cancel_poll,cancel_poll+'\n    if (before_cohort_cancel) before_cohort_cancel();')
+source=head+'extern std::function<void()> before_cohort_cancel;\n'+methods+factory+(root/test).read_text()
 capture = methods[methods.index('    if (!owners) {'):methods.index('    if (!execution) {')]
 late_capture = source.replace(capture, '').replace('    const auto result = execution->Poll();',
     '    const auto result = execution->Poll();\n' + capture)
@@ -44,6 +49,18 @@ variants += [
         '    static Common::ProducerDrain unrelated;\n    auto publication = unrelated.TryClose(poll_budget);'),
      'held publication closure must refuse ordinary mappings'),
 ]
+reservation=('    auto reservation = creation.TryReserveCancel(std::addressof(*owners));\n'
+             '    if (!reservation) { Quarantine(); return false; }\n')
+release=('    if (!execution->CancelNoEffects() || !publication.ResumeNoEffects()) {\n'
+         '        Quarantine(); return false;\n    }\n')
+assert source.count(reservation)==1 and source.count(release)==1
+variants += [('reserve-roster-after-reopening', source.replace(reservation,'').replace(
+    release,release+reservation), 'roster cancellation contention must not reopen a CPU entry')]
+revision=('    if (expected && (expected->state != state || expected->revision != state->revision))\n'
+          '        return std::nullopt;\n')
+assert source.count(revision)==1
+variants += [('omit-reserved-cohort-revision',source.replace(revision,'    (void)expected;\n'),
+              'a changed cohort must refuse cancellation before reopening')]
 command=[os.environ.get('CXX','g++'),'-std=c++23','-O1','-pthread','-Wall','-Wextra','-Werror',
          '-Wno-unused-parameter','-I',str(root/'.diagnostics/m4-process-execution-stop/stubs'),'-I',str(root/'src')]
 for name,text,expected in variants:

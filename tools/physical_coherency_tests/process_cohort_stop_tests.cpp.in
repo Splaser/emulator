@@ -1,3 +1,6 @@
+// Extraction-only scheduling hook, inserted after cancellation's final Poll.
+// It never replaces a production lock or gate operation.
+std::function<void()> before_cohort_cancel;
 int main() {
     using R=Kernel::ProcessCohortStop::Result;
     using Domain=Core::Memory::ControlledMappingPublication;
@@ -68,6 +71,39 @@ int main() {
         try {Kernel::KProcess late{kernel};} catch(const Kernel::ProcessOwnerRoster::CreationRefused&) {refused=true;}
         assert(refused && "Unknown must keep creation closed after handle release");
         assert(!kernel.ProcessPublicationDomain()->TryEnter());
+    }
+    { // A refused constructor can contend with cancellation AFTER a healthy Poll.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto stop=caller.TryStopProcessCohort(64);assert(stop);
+        assert(stop->Poll()==R::BackendsStopped);
+        std::promise<void> start,locked,release;
+        auto begin=start.get_future();auto held=locked.get_future();auto leave=release.get_future();
+        std::thread constructor{[&] {
+            begin.wait();
+            auto lock=Core::SchedulerTestAccess::HoldRoster(kernel.impl->process_owners);
+            locked.set_value();leave.wait();
+        }};
+        before_cohort_cancel=[&] {start.set_value();held.wait();};
+        assert(!stop->CancelNoEffects());
+        before_cohort_cancel={};
+        assert(!kernel.PhysicalCore(0).TryCloseGuestExecution(8) &&
+               "roster cancellation contention must not reopen a CPU entry");
+        assert(!kernel.TryEnterGuestProcessInitialization() &&
+               !kernel.ProcessPublicationDomain()->TryEnter());
+        release.set_value();constructor.join();
+        assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
+    }
+    { // Retirement between Poll and reservation must not be mistaken for the same cohort.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto stop=caller.TryStopProcessCohort(64);assert(stop);
+        assert(stop->Poll()==R::BackendsStopped);
+        before_cohort_cancel=[&] {kernel.impl->process_owners.BeginRetirement(caller.registration);};
+        assert(!stop->CancelNoEffects() &&
+               "a changed cohort must refuse cancellation before reopening");
+        before_cohort_cancel={};
+        assert(!kernel.PhysicalCore(0).TryCloseGuestExecution(8));
+        assert(!kernel.TryEnterGuestProcessInitialization() &&
+               !kernel.ProcessPublicationDomain()->TryEnter());
     }
     { // A zero-ref owner cannot be omitted or resurrected to certify a cohort.
         Kernel::KernelCore kernel;Kernel::KProcess caller{kernel},unready{kernel};
