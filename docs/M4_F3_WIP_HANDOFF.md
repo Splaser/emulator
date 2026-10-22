@@ -1,5 +1,34 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: retained channel initialization and NV acknowledgement
+
+InitChannel now returns the GPU's cold terminal publication Entry to both NV
+Setup and Submit callers, including ready-channel Submit. Deferred Setup remains
+supported; unbound Submit refuses. Setup is serialized with Submit's existing
+channel mutex. Closed entry refuses before caller program-id/fence/queue effects.
+Entry survives through final caller acknowledgement, so returning from backend
+initialization alone cannot release teardown protection.
+
+ChannelState::Init no longer sets initialized early. The GPU sets ready only after
+engine construction, alias binding and backend cache initialization succeed.
+Before partial effects it marks initialization_failed; any exception preserves
+that state and later requests refuse rather than retrying the affected owner.
+This is retry isolation, not proof of native resource retirement.
+
+Windows publication/lifecycle tests pass three repeats, the prior controls and
+six new precise channel controls. Actual GPU/NV Setup/Submit methods are executed;
+engine/backend/queue/syncpoint work remains fixture code. Complete production
+gpu.cpp, nvhost_gpu.cpp and channel_state.cpp pass local WSL syntax. See
+[the retained validation conclusion](M4_F3_CHANNEL_INITIALIZATION_VALIDATION.md).
+Temporary outputs are removed after inspection; no new remote/Android build.
+
+CreateChannel still succeeds after Close as an actual-body positive scope
+counterexample. Channel creation and address-space binding/configuration remain
+unclosed. Pre-submit guest buffer reads, existing aliases, void queue-admission
+acknowledgement, native writers and durable Unknown ownership are independent.
+All THREE M4 phases remain unfinished and ordinary GuestBackingAdmission remains
+Unknown. Main remains unchanged until M7's final zero-copy merge.
+
 ## 2026-10-22: retained GPU address-space owner publication
 
 GPU owns a separate cold terminal address-publication counter, open before Start,

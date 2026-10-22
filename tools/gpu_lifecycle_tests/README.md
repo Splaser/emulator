@@ -272,7 +272,7 @@ start before GPU Start, closes with NotifyShutdown, and joins before renderer
 teardown. InitAddressSpace returns an optional owned Entry, retained by AllocAsEx
 through its final VM/GMMU commit. The NV caller stages both owners locally and
 returns InvalidState on refusal without publishing candidate state. This does
-not close channel creation/initialization, existing mappings, or other raw aliases.
+not close channel creation/address-space binding, existing mappings, or other raw aliases.
 
 Run `python tools/gpu_lifecycle_tests/run_owner_publication_tests.py --repeat 3`
 for actual GPU close/join/API/forwarding, MemoryManager binding assignment, VM
@@ -284,3 +284,15 @@ Its optional `--output-dir` isolates local binaries for subsequent cleanup.
 Allocator/GMMU construction, renderer, worker and complete System lifetime remain
 fixtures; this terminal lease is not reversible Guest admission or native GPU
 completion. Candidate construction before Entry acquisition remains outside it.
+
+The same suite now covers channel initialization and both actual NV Setup/Submit
+callers. InitChannel returns an Entry held through caller acknowledgement, even
+for a ready-channel Submit. Deferred Setup is allowed; unbound Submit refuses.
+Ready is published after backend initialization; partially effected owners keep
+initialization_failed and cannot retry. Setup/Submit share the channel mutex.
+Six channel controls reject early ready, missing retry isolation, either ignored
+refusal, or either caller releasing protection early. Four teardown pauses cover
+engine construction, backend initialization, Setup metadata and ready Submit
+acknowledgement. Engines/backend/queue/syncpoints are fixtures. Actual CreateChannel
+still succeeds after Close as a separate scope counterexample. Guest-buffer reads
+before SubmitGPFIFOImpl and actual queue acceptance/completion remain independent.

@@ -347,6 +347,49 @@ for later GMMU use, drain native writers, or provide durable Unknown retirement.
 It is terminal and not attached to ProcessCohortStop. All THREE M4 phases remain
 unfinished and ordinary GuestBackingAdmission stays Unknown.
 
+### Follow-up: terminal channel initialization and NV acknowledgement
+
+InitChannel now returns an owned publication Entry from the same cold GPU domain.
+Both actual NV SetupGPFIFOChannel and SubmitGPFIFOImpl retain it through their
+final metadata/fence/queue acknowledgement. Submit obtains an entry even for an
+already initialized channel. Setup now shares Submit's channel mutex. Closed
+entry refuses before Setup's program-id/fence output writes or Submit's fence
+increment/queue calls. An already initialized duplicate Setup still reports
+AlreadyAllocated without effects.
+
+| Channel transition | Disposition |
+| --- | --- |
+| Unbound deferred Setup | Entry retained while recording program id/fence; no engine materialization |
+| Unbound Submit | Refuse; no queue or fence-increment effects |
+| Bound cold initialization | Mark potential partial effects before engine construction; ready remains false |
+| Engine/binding/backend initialization throws | Keep initialization_failed true and ready false; preserve parent ownership and reject retry |
+| Complete backend initialization | Publish initialized only now; clear failure marker; return Entry to caller |
+| Ready-channel Submit | Reacquire publication Entry without reinitializing engines |
+| Close before entry | No new initialization/metadata/submission effects on these two NV routes |
+| Close after entry | Existing initialization and caller acknowledgement may finish; teardown joins them |
+
+ChannelState::Init no longer publishes initialized before alias/backend-cache
+initialization. The first exception still propagates as before; subsequent Setup/
+Submit requests reject a partially effected owner instead of rebuilding engines
+or replaying cache publication. This marker only isolates retries; it is not a
+native resource quarantine/retirement certificate.
+
+Windows actual GPU/NV method tests cover deferred setup, required address-space
+binding, cold materialization, ready-channel reuse, closed no-effects results,
+engine/backend partial failure and retained teardown at engine/backend/Setup/
+Submit stages. Six precise controls detect premature ready, omitted failure
+isolation, ignored Setup/Submit refusal, or either caller releasing Entry early.
+Complete production GPU, nvhost_gpu and ChannelState units pass local WSL syntax.
+
+Actual GPU CreateChannel still succeeds after NotifyShutdown in the fixture and
+is retained as an independent owner-creation counterexample. Address-space bind
+to channel, other configuration APIs, pre-SubmitGPFIFOImpl guest-buffer reads,
+existing alias lifetime and native writers remain outside this closure. An
+admitted Submit racing later queue shutdown may still see void PushGPUEntries
+cancelled; its service acknowledgement is not queue acceptance or checked device
+completion. All THREE M4 phases remain unfinished; ordinary admission stays
+Unknown. No reversible ProcessCohortStop or durable GPU Unknown registry is added.
+
 ## Evidence and limits
 
 The actual-body Linux fixture covers Run and Step, a halt request followed by a

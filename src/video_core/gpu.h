@@ -152,7 +152,10 @@ public:
 
     std::shared_ptr<Control::ChannelState> AllocateChannel();
 
-    void InitChannel(Control::ChannelState& to_init, u64 program_id);
+    /// Retain through caller metadata/submission publication. Deferred setup may
+    /// record a program id before address-space binding, but cannot submit work.
+    [[nodiscard]] std::optional<Common::TerminalIngress::Entry>
+    InitChannel(Control::ChannelState& to_init, u64 program_id, bool allow_deferred = false);
 
     void BindChannel(s32 channel_id);
 

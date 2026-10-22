@@ -80,10 +80,24 @@ struct GPU::Impl {
         return CreateChannel(new_channel_id++);
     }
 
-    void InitChannel(Control::ChannelState& to_init, u64 program_id) {
-        to_init.Init(system, gpu, program_id);
-        to_init.BindRasterizer(rasterizer);
-        rasterizer->InitializeChannel(to_init);
+    std::optional<Common::TerminalIngress::Entry>
+    InitChannel(Control::ChannelState& to_init, u64 program_id, bool allow_deferred) {
+        auto publication = owner_publications.TryEnter();
+        if (!publication || to_init.initialization_failed) return std::nullopt;
+        if (!to_init.memory_manager) {
+            return allow_deferred ? std::move(publication) : std::nullopt;
+        }
+        if (!to_init.initialized) {
+            // A throw may leave engines, aliases or backend cache entries behind.
+            // Do not replay that partially effected initialization on this owner.
+            to_init.initialization_failed = true;
+            to_init.Init(system, gpu, program_id);
+            to_init.BindRasterizer(rasterizer);
+            rasterizer->InitializeChannel(to_init);
+            to_init.initialized = true;
+            to_init.initialization_failed = false;
+        }
+        return publication;
     }
 
     std::optional<Common::TerminalIngress::Entry>
@@ -492,8 +506,9 @@ std::shared_ptr<Control::ChannelState> GPU::AllocateChannel() {
     return impl->AllocateChannel();
 }
 
-void GPU::InitChannel(Control::ChannelState& to_init, u64 program_id) {
-    impl->InitChannel(to_init, program_id);
+std::optional<Common::TerminalIngress::Entry>
+GPU::InitChannel(Control::ChannelState& to_init, u64 program_id, bool allow_deferred) {
+    return impl->InitChannel(to_init, program_id, allow_deferred);
 }
 
 void GPU::BindChannel(s32 channel_id) {

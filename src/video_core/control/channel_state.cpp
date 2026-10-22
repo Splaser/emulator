@@ -29,7 +29,6 @@ void ChannelState::Init(Core::System& system, GPU& gpu, u64 program_id_) {
     kepler_compute = std::make_unique<Engines::KeplerCompute>(system, *memory_manager);
     maxwell_dma = std::make_unique<Engines::MaxwellDMA>(system, *memory_manager);
     kepler_memory = std::make_unique<Engines::KeplerMemory>(system, *memory_manager);
-    initialized = true;
 }
 
 void ChannelState::BindRasterizer(VideoCore::RasterizerInterface* rasterizer) {
