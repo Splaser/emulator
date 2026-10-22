@@ -57,27 +57,43 @@ struct GPU::Impl {
         }
     }
 
-    std::shared_ptr<Control::ChannelState> CreateChannel(s32 channel_id) {
+    std::optional<GPU::ChannelAllocation> AllocateChannel() {
+        auto publication = owner_publications.TryEnter();
+        if (!publication) return std::nullopt;
+        std::scoped_lock creation_lock{channel_creation_mutex};
+        const s32 channel_id = new_channel_id++;
         auto channel_state = std::make_shared<Tegra::Control::ChannelState>(channel_id);
-        channels.emplace(channel_id, channel_state);
-        scheduler->DeclareChannel(channel_state);
-        return channel_state;
+        {
+            std::scoped_lock map_lock{channel_map_mutex};
+            channels.emplace(channel_id, channel_state);
+        }
+        // Scheduler::Push holds its scheduling lock while binding a channel.
+        // Never hold channel_map_mutex while acquiring that scheduler lock.
+        try {
+            scheduler->DeclareChannel(channel_state);
+        } catch (...) {
+            std::scoped_lock map_lock{channel_map_mutex};
+            channels.erase(channel_id);
+            throw;
+        }
+        return GPU::ChannelAllocation{std::move(channel_state), std::move(*publication)};
     }
 
     void BindChannel(s32 channel_id) {
         if (bound_channel == channel_id) {
             return;
         }
-        auto it = channels.find(channel_id);
-        ASSERT(it != channels.end());
+        std::shared_ptr<Control::ChannelState> channel_state;
+        {
+            std::scoped_lock map_lock{channel_map_mutex};
+            auto it = channels.find(channel_id);
+            ASSERT(it != channels.end());
+            channel_state = it->second;
+        }
         bound_channel = channel_id;
-        current_channel = it->second.get();
+        current_channel = channel_state.get();
 
         rasterizer->BindChannel(*current_channel);
-    }
-
-    std::shared_ptr<Control::ChannelState> AllocateChannel() {
-        return CreateChannel(new_channel_id++);
     }
 
     std::optional<Common::TerminalIngress::Entry>
@@ -480,6 +496,8 @@ struct GPU::Impl {
 
     std::unique_ptr<Tegra::Control::Scheduler> scheduler;
     std::unordered_map<s32, std::shared_ptr<Tegra::Control::ChannelState>> channels;
+    std::mutex channel_creation_mutex;
+    std::mutex channel_map_mutex;
     Tegra::Control::ChannelState* current_channel;
     s32 bound_channel{-1};
 
@@ -502,7 +520,7 @@ GPU::GPU(Core::System& system, bool is_async, bool use_nvdec)
 
 GPU::~GPU() = default;
 
-std::shared_ptr<Control::ChannelState> GPU::AllocateChannel() {
+std::optional<GPU::ChannelAllocation> GPU::AllocateChannel() {
     return impl->AllocateChannel();
 }
 

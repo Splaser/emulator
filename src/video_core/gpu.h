@@ -150,7 +150,12 @@ public:
     /// Signal the ending of command list.
     void OnCommandListEnd();
 
-    std::shared_ptr<Control::ChannelState> AllocateChannel();
+    struct ChannelAllocation {
+        std::shared_ptr<Control::ChannelState> channel;
+        Common::TerminalIngress::Entry publication;
+    };
+    /// Retain publication through device/fd/session construction, not only allocation.
+    [[nodiscard]] std::optional<ChannelAllocation> AllocateChannel();
 
     /// Retain through caller metadata/submission publication. Deferred setup may
     /// record a program id before address-space binding, but cannot submit work.

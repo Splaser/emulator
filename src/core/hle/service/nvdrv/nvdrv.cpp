@@ -77,8 +77,12 @@ Module::Module(Core::System& system)
         return open_files.emplace(fd, std::move(device)).first;
     };
     builders["/dev/nvhost-gpu"] = [this, &system](DeviceFD fd) {
-        auto device = std::make_shared<Devices::nvhost_gpu>(system, events_interface, container);
-        return open_files.emplace(fd, std::move(device)).first;
+        auto allocation = system.GPU().AllocateChannel();
+        if (!allocation) return OpenResult{open_files.end()};
+        auto device = std::make_shared<Devices::nvhost_gpu>(system, events_interface, container,
+                                                         std::move(allocation->channel));
+        return OpenResult{open_files.emplace(fd, std::move(device)).first,
+                          std::move(allocation->publication)};
     };
     builders["/dev/nvhost-ctrl-gpu"] = [this, &system](DeviceFD fd) {
         auto device = std::make_shared<Devices::nvhost_ctrl_gpu>(system, events_interface);
@@ -110,7 +114,10 @@ Module::Module(Core::System& system)
     };
 }
 
-Module::~Module() {}
+Module::~Module() {
+    // Devices release events and syncpoints through these still-live providers.
+    open_files.clear();
+}
 
 NvResult Module::VerifyFD(DeviceFD fd) const {
     if (fd < 0) {
@@ -135,7 +142,9 @@ DeviceFD Module::Open(const std::string& device_name, NvCore::SessionId session_
 
     const DeviceFD fd = next_fd++;
     auto& builder = it->second;
-    auto device = builder(fd)->second;
+    auto opened = builder(fd);
+    if (opened.file == open_files.end()) return INVALID_NVDRV_FD;
+    auto device = opened.file->second;
 
     device->OnOpen(session_id, fd);
 

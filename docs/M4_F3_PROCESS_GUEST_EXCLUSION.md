@@ -381,14 +381,51 @@ Submit stages. Six precise controls detect premature ready, omitted failure
 isolation, ignored Setup/Submit refusal, or either caller releasing Entry early.
 Complete production GPU, nvhost_gpu and ChannelState units pass local WSL syntax.
 
-Actual GPU CreateChannel still succeeds after NotifyShutdown in the fixture and
-is retained as an independent owner-creation counterexample. Address-space bind
+The subsequent channel-creation change below closes that owner-creation witness.
+Address-space bind
 to channel, other configuration APIs, pre-SubmitGPFIFOImpl guest-buffer reads,
 existing alias lifetime and native writers remain outside this closure. An
 admitted Submit racing later queue shutdown may still see void PushGPUEntries
 cancelled; its service acknowledgement is not queue acceptance or checked device
 completion. All THREE M4 phases remain unfinished; ordinary admission stays
 Unknown. No reversible ProcessCohortStop or durable GPU Unknown registry is added.
+
+### Follow-up: terminal channel creation through fd/session publication
+
+AllocateChannel returns an optional channel plus owned publication Entry from
+the same cold GPU domain. NV's GPU-device builder retains it through device
+construction and fd-map insertion; Module::Open retains it through OnOpen's
+session acknowledgement. Refusal returns INVALID_NVDRV_FD before channel ID,
+event or syncpoint allocation. Module may consume an unused fd number.
+
+| Transition | Disposition |
+| --- | --- |
+| Closed allocation | No channel, scheduler or fd/device publication |
+| Entered creation races Close | May complete; GPU teardown joins the retained Entry |
+| Channel constructor throws | Entry released; no inventory record published |
+| Scheduler declaration throws | GPU map record erased; exception propagates |
+| NV construction/fd/session allocation throws | Entry released on unwind; completed channel registration remains parent-owned until teardown; no claim of a full Open transaction rollback |
+| Module retirement | Own fd map cleared while event/syncpoint providers remain alive; escaped device refs still need external lifetime coordination |
+
+Channel creation serializes IDs and inventory registration with a dedicated
+mutex. BindChannel copies the shared owner under a short map lock before backend
+binding. Allocation releases that lock before Scheduler::DeclareChannel because
+Scheduler::Push holds its own lock when calling BindChannel. No Module-wide
+concurrent-client safety is inferred from the GPU creation lock.
+
+Windows actual-body tests cover three positive repetitions, constructor and
+declaration failures, 128 concurrent unique IDs, scheduler/map lock ordering, and
+five retained teardown pauses (channel construction, scheduler declaration, NV
+event construction, fd publication, session commit). Six new precise controls
+exercise wrong-domain entry, rollback omission, lock inversion, factory/Open early
+release and provider retirement order. Four full production units pass local WSL
+syntax. See [validation](M4_F3_CHANNEL_CREATION_VALIDATION.md).
+
+An existing fd can still publish its address-space binding after Close; the test
+executes that actual route as a separate positive scope counterexample. No native
+GPU completion, reversible ProcessCohortStop coupling, escaped-owner revocation
+or durable Unknown registry is proved. All THREE M4 phases remain unfinished;
+ordinary GuestBackingAdmission remains Unknown.
 
 ## Evidence and limits
 

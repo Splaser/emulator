@@ -470,6 +470,7 @@ NvResult nvhost_as_gpu::BindChannel(IoctlBindChannel& params) {
     LOG_DEBUG(Service_NVDRV, "called, fd={:X}", params.fd);
 
     auto gpu_channel_device = module.GetDevice<nvhost_gpu>(params.fd);
+    if (!gpu_channel_device || !gpu_channel_device->channel_state) return NvResult::InvalidState;
     gpu_channel_device->channel_state->memory_manager = gmmu;
     return NvResult::Success;
 }

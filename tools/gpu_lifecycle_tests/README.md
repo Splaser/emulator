@@ -272,7 +272,7 @@ start before GPU Start, closes with NotifyShutdown, and joins before renderer
 teardown. InitAddressSpace returns an optional owned Entry, retained by AllocAsEx
 through its final VM/GMMU commit. The NV caller stages both owners locally and
 returns InvalidState on refusal without publishing candidate state. This does
-not close channel creation/address-space binding, existing mappings, or other raw aliases.
+not close channel address-space binding, existing mappings, or other raw aliases.
 
 Run `python tools/gpu_lifecycle_tests/run_owner_publication_tests.py --repeat 3`
 for actual GPU close/join/API/forwarding, MemoryManager binding assignment, VM
@@ -293,6 +293,21 @@ initialization_failed and cannot retry. Setup/Submit share the channel mutex.
 Six channel controls reject early ready, missing retry isolation, either ignored
 refusal, or either caller releasing protection early. Four teardown pauses cover
 engine construction, backend initialization, Setup metadata and ready Submit
-acknowledgement. Engines/backend/queue/syncpoints are fixtures. Actual CreateChannel
-still succeeds after Close as a separate scope counterexample. Guest-buffer reads
+acknowledgement. Engines/backend/queue/syncpoints are fixtures. Guest-buffer reads
 before SubmitGPFIFOImpl and actual queue acceptance/completion remain independent.
+
+Channel allocation now returns its channel and publication Entry together. The
+actual NV GPU factory and Module::Open retain it through construction, fd insertion
+and OnOpen session acknowledgement. Closed allocation refuses before ID/resource
+allocation. Scheduler registration failure removes the GPU map record; creation
+serializes IDs while map locks are released before scheduler/backend calls.
+Module's destructor releases its own device map before event providers retire;
+escaped device references still require external lifetime coordination.
+
+Creation tests cover concurrent IDs, allocation/registration failure, map/scheduler
+lock order and five teardown pauses from construction through session commit.
+Six controls reject an unrelated gate, missing rollback, inverted locks, early
+factory/Open release and missing fd retirement. Real constructor/destructor,
+factory/Open/session methods execute against fake event/syncpoint providers.
+The retained scope counterexample is now existing-channel address-space binding:
+it still succeeds after Close. Guest admission remains Unknown.

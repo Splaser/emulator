@@ -1,5 +1,30 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: retained channel creation through NV fd/session publication
+
+AllocateChannel now returns its channel together with the cold publication Entry.
+NV's GPU factory and Module::Open retain it through device construction, fd-map
+insertion and OnOpen's session commit. Closed allocation returns an invalid fd
+without channel ID, scheduler, event or syncpoint effects. Module may consume an
+unused fd number. GPU IDs are serialized; declaration failure rolls back its GPU
+map record. Map locks never span scheduler/backend calls, avoiding the existing
+Scheduler::Push -> BindChannel lock order. Module clears its own fd map before
+event providers retire; escaped references still need external lifetime control.
+
+Windows positives pass three repeats, prior eleven controls and six new precise
+creation controls. Actual allocation, scheduler declaration, NV constructor/
+destructor/factory, Module Open/retirement and session bodies execute with fake
+external providers. Concurrent IDs, rollback, lock inversion and five retained
+teardown stages are covered. Four production units pass local WSL syntax. See
+[validation](M4_F3_CHANNEL_CREATION_VALIDATION.md).
+
+The earlier creation-after-Close witness is closed. Existing-channel address-space
+binding still succeeds after Close as a separate actual-body scope counterexample.
+No full NV Open exception transaction, Module client serialization, escaped-device
+lifetime, native completion, reversible cohort stop or durable Unknown registry
+is established. All THREE M4 phases remain unfinished; ordinary admission Unknown.
+No new workflow or Android build; main still waits for M7.
+
 ## 2026-10-22: retained channel initialization and NV acknowledgement
 
 InitChannel now returns the GPU's cold terminal publication Entry to both NV

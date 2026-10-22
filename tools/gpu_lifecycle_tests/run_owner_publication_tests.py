@@ -68,10 +68,12 @@ namespace Tegra {
 struct CommandList {std::vector<int> entries;};
 namespace Control {
 struct ChannelState {
+    inline static int live=0;inline static std::function<void()> create_hook;
     s32 bind_id;u64 program_id=0;bool initialized=false,initialization_failed=false;
     std::shared_ptr<MemoryManager> memory_manager;
     int init_calls=0,bind_calls=0;std::function<void()> init_hook;
-    explicit ChannelState(s32 id):bind_id{id} {}
+    explicit ChannelState(s32 id):bind_id{id} {if(create_hook)create_hook();++live;}
+    ~ChannelState() {--live;}
     template<class System,class Gpu> void Init(System&,Gpu&,u64 id) {
         ++init_calls;program_id=id;if(init_hook)init_hook();
     }
@@ -82,28 +84,47 @@ struct ChannelState {
 '''
 base = base.replace('struct Rasterizer {', '''struct Rasterizer {
     int channel_inits=0;std::function<void()> initialize_channel;
+    int channel_binds=0;template<class Channel> void BindChannel(Channel&) {++channel_binds;}
     template<class Channel> void InitializeChannel(Channel& channel) {
         Require(!channel.initialized,"channel advertised ready before backend initialization");
         ++channel_inits;if(initialize_channel)initialize_channel();
     }''')
+declare = method(read('src/video_core/control/scheduler.cpp'), 'void Scheduler::DeclareChannel(')
+declare = declare.replace('Scheduler::', '').replace('std::shared_ptr<ChannelState>', 'std::shared_ptr<Channel>')
+declare = declare.replace('    std::unique_lock lk(scheduling_guard);',
+                          '    if(declare_hook) declare_hook();\n    std::unique_lock lk(scheduling_guard);')
+declare = declare[:-1] + '    ++declared;\n}'
 base = base.replace('struct Scheduler {', '''struct Scheduler {
-    int declared=0;template<class Channel> void DeclareChannel(std::shared_ptr<Channel>) {++declared;}''')
+    int declared=0;std::mutex scheduling_guard;
+    std::unordered_map<s32,std::shared_ptr<void>> channels;std::function<void()> declare_hook;
+    template<class Channel>
+''' + declare)
+allocation_type = method(read('src/video_core/gpu.h'), '    struct ChannelAllocation {').replace(
+    'Control::ChannelState', 'Tegra::Control::ChannelState') + ';\n'
 base = base.replace('struct Impl {', fake_memory + channel_fixture + '''
+''' + allocation_type + '''
 struct Impl {
     int system=0,gpu=0;s32 new_channel_id=1;
     std::unordered_map<s32,std::shared_ptr<Tegra::Control::ChannelState>> channels;
+    std::mutex channel_creation_mutex,channel_map_mutex;s32 bound_channel=-1;
+    Tegra::Control::ChannelState* current_channel=nullptr;
 ''')
 init = method(gpu, '    std::optional<Common::TerminalIngress::Entry>\n    InitAddressSpace(')
 channel_init = method(gpu, '    std::optional<Common::TerminalIngress::Entry>\n    InitChannel(')
 channel_init = channel_init.replace('Control::ChannelState', 'Tegra::Control::ChannelState')
 assert 'initialized = true' not in method(read('src/video_core/control/channel_state.cpp'), 'void ChannelState::Init(')
-base += '\n' + init + '\n' + channel_init + '\n' + method(gpu, '    std::shared_ptr<Control::ChannelState> CreateChannel(').replace(
-    'std::shared_ptr<Control::ChannelState>', 'std::shared_ptr<Tegra::Control::ChannelState>') + '\n};\n'
+allocation = method(gpu, '    std::optional<GPU::ChannelAllocation> AllocateChannel(').replace(
+    'GPU::ChannelAllocation', 'ChannelAllocation')
+binding = method(gpu, '    void BindChannel(s32 channel_id)').replace(
+    'Control::ChannelState', 'Tegra::Control::ChannelState')
+base += '\n' + init + '\n' + channel_init + '\n' + allocation + '\n' + binding + '\n};\n'
 public_init = method(gpu, 'std::optional<Common::TerminalIngress::Entry>\nGPU::InitAddressSpace(')
 public_init = public_init.replace('GPU::', '')
 public_channel = method(gpu, 'std::optional<Common::TerminalIngress::Entry>\nGPU::InitChannel(')
 public_channel = public_channel.replace('GPU::', '').replace('Control::ChannelState', 'Tegra::Control::ChannelState')
 public_channel = public_channel.replace('bool allow_deferred)', 'bool allow_deferred = false)')
+public_allocation = method(gpu, 'std::optional<GPU::ChannelAllocation> GPU::AllocateChannel(').replace(
+    'GPU::ChannelAllocation', 'ChannelAllocation').replace('GPU::', '')
 vm = method(read('src/core/hle/service/nvdrv/devices/nvhost_as_gpu.h'), '    struct VM {')
 vm = vm.replace('Common::FlatAllocator<u32, 0, 32>', 'TestAllocator')
 allocate = method(read('src/core/hle/service/nvdrv/devices/nvhost_as_gpu.cpp'),
@@ -114,7 +135,7 @@ allocate = allocate.replace(commit, '    if(commit_hook) commit_hook();\n' + com
 caller = r'''
 struct PublicGpu {Impl* impl;
     int submissions=0;void PushGPUEntries(s32,Tegra::CommandList&&) {++submissions;}
-''' + public_init + '\n' + public_channel + r'''
+''' + public_init + '\n' + public_channel + '\n' + public_allocation + r'''
 };
 struct FixtureSystem {PublicGpu& facade;PublicGpu& GPU() {return facade;}};
 enum class NvResult {Success,InvalidState,BadValue,AlreadyAllocated,BadParameter};
@@ -161,6 +182,81 @@ struct ChannelDevice {
     std::function<void()> setup_hook,submit_hook;
     ChannelDevice(FixtureSystem& s,std::shared_ptr<Tegra::Control::ChannelState> c):system{s},channel_state{std::move(c)} {}
 ''' + setup + '\n' + submit + '\n};\n'
+
+# Retain the actual allocation through the real factory, fd publication and
+# session acknowledgement. Only external resource providers are substituted.
+nv_module = read('src/core/hle/service/nvdrv/nvdrv.cpp')
+nv_header = read('src/core/hle/service/nvdrv/nvdrv.h')
+factory_start = nv_module.index('    builders["/dev/nvhost-gpu"] = ')
+factory_end = nv_module.index('\n    };', factory_start) + len('\n    };')
+factory = nv_module[factory_start:factory_end]
+opened = method(nv_module, 'DeviceFD Module::Open(').replace('Module::', '').replace('NvCore::SessionId', 'int')
+opened = opened.replace('    device->OnOpen(session_id, fd);',
+                        '    if(open_hook) open_hook();\n    device->OnOpen(session_id, fd);')
+module_destructor = method(nv_module, 'Module::~Module()').replace('Module::', '')
+open_result = method(nv_header, '    struct OpenResult {') + ';'
+get_device = method(nv_header, '    std::shared_ptr<T> GetDevice(')
+ctor_start = nv_channel.index('nvhost_gpu::nvhost_gpu(')
+ctor_end = nv_channel.index('\n}', ctor_start) + 2
+device_ctor = nv_channel[ctor_start:ctor_end].replace('nvhost_gpu::', '').replace(
+    'Core::System&', 'FixtureSystem&').replace('EventInterface&', 'CreationEvents&').replace(
+    'NvCore::Container&', 'CreationContainer&')
+device_destructor = method(nv_channel, 'nvhost_gpu::~nvhost_gpu()').replace('nvhost_gpu::', '')
+on_open = method(nv_channel, 'void nvhost_gpu::OnOpen(').replace('nvhost_gpu::', '').replace('NvCore::SessionId', 'int')
+on_open = on_open.replace('    sessions[fd] = session_id;',
+                          '    if(session_hook) session_hook();\n    sessions[fd] = session_id;')
+as_bind = method(read('src/core/hle/service/nvdrv/devices/nvhost_as_gpu.cpp'),
+                 'NvResult nvhost_as_gpu::BindChannel(').replace('nvhost_as_gpu::', '').replace(
+    'GetDevice<nvhost_gpu>', 'GetDevice<Devices::nvhost_gpu>')
+caller += r'''
+void HardRequire(bool,const char*);
+constexpr DeviceFD INVALID_NVDRV_FD=-1;
+struct CreationSyncpoints {
+    int live=0,allocated=0;
+    u32 AllocateSyncpoint(bool) {++live;return ++allocated;}
+    void FreeSyncpoint(u32) {--live;}
+    ~CreationSyncpoints() {HardRequire(live==0,"module destroyed syncpoint provider before owned devices");}
+};
+struct CreationContainer {
+    CreationSyncpoints syncpoints;int nvmap=0;
+    CreationSyncpoints& GetSyncpointManager() {return syncpoints;}
+    int& GetNvMapFile() {return nvmap;}
+};
+struct CreationEvents {
+    int live=0,allocated=0;std::function<void()> create_hook;
+    int CreateEvent(const char*) {if(create_hook)create_hook();++live;return ++allocated;}
+    void FreeEvent(int) {--live;}
+    ~CreationEvents() {HardRequire(live==0,"module destroyed event provider before owned devices");}
+};
+namespace Devices {
+struct nvdevice {
+    FixtureSystem& system;explicit nvdevice(FixtureSystem& s):system{s} {}
+    virtual ~nvdevice()=default;virtual void OnOpen(int,DeviceFD)=0;
+};
+struct nvhost_gpu: nvdevice {
+    CreationEvents& events_interface;CreationContainer& core;
+    CreationSyncpoints& syncpoint_manager;int& nvmap;
+    std::shared_ptr<Tegra::Control::ChannelState> channel_state;
+    u32 channel_syncpoint=0;int sm_exception_breakpoint_int_report_event=0;
+    int sm_exception_breakpoint_pause_report_event=0,error_notifier_event=0;
+    std::unordered_map<DeviceFD,int> sessions;inline static std::function<void()> session_hook;
+''' + device_ctor + '\n' + device_destructor + '\n' + on_open + r'''
+};
+}
+struct Module {
+    CreationContainer container;DeviceFD next_fd=1;
+    using FilesContainerType=std::unordered_map<DeviceFD,std::shared_ptr<Devices::nvdevice>>;
+    FilesContainerType open_files;CreationEvents events_interface;
+''' + open_result + r'''
+    std::unordered_map<std::string,std::function<OpenResult(DeviceFD)>> builders;
+    std::function<void()> open_hook;
+    explicit Module(FixtureSystem& system) {
+''' + factory + '\n    }\n' + module_destructor + '\n' + opened + '\n    template<class T>\n' + get_device + r'''
+};
+struct IoctlBindChannel {DeviceFD fd;};
+struct AddressBinder {
+    Module& module;std::shared_ptr<Tegra::MemoryManager> gmmu;
+''' + as_bind + '\n};\n'
 tests = r'''
 void HardRequire(bool condition,const char* message) {
     if(!condition) {std::cerr<<"FAIL "<<message<<"\n";std::cerr.flush();std::_Exit(91);}
@@ -227,17 +323,20 @@ int main() {
 '''
 channel_tests = r'''
 auto NewChannel(Impl& gpu,FixtureSystem& system,bool bound) {
-    auto channel=gpu.CreateChannel(gpu.new_channel_id++);
+    auto allocated=gpu.AllocateChannel();Require(bool(allocated),"healthy channel creation refused");
+    auto channel=std::move(allocated->channel);
     if(bound)channel->memory_manager=std::make_shared<Tegra::MemoryManager>(system,37,0,17,12);
     return channel;
 }
 void ChannelClosed() {
     Host host;VideoCore::Rasterizer raster;Impl gpu{host};gpu.rasterizer=&raster;
-    PublicGpu facade{&gpu};FixtureSystem system{facade};gpu.NotifyShutdown();
+    PublicGpu facade{&gpu};FixtureSystem system{facade};
+    std::vector<std::shared_ptr<Tegra::Control::ChannelState>> owners;
+    for(bool ready:{false,true}) {auto c=NewChannel(gpu,system,true);c->initialized=ready;owners.push_back(c);}
+    gpu.NotifyShutdown();
+    size_t owner_index=0;
     for(bool ready:{false,true}) {
-        auto channel=NewChannel(gpu,system,true);channel->initialized=ready;channel->program_id=17;
-        Require(gpu.channels.contains(channel->bind_id) && gpu.scheduler->declared>0,
-                "post-close channel creation counterexample disappeared");
+        auto channel=owners[owner_index++];channel->program_id=17;
         ChannelDevice device{system,channel};IoctlAllocGpfifoEx setup_params;setup_params.fence_out={3,55};
         const auto result=device.SetupGPFIFOChannel(setup_params,7);
         HardRequire(result==(ready?NvResult::AlreadyAllocated:NvResult::InvalidState) &&
@@ -308,14 +407,102 @@ void ChannelRetain(int stage) {
     Ready(destroy);channel->init_hook={};raster.initialize_channel={};device.setup_hook={};device.submit_hook={};
 }
 '''
-tests = tests.replace('int main() {', channel_tests + '\nint main() {')
+creation_tests = r'''
+void CreationClosedAndAliasScope() {
+    Host host;VideoCore::Rasterizer raster;Impl gpu{host};gpu.rasterizer=&raster;
+    PublicGpu facade{&gpu};FixtureSystem system{facade};Module module{system};
+    auto fd=module.Open("/dev/nvhost-gpu",7);
+    Require(fd!=INVALID_NVDRV_FD && module.GetDevice<Devices::nvhost_gpu>(fd)->sessions.at(fd)==7,
+            "healthy channel creation lost fd or session");
+    gpu.NotifyShutdown();const auto next=gpu.new_channel_id;
+    const auto count=gpu.channels.size();const auto declared=gpu.scheduler->declared;
+    const auto files=module.open_files.size();const auto events=module.events_interface.allocated;
+    const auto syncpoints=module.container.syncpoints.allocated;
+    HardRequire(module.Open("/dev/nvhost-gpu",9)==INVALID_NVDRV_FD,
+                "closed channel creation published device");
+    Require(gpu.new_channel_id==next && gpu.channels.size()==count && gpu.scheduler->declared==declared &&
+            module.open_files.size()==files && module.events_interface.allocated==events &&
+            module.container.syncpoints.allocated==syncpoints,"closed creation changed owner inventory");
+    AddressBinder binder{module,std::make_shared<Tegra::MemoryManager>(system,37,0,17,12)};
+    IoctlBindChannel invalid{-1},valid{fd};
+    Require(binder.BindChannel(invalid)==NvResult::InvalidState,"missing channel fd was accepted");
+    // An existing fd can still publish its address-space binding after Close.
+    // This independent route must not be mistaken for whole-guest exclusion.
+    Require(binder.BindChannel(valid)==NvResult::Success &&
+            module.GetDevice<Devices::nvhost_gpu>(fd)->channel_state->memory_manager==binder.gmmu,
+            "independent address-space binding scope witness disappeared");
+}
+void CreationFailures() {
+    Host host;Impl gpu{host};
+    for(bool declaration:{false,true}) {
+        auto fail=[] {throw std::bad_alloc();};
+        if(declaration)gpu.scheduler->declare_hook=fail;else Tegra::Control::ChannelState::create_hook=fail;
+        bool threw=false;try {gpu.AllocateChannel();}catch(const std::bad_alloc&) {threw=true;}
+        gpu.scheduler->declare_hook={};Tegra::Control::ChannelState::create_hook={};
+        Require(threw && gpu.channels.empty() && gpu.scheduler->channels.empty() &&
+                Tegra::Control::ChannelState::live==0,"failed channel declaration left owner inventory");
+    }
+    Require(bool(gpu.AllocateChannel()),"failed allocation prevented subsequent creation");
+}
+void CreationConcurrent() {
+    Host host;Impl gpu{host};std::mutex ids_mutex;std::vector<s32> ids;
+    std::vector<std::future<void>> producers;
+    for(int i=0;i<8;++i)producers.push_back(std::async(std::launch::async,[&] {
+        for(int j=0;j<16;++j) {
+            auto allocation=gpu.AllocateChannel();Require(bool(allocation),"concurrent creation refused");
+            std::scoped_lock lk{ids_mutex};ids.push_back(allocation->channel->bind_id);
+        }
+    }));
+    for(auto& producer:producers)Ready(producer);
+    std::sort(ids.begin(),ids.end());
+    Require(ids.size()==128 && std::adjacent_find(ids.begin(),ids.end())==ids.end() &&
+            gpu.channels.size()==128 && gpu.scheduler->channels.size()==128,
+            "concurrent channel creation lost unique inventory");
+}
+void CreationLockOrder() {
+    Host host;VideoCore::Rasterizer raster;Impl gpu{host};gpu.rasterizer=&raster;
+    auto existing=gpu.AllocateChannel();Event entered;
+    std::unique_lock scheduler_lock{gpu.scheduler->scheduling_guard};
+    gpu.scheduler->declare_hook=[&] {entered.Set();};
+    auto allocation=std::async(std::launch::async,[&] {return gpu.AllocateChannel();});entered.Wait();
+    auto binding=std::async(std::launch::async,[&] {gpu.BindChannel(existing->channel->bind_id);});
+    const bool ready=binding.wait_for(100ms)==std::future_status::ready;
+    scheduler_lock.unlock();Ready(binding);Require(bool(Ready(allocation)),"blocked allocation lost result");
+    Require(ready,"channel map lock inverted scheduler binding");
+    gpu.scheduler->declare_hook={};
+}
+void CreationRetain(int stage) {
+    Host host;VideoCore::Rasterizer raster;auto gpu=std::make_unique<Impl>(host);gpu->rasterizer=&raster;
+    gpu->renderer->rasterizer=&raster;PublicGpu facade{gpu.get()};FixtureSystem system{facade};Module module{system};
+    Event entered,release,stopped;auto block=[&] {entered.Set();release.Wait();};
+    if(stage==0)Tegra::Control::ChannelState::create_hook=block;
+    else if(stage==1)gpu->scheduler->declare_hook=block;
+    else if(stage==2)module.events_interface.create_hook=block;
+    else if(stage==3)module.open_hook=block;
+    else Devices::nvhost_gpu::session_hook=block;
+    gpu->gpu_thread.stopped=&stopped;
+    auto publish=std::async(std::launch::async,[&] {return module.Open("/dev/nvhost-gpu",7);});entered.Wait();
+    auto destroy=std::async(std::launch::async,[gpu=std::move(gpu)]() mutable {gpu.reset();});stopped.Wait();
+    HardRequire(destroy.wait_for(100ms)!=std::future_status::ready,"teardown escaped retained channel creation");
+    release.Set();const auto fd=Ready(publish);
+    Require(fd!=INVALID_NVDRV_FD && module.GetDevice<Devices::nvhost_gpu>(fd)->sessions.at(fd)==7,
+            "joined creation lost fd or session commit");
+    Ready(destroy);Tegra::Control::ChannelState::create_hook={};
+    module.events_interface.create_hook={};module.open_hook={};Devices::nvhost_gpu::session_hook={};
+}
+'''
+tests = tests.replace('int main() {', channel_tests + creation_tests + '\nint main() {')
 final_check='        Require(TestAllocator::live==0 && Tegra::MemoryManager::live==0,"fixture owners leaked");'
 assert tests.count(final_check)==1
 tests = tests.replace(final_check,
                       '        ChannelClosed();ChannelHealthyDeferred();ChannelFailures();\n'
-                      '        for(int stage=0;stage<4;++stage)ChannelRetain(stage);\n'+final_check+
+                      '        for(int stage=0;stage<4;++stage)ChannelRetain(stage);\n'
+                      '        CreationClosedAndAliasScope();CreationFailures();CreationConcurrent();CreationLockOrder();\n'
+                      '        for(int stage=0;stage<5;++stage)CreationRetain(stage);\n'
+                      '        Require(Tegra::Control::ChannelState::live==0,"channel owners leaked");\n'+final_check+
+                      '\n        std::cout<<"PASS retained channel creation: refusal, rollback, concurrent IDs, lock order, fd/session join and provider retirement\\n";'+
                       '\n        std::cout<<"PASS retained channel initialization: deferred setup, ready commit, partial failure isolation and NV lease retention\\n";')
-source = '#include <cstdlib>\n#include <unordered_map>\n#include "common/bit_util.h"\n' + base + caller + tests
+source = '#include <algorithm>\n#include <cstdlib>\n#include <unordered_map>\n#include "common/bit_util.h"\n#define ASSERT(x) Require(bool(x),"missing channel binding")\n' + base + caller + tests
 flags = [a.cxx, '-std=c++23', '-O1', '-g', '-pthread', '-Wall', '-Wextra', '-Werror',
          '-I', str(root / 'src')]
 
@@ -329,7 +516,9 @@ exe = compile_source('publication', source)
 for i in range(a.repeat):
     result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
     log = result.stdout + result.stderr;(out / f'positive-{i}.log').write_text(log)
-    assert result.returncode == 0 and 'PASS retained GPU address-space publication:' in log and 'PASS retained channel initialization:' in log, log
+    assert result.returncode == 0 and all(marker in log for marker in (
+        'PASS retained GPU address-space publication:', 'PASS retained channel initialization:',
+        'PASS retained channel creation:')), log
 print(f'PASS retained GPU owner publication ({a.repeat} repetitions)', flush=True)
 refusal = '    if (!publication) {\n        return NvResult::InvalidState;\n    }'
 assert allocate.count(refusal) == 1
@@ -357,7 +546,28 @@ channel_controls = [
     ('channel-submit-early-release', source.replace(submit,submit.replace('    if(submit_hook) submit_hook();',
         '    publication.reset();\n    if(submit_hook) submit_hook();')),'teardown escaped retained channel initialization'),
 ]
-for name, changed, expected in controls + channel_controls:
+creation_controls = [
+    ('creation-wrong-domain', source.replace(allocation,allocation.replace(
+        '        auto publication = owner_publications.TryEnter();',
+        '        static Common::TerminalIngress unrelated;\n'
+        '        static const bool opened=(unrelated.Open(),true);(void)opened;\n'
+        '        auto publication = unrelated.TryEnter();')),'closed channel creation published device'),
+    ('creation-missing-rollback', source.replace(allocation,allocation.replace(
+        '            channels.erase(channel_id);','')),'failed channel declaration left owner inventory'),
+    ('creation-inverted-locks', source.replace(allocation,allocation.replace(
+        '            scheduler->DeclareChannel(channel_state);',
+        '            std::scoped_lock map_lock{channel_map_mutex};\n'
+        '            scheduler->DeclareChannel(channel_state);')),'channel map lock inverted scheduler binding'),
+    ('creation-factory-early-release', source.replace(factory,factory.replace(
+        'open_files.emplace(fd, std::move(device)).first,\n                          std::move(allocation->publication)',
+        'open_files.emplace(fd, std::move(device)).first')),'teardown escaped retained channel creation'),
+    ('creation-open-early-release', source.replace(opened,opened.replace(
+        '    if(open_hook) open_hook();','    opened.publication.reset();\n    if(open_hook) open_hook();')),
+     'teardown escaped retained channel creation'),
+    ('creation-missing-fd-retirement', source.replace(module_destructor,module_destructor.replace(
+        '    open_files.clear();','')),'module destroyed event provider before owned devices'),
+]
+for name, changed, expected in controls + channel_controls + creation_controls:
     assert changed != source
     mutant = compile_source(name, changed)
     result = subprocess.run([str(mutant)], capture_output=True, text=True, timeout=30)
@@ -368,17 +578,23 @@ paths = ['src/video_core/gpu.cpp', 'src/video_core/gpu.h', 'src/video_core/memor
          'src/core/hle/service/nvdrv/devices/nvhost_as_gpu.cpp',
          'src/core/hle/service/nvdrv/devices/nvhost_as_gpu.h', 'src/common/terminal_ingress.h',
          'src/core/hle/service/nvdrv/devices/nvhost_gpu.cpp',
+         'src/core/hle/service/nvdrv/devices/nvhost_gpu.h',
+         'src/core/hle/service/nvdrv/nvdrv.cpp', 'src/core/hle/service/nvdrv/nvdrv.h',
+         'src/video_core/control/scheduler.cpp',
          'src/video_core/control/channel_state.cpp', 'src/video_core/control/channel_state.h',
          'tools/gpu_lifecycle_tests/run_tests.py', 'tools/gpu_lifecycle_tests/run_owner_publication_tests.py']
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths},
     'positive_repeats': a.repeat, 'controls': [c[0] for c in controls],
     'channel_controls': [c[0] for c in channel_controls],
+    'creation_controls': [c[0] for c in creation_controls],
     'actual': ['GPU publication API and forwarding', 'GPU destructor and NotifyShutdown',
                'MemoryManager BindRasterizer assignment', 'AllocAsEx and VM layout',
-               'GPU channel initialization and creation', 'NV SetupGPFIFOChannel and SubmitGPFIFOImpl'],
+               'GPU channel initialization, allocation and binding', 'Scheduler DeclareChannel',
+               'NV SetupGPFIFOChannel and SubmitGPFIFOImpl', 'NV GPU constructor/destructor and OnOpen',
+               'Module GPU builder, OpenResult, Open, GetDevice and destructor', 'NV address-space BindChannel'],
     'fixtures': ['System owner lifetime', 'renderer', 'allocator', 'GMMU allocation', 'GPU worker',
-                 'channel engine allocation/binding', 'queue and syncpoint services'],
+                 'channel engine allocation/binding', 'queue, event and syncpoint services'],
     'instrumentation': ['counter/hook before rasterizer assignment', 'hook before caller commit', 'event after fixture worker stop'],
-    'boundary': 'Terminal address-space/channel initialization and NV acknowledgement only; channel creation/binding, pre-submit buffer reads, queue acceptance/native completion remain independent; Guest admission Unknown',
+    'boundary': 'Terminal address-space/channel initialization and creation through NV fd/session acknowledgement; existing channel address-space binding, pre-submit buffer reads, queue acceptance/native completion remain independent; escaped Module/device references require external lifetime; Guest admission Unknown',
 }, indent=2))

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstring>
+#include <utility>
 #include <vector>
 
 #include "common/assert.h"
@@ -31,10 +32,12 @@ Tegra::CommandHeader BuildFenceAction(Tegra::Engines::Puller::FenceOperation op,
 } // namespace
 
 nvhost_gpu::nvhost_gpu(Core::System& system_, EventInterface& events_interface_,
-                       NvCore::Container& core_)
+                       NvCore::Container& core_,
+                       std::shared_ptr<Tegra::Control::ChannelState> channel)
     : nvdevice{system_}, events_interface{events_interface_}, core{core_},
       syncpoint_manager{core_.GetSyncpointManager()}, nvmap{core.GetNvMapFile()},
-      channel_state{system.GPU().AllocateChannel()} {
+      channel_state{std::move(channel)} {
+    ASSERT(channel_state);
     channel_syncpoint = syncpoint_manager.AllocateSyncpoint(false);
     sm_exception_breakpoint_int_report_event =
         events_interface.CreateEvent("GpuChannelSMExceptionBreakpointInt");

@@ -7,11 +7,14 @@
 #include <functional>
 #include <list>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include "common/common_types.h"
+#include "common/terminal_ingress.h"
 #include "core/hle/service/kernel_helpers.h"
 #include "core/hle/service/nvdrv/core/container.h"
 #include "core/hle/service/nvdrv/nvdata.h"
@@ -108,7 +111,14 @@ private:
 
     EventInterface events_interface;
 
-    std::unordered_map<std::string, std::function<FilesContainerType::iterator(DeviceFD)>> builders;
+    struct OpenResult {
+        FilesContainerType::iterator file;
+        std::optional<Common::TerminalIngress::Entry> publication;
+        OpenResult(FilesContainerType::iterator file_) : file{file_} {}
+        OpenResult(FilesContainerType::iterator file_, Common::TerminalIngress::Entry&& entry)
+            : file{file_}, publication{std::move(entry)} {}
+    };
+    std::unordered_map<std::string, std::function<OpenResult(DeviceFD)>> builders;
 };
 
 void LoopProcess(Core::System& system);
