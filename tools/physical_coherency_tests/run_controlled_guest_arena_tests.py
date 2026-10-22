@@ -31,7 +31,7 @@ namespace Common::Log { inline void Stop() {} }
 header_path = 'src/common/controlled_guest_arena.h'
 header = (root / header_path).read_text()
 test_path = 'tools/physical_coherency_tests/controlled_guest_arena_tests.cpp'
-def execute(name, mutant=False):
+def execute(name, mutant=False, expected=None):
     exe = out / name
     subprocess.run([os.environ.get('CXX', 'g++'), '-std=c++23', '-O1', '-pthread',
         '-Wall', '-Wextra', '-Werror=reorder', '-I', str(stubs.parent), '-I', str(root / 'src'),
@@ -42,6 +42,8 @@ def execute(name, mutant=False):
         (out / f'{name}-{repeat}.txt').write_text(log)
         if mutant:
             assert run.returncode != 0 and 'assert' in log.lower(), (name, run.returncode, log)
+            if expected:
+                assert expected in log, (name, log)
             print('PASS expected assertion mutant:', name, flush=True)
         else:
             assert run.returncode == 0 and 'PASS ' in log, (name, log)
@@ -84,7 +86,7 @@ drain = (root / 'src/common/producer_drain.h').read_text()
 for name, before, after in [
     ('timeout-as-drained', 'Quarantine();return Result::Unknown;', 'return Result::DrainedSubset;'),
     ('closure-drop-reopens', '~Closure(){if(state && !released) Quarantine();}',
-     '~Closure(){if(state && !released) state->value.store(0);}'),
+     '~Closure(){if(state && !released) state->value.fetch_and(~(Closed|Unknown));}'),
 ]:
     assert drain.count(before) == 1, name
     changed = drain.replace(before, after)
@@ -92,7 +94,11 @@ for name, before, after in [
     injected = stubs / 'producer_drain.h'
     injected.write_text(changed)
     try:
-        execute(name, True)
+        # Reopen admission without destroying in-flight count or membership bits.
+        # Zeroing the entire word invents count underflow on the next Entry exit
+        # and can crash before the intended ownership assertion is reached.
+        expected = 'unfinished closure drop must keep owner admission closed' if name == 'closure-drop-reopens' else None
+        execute(name, True, expected)
     finally:
         injected.unlink()
 execute('production')

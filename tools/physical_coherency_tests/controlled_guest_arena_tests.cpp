@@ -99,7 +99,8 @@ int main() {
             assert(close->Poll() == Result::Unknown);
             assert(!close->CancelNoEffects() && !close->TryFreezeHostMappings());
         }
-        assert(!arena.RegisterOwner() && !arena.TryClose());
+        assert(!arena.RegisterOwner() && !arena.TryClose() &&
+               "unfinished closure drop must keep owner admission closed");
     }
     {
         auto arena = std::make_unique<Arena>(); auto weak = Access::Lifetime(*arena);

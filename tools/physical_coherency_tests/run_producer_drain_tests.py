@@ -30,7 +30,7 @@ mutants=[
  ('open-after-close','if((value & (Closed|Unknown)) || (value & Count)==Count)','if((value & Count)==Count)'),
  ('false-drain','if(!(value & Count))','if(true)'),
  ('early-resume','u64 expected=Closed;','u64 expected=state->value.load();'),
- ('drop-reopens','~Closure(){if(state && !released) Quarantine();}','~Closure(){if(state && !released) state->value.store(0);}'),
+ ('drop-reopens','~Closure(){if(state && !released) Quarantine();}','~Closure(){if(state && !released) state->value.fetch_and(~(Closed|Unknown));}'),
  ('ignore-unknown','if(released || (value & Unknown))','if(released)'),
  ('timeout-is-drained','if(!remaining || !--remaining){Quarantine();return Result::Unknown;}','if(!remaining || !--remaining){return Result::DrainedSubset;}'),
  ('duplicate-close','if(old & (Closed|Unknown))','if((static_cast<void>(old),false))'),
