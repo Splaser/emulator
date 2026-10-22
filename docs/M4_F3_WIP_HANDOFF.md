@@ -2,6 +2,14 @@
 
 ## 2026-10-22: atomic no-effects release across managed domains (phase one)
 
+Implementation source: `e64b7f2b28e6672e7f20aeb65145f4c925084663`, pushed to
+`codex/issue-372-fixes`. Exact-source Linux-only validation
+[39713592657](https://github.com/Splaser/emulator/actions/runs/39713592657)
+is in progress; do not duplicate dispatch. Android is excluded. Independent
+artifact verification must require the new batch manifest/four mutants, cohort
+eight mutants, and stop five mutants, selected from the exact committed runners.
+The ignored artifact recovery helper has been updated for these source variants.
+
 The previous exact-source Linux run
 [39705537466](https://github.com/Splaser/emulator/actions/runs/39705537466)
 completed successfully at `233cf67b6d58660f4e556eebf26c4c9e561eaabd`, including
