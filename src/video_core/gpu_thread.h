@@ -151,6 +151,12 @@ public:
     /// Closed ingress returns no area, never a reusable flushed interval.
     std::optional<VideoCore::RasterizerDownloadArea> TryGetFlushArea(DAddr addr, u64 size);
 
+    /// Terminally owned direct command/cache callbacks. Existing backend thread
+    /// requirements still apply; returning does not imply device completion.
+    void FlushCommands();
+    void InvalidateGPUCache();
+    void OnCommandListEnd();
+
     /// Notify rasterizer that any caches of the specified region should be flushed and invalidated
     void FlushAndInvalidateRegion(DAddr addr, u64 size);
 

@@ -248,10 +248,19 @@ release, closed-interval invention and entered-owner refusal. The facade returns
 an empty area on closed query or cancelled flush, preventing new cached coverage
 for unperformed work. The actual sync-request suite also rejects the old ignored
 WaitForSyncOperation result while preserving normal completed readback behavior.
-A successful actual-body GPU::FlushCommands bypass remains independent. This
-terminal guard covers neither all rasterizer ingress nor native device completion
-and is not live M4 admission. Existing cached geometry and underlying guest loads
-are outside this change.
+Existing cached geometry and underlying guest loads are outside this change.
+
+FlushCommands, InvalidateGPUCache and OnCommandListEnd now also forward through
+ThreadManager's terminal counter. InvalidateGPUCache enters before consuming any
+dirty records and holds one entry over the entire gather, including later owners
+after external close. Command end preserves ReleaseFences(false), then accuracy
+update. Backend affinity/serialization requirements remain unchanged.
+Six command-tail controls reject the three old facade bypasses, early entry
+release, refusal of an entered owner, and callback-only dirty admission after
+metadata consumption. Actual System gather and GPUDirtyMemoryManager Collect/
+Gather run against two fixture owners. Actual dirty Collect remains successful
+after Stop as an independent producer scope counterexample. Neither this counter
+nor backend FlushCommands proves native completion or live M4 admission.
 
 For isolated local validation, both run_thread_tests.py and run_tests.py accept
 `--output-dir <temporary-directory>`. Their normal CI output paths are unchanged.

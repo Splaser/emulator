@@ -274,6 +274,40 @@ rasterizer routes, suspended work and device submissions remain independent.
 No reversible owner stop, backing/alias freeze, or durable Unknown retirement
 authority is created. All THREE M4 phases remain unfinished.
 
+### Follow-up: terminal command tail and whole dirty gather
+
+The GPU facade's FlushCommands, InvalidateGPUCache and OnCommandListEnd now forward
+through ThreadManager under the same terminal counter. External entry is retained
+through the complete callback or exception. An already executing GPU worker may
+finish its command tail after external closure under worker-join ownership.
+FlushCommands still calls the backend directly, and OnCommandListEnd preserves
+ReleaseFences(false) followed by UpdateGPUAccuracy. No queue fence or new wait is
+added to these paths. Backend thread-affinity and serialization requirements are
+unchanged: an ingress counter does not serialize concurrent backend users.
+
+InvalidateGPUCache closes admission before System::GatherGPUDirtyMemory consumes
+dirty metadata. The entry covers the entire gather, including every owner and
+synchronous callback, rather than entering separately within each callback.
+Otherwise closed callbacks could refuse after the gather has already consumed
+dirty records. An admitted gather may finish later owners after external Close.
+The existing Stop worker-join/capture-retirement/external-join order remains.
+
+Tests execute the actual facade/ThreadManager methods, System gather loop and
+GPUDirtyMemoryManager Collect/Gather against two fixture owners. They cover both
+GPU modes, pre-start/post-stop effects and metadata preservation, active callback
+join, remaining-owner callbacks after Close, exceptions and entered GPU-worker
+tail completion. Six precise controls restore each of the three facade bypasses,
+release the command entry early, reject entered-worker tails, or guard only dirty
+callbacks after metadata consumption. Existing cache/readback controls remain.
+
+The former successful FlushCommands bypass is now a rejection control. Actual
+dirty Collect still succeeds after Stop and is retained as a positive scope
+counterexample: CPU producers are not closed by this terminal consumer guard.
+Collection/gather concurrency assumptions and partial dirty-callback exception
+semantics are unchanged; no durable Unknown owner or rollback is added. Backend
+FlushCommands may merely submit native work. This is neither device completion
+nor reversible whole-guest exclusion. All THREE M4 phases remain unfinished.
+
 ## Evidence and limits
 
 The actual-body Linux fixture covers Run and Step, a halt request followed by a

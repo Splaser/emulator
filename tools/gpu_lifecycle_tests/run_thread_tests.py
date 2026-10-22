@@ -35,6 +35,19 @@ direct_read=gpu_source.index('    VideoCore::RasterizerDownloadArea OnCPURead(DA
 direct_read=gpu_source[direct_read:gpu_source.index('\n    }',direct_read)+len('\n    }')]
 direct_flush=gpu_source.index('    void FlushCommands() {')
 direct_flush=gpu_source[direct_flush:gpu_source.index('\n    }',direct_flush)+len('\n    }')]
+direct_gather=gpu_source.index('    void InvalidateGPUCache() {')
+direct_gather=gpu_source[direct_gather:gpu_source.index('\n    }',direct_gather)+len('\n    }')]
+direct_end=gpu_source.index('    void OnCommandListEnd() {')
+direct_end=gpu_source[direct_end:gpu_source.index('\n    }',direct_end)+len('\n    }')]
+core_source=(root/'src/core/core.cpp').read_text()
+gather=core_source.index('void System::GatherGPUDirtyMemory(')
+gather=core_source[gather:core_source.index('\n}',gather)+len('\n}')]
+gather=gather.replace('    for (auto& manager', '    ++gathers;\n    for (auto& manager')
+page_bits=next(line for line in (root/'src/core/device_memory_manager.h').read_text().splitlines()
+               if line.startswith('constexpr size_t DEVICE_PAGEBITS ='))
+(out/'shims/core').mkdir(parents=True,exist_ok=True)
+(out/'shims/core/device_memory_manager.h').write_text(
+    '#pragma once\n#include "common/common_types.h"\nnamespace Core {\n'+page_bits+'\n}\n')
 body = production[production.index('namespace VideoCommon::GPUThread {'):]
 # Rendezvous signals only: the copied production wait and cancellation still run.
 assert body.count('state.cv.wait(lk);') == 1
@@ -74,6 +87,7 @@ head = r'''
 #include <vector>
 #include "video_core/gpu_thread.h"
 #include "video_core/rasterizer_download_area.h"
+#include "core/gpu_dirty_memory_manager.h"
 #include "video_core/buffer_cache/gather_alias.h"
 #include "video_core/buffer_cache/controlled_conflict.h"
 #define LOG_ERROR(category, format, reason) ((void)(reason))
@@ -104,7 +118,11 @@ enum class ThreadPriority { Critical };
 void SetCurrentThreadName(const char*) {}
 void SetCurrentThreadPriority(ThreadPriority) {}
 }
-namespace Settings { bool IsGPULevelExtreme() { return false; } }
+namespace Settings {
+std::atomic<unsigned> updates{};
+bool IsGPULevelExtreme() { return false; }
+void UpdateGPUAccuracy() {++updates;}
+}
 namespace VideoCommon { struct InvalidImageSize : std::runtime_error { using runtime_error::runtime_error; }; }
 namespace Vulkan::vk { struct Exception : std::runtime_error {
 using runtime_error::runtime_error; int GetResult() const { return -2; }
@@ -112,6 +130,10 @@ using runtime_error::runtime_error; int GetResult() const { return -2; }
 namespace Core {
 enum class SystemResultStatus { ErrorVideoCore };
 struct System {
+    struct State {std::array<GPUDirtyMemoryManager,2> gpu_dirty_memory_managers; } storage;
+    State* impl=&storage;
+    std::atomic<unsigned> gathers{};
+    void GatherGPUDirtyMemory(std::function<void(PAddr,size_t)>&);
     struct Gpu {
         std::atomic<int> ticks=0; void NotifyShutdown() {} void TickWork() { ++ticks; }
         bool HasControlledProducerConflict() const { return false; }
@@ -120,6 +142,7 @@ struct System {
     void RegisterHostThread() {} Gpu& GPU() { return gpu; }
     void Exit(SystemResultStatus) {}
 };
+''' + gather + r'''
 namespace Frontend { struct GraphicsContext { int Acquire() { return 0; } }; }
 }
 namespace VideoCore {
@@ -128,11 +151,13 @@ struct RasterizerInterface {
     std::function<void()> invalidate;
     std::function<bool()> cpu_write;
     std::function<RasterizerDownloadArea(DAddr,u64)> query;
+    std::function<void()> command;
     void FlushRegion(DAddr,u64) {}
     void OnCacheInvalidation(DAddr,u64) {++invalidations;if(invalidate)invalidate();}
     bool OnCPUWrite(DAddr,u64) {++invalidations;return cpu_write?cpu_write():false;}
     RasterizerDownloadArea GetFlushArea(DAddr addr,u64 size) {++invalidations;return query?query(addr,size):RasterizerDownloadArea{addr,addr+size,true};}
-    void FlushCommands() {++invalidations;}
+    void FlushCommands() {++invalidations;if(command)command();}
+    void ReleaseFences(bool force) {Require(!force,"command tail forced fence release");++invalidations;if(command)command();}
 };
 struct RendererBase { RasterizerInterface rasterizer; RasterizerInterface* ReadRasterizer() { return &rasterizer; } };
 }
@@ -153,9 +178,10 @@ head+='''
 struct GpuFacade {
     VideoCore::RasterizerInterface* rasterizer;
     VideoCommon::GPUThread::ThreadManager& gpu_thread;
+    Core::System* source_system=nullptr;
     template<class F> u64 RequestSyncOperation(F&&) {throw std::runtime_error("unexpected fixture sync request");}
     bool WaitForSyncOperation(u64) {throw std::runtime_error("unexpected fixture sync wait");}
-'''+direct_cpu+'\n'+direct_read+'\n'+direct_flush+'\n};\n'
+'''+direct_cpu+'\n'+direct_read+'\n'+direct_flush+'\n'+direct_gather+'\n'+direct_end+'\n};\n'
 tail = r'''
 using VideoCommon::GPUThread::ThreadManager;
 void full_queue_stop() {
@@ -311,14 +337,78 @@ void entered_owner_invalidation_during_stop() {
     stopping.Wait();release.Set();Ready(active);Ready(stop);stop_requested=nullptr;
     Require(renderer.rasterizer.invalidations==2,"Stop rejected invalidation from an already entered GPU owner");
 }
-void unmanaged_flush_commands_negative() {
+auto drain_fixture_dirty(Core::System& system) {
+    std::vector<std::pair<PAddr,size_t>> ranges;
+    std::function<void(PAddr,size_t)> record=[&](PAddr addr,size_t size) {ranges.emplace_back(addr,size);};
+    for(auto& owner:system.storage.gpu_dirty_memory_managers)owner.Gather(record);
+    return ranges;
+}
+void invoke_tail(GpuFacade& facade,int kind) {
+    if(kind==0)facade.FlushCommands();
+    else if(kind==1)facade.InvalidateGPUCache();
+    else facade.OnCommandListEnd();
+}
+void command_tail_lifetime(int kind,bool async) {
     Core::System system;VideoCore::RendererBase renderer;
     Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler scheduler;
-    ThreadManager manager{system,true};manager.StartThread(renderer,context,scheduler);manager.Stop();
-    GpuFacade facade{&renderer.rasterizer,manager};
-    facade.FlushCommands();
-    Require(renderer.rasterizer.invalidations==1,
-            "unmanaged GPU FlushCommands bypass counterexample disappeared");
+    ThreadManager manager{system,async};GpuFacade facade{&renderer.rasterizer,manager,&system};
+    const auto accuracy_before=Settings::updates.load();
+    system.storage.gpu_dirty_memory_managers[0].Collect(4096,64);
+    invoke_tail(facade,kind);
+    Require(system.gathers==0,"closed command ingress consumed dirty records");
+    Require(renderer.rasterizer.invalidations==0 && Settings::updates==accuracy_before,
+            "closed command ingress touched resources");
+    Require(drain_fixture_dirty(system)==std::vector<std::pair<PAddr,size_t>>{{4096,64}},
+            "closed gather lost pending dirty records");
+    manager.StartThread(renderer,context,scheduler);
+    Event entered,release,joined;worker_joined=&joined;
+    auto block=[&] {entered.Set();release.Wait();};
+    renderer.rasterizer.command=block;renderer.rasterizer.invalidate=block;
+    if(kind==1) {
+        system.storage.gpu_dirty_memory_managers[0].Collect(4096,64);
+        system.storage.gpu_dirty_memory_managers[1].Collect(8192,64);
+    }
+    auto call=std::async(std::launch::async,[&] {invoke_tail(facade,kind);});entered.Wait();
+    auto stop=std::async(std::launch::async,[&] {manager.Stop();});joined.Wait();
+    const bool early=stop.wait_for(100ms)==std::future_status::ready;
+    release.Set();Ready(call);Ready(stop);worker_joined=nullptr;
+    Require(!early,"Stop failed to join direct command callback");
+    Require(renderer.rasterizer.invalidations==(kind==1?2u:1u),"entered command tail lost callback effects");
+    Require(Settings::updates==accuracy_before+(kind==2?1u:0u),"command tail changed accuracy-update semantics");
+    if(kind==1)Require(drain_fixture_dirty(system).empty(),"entered gather failed to visit every dirty owner");
+    const auto calls=renderer.rasterizer.invalidations.load(),gathers=system.gathers.load();
+    system.storage.gpu_dirty_memory_managers[0].Collect(12288,64);
+    invoke_tail(facade,kind);
+    Require(system.gathers==gathers,"closed command ingress consumed dirty records");
+    Require(renderer.rasterizer.invalidations==calls,"post-stop command tail touched rasterizer");
+    Require(drain_fixture_dirty(system)==std::vector<std::pair<PAddr,size_t>>{{12288,64}},
+            "post-stop dirty producer bypass counterexample disappeared");
+}
+void command_tail_exception(int kind) {
+    Core::System system;VideoCore::RendererBase renderer;
+    Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler scheduler;
+    ThreadManager manager{system,true};GpuFacade facade{&renderer.rasterizer,manager,&system};
+    manager.StartThread(renderer,context,scheduler);
+    renderer.rasterizer.command=[] {throw std::runtime_error("command injection");};
+    renderer.rasterizer.invalidate=renderer.rasterizer.command;
+    system.storage.gpu_dirty_memory_managers[0].Collect(4096,64);
+    bool threw=false;try {invoke_tail(facade,kind);}catch(const std::runtime_error&) {threw=true;}
+    Require(threw,"command tail swallowed callback exception");manager.Stop();
+}
+void entered_command_tail_during_stop() {
+    Core::System system;VideoCore::RendererBase renderer;
+    Core::Frontend::GraphicsContext context;Tegra::Control::Scheduler scheduler;
+    ThreadManager manager{system,true};GpuFacade facade{&renderer.rasterizer,manager,&system};
+    manager.StartThread(renderer,context,scheduler);
+    system.storage.gpu_dirty_memory_managers[0].Collect(4096,64);
+    const auto accuracy_before=Settings::updates.load();Event entered,release,stopping;stop_requested=&stopping;
+    auto active=std::async(std::launch::async,[&] {manager.RunOnGpuThread([&] {
+        entered.Set();release.Wait();for(int kind=0;kind<3;++kind)invoke_tail(facade,kind);
+    });});
+    entered.Wait();auto stop=std::async(std::launch::async,[&] {manager.Stop();});
+    stopping.Wait();release.Set();Ready(active);Ready(stop);stop_requested=nullptr;
+    Require(renderer.rasterizer.invalidations==3 && system.gathers==1 && Settings::updates==accuracy_before+1,
+            "Stop rejected already entered command tail");
 }
 void direct_read_query_lifetime(bool async) {
     Core::System system;VideoCore::RendererBase renderer;
@@ -450,7 +540,10 @@ int main() {
         entered_owner_invalidation_during_stop();
         direct_cpu_write_lifetime(true);direct_cpu_write_lifetime(false);direct_cpu_write_owner_and_exception();
         direct_read_query_lifetime(true);direct_read_query_lifetime(false);direct_read_query_owner();
-        unmanaged_flush_commands_negative();
+        for(int kind=0;kind<3;++kind) {
+            command_tail_lifetime(kind,true);command_tail_lifetime(kind,false);command_tail_exception(kind);
+        }
+        entered_command_tail_during_stop();
         std::cout<<"PASS actual ThreadManager: full-queue cancellation, active join, suspended retry, sync/async inline, pre/post-start rejection\n";
     } catch(const std::exception& e) { std::cerr<<"FAIL "<<e.what()<<"\n"; return 1; }
 }
@@ -470,10 +563,11 @@ manifest={
                         'observer before terminal join and direct-entry RMW'],
     'sha256': {path: hashlib.sha256((root/path).read_bytes()).hexdigest() for path in [
         'src/video_core/gpu_thread.cpp','src/video_core/gpu_thread.h','src/video_core/gpu.cpp','src/common/terminal_ingress.h',
-        'src/common/bounded_threadsafe_queue.h','tools/gpu_lifecycle_tests/run_thread_tests.py']},
+        'src/common/bounded_threadsafe_queue.h','src/core/gpu_dirty_memory_manager.h',
+        'src/core/core.cpp','src/core/device_memory_manager.h','tools/gpu_lifecycle_tests/run_thread_tests.py']},
     'production': ['ThreadManager class', 'RunThread and all ThreadManager definitions', 'MPSCQueue/SPSCQueue', 'stop-token wait'],
     'fixtures': ['renderer/engine/scheduler/platform/Core/System'],
-    'boundary': 'Terminal worker, direct invalidations, GPU OnCPUWrite and read query only; actual FlushCommands bypass remains; no live GPU freeze or Vulkan completion',
+    'boundary': 'Terminal worker and selected direct cache/command callbacks; actual dirty Collect remains possible after Stop; no live GPU freeze or Vulkan completion',
     'positive_repeats': args.repeat,
 }
 for i in range(args.repeat):
@@ -487,7 +581,7 @@ guard=('    const bool owner = IsGpuThread();\n'
        '    auto entry = owner ? std::optional<Common::TerminalIngress::Entry>{}\n'
        '                       : direct_invalidations.TryEnter();\n'
        '    if (!owner && !entry) return;\n')
-assert body.count(guard)==2
+assert body.count(guard)==5
 join_block=('    // An entered invalidation can be waiting for a queued preservation callback.\n'
             '    // Cancel unexecuted captures first, outside write_lock, so it can leave.\n'
             '    direct_invalidations.Join();\n')
@@ -535,12 +629,43 @@ query_controls=[
 ]
 query_forward='const auto area = gpu_thread.TryGetFlushArea(addr, size);'
 assert head.count(query_forward)==1
-for name,changed,override,expected in direct_controls+cpu_write_controls+query_controls:
+command_begin=body.index('void ThreadManager::FlushCommands() {')
+command_end=body.index('u64 ThreadManager::PushCommand(',command_begin)
+command_chunk=body[command_begin:command_end]
+assert command_chunk.count(guard)==3
+gather_begin=command_chunk.index('void ThreadManager::InvalidateGPUCache() {')
+gather_end=command_chunk.index('void ThreadManager::OnCommandListEnd()',gather_begin)
+gather_method=command_chunk[gather_begin:gather_end]
+callback_only=gather_method.replace(guard,'').replace(
+    'rasterizer->OnCacheInvalidation(address, size);',
+    'if (auto entry = direct_invalidations.TryEnter()) rasterizer->OnCacheInvalidation(address, size);')
+command_controls=[
+    ('direct-command-flush-bypasses-manager',body,None,'closed command ingress touched resources'),
+    ('direct-command-gather-bypasses-manager',body,None,'closed command ingress consumed dirty records'),
+    ('direct-command-end-bypasses-manager',body,None,'closed command ingress touched resources'),
+    ('direct-command-released-early',body.replace(command_chunk,
+     command_chunk.replace(guard,'    {\n'+guard+'    }\n')),None,'Stop failed to join direct command callback'),
+    ('direct-command-rejects-owner',body.replace(command_chunk,command_chunk.replace('IsGpuThread()','false')),None,
+     'Stop rejected already entered command tail'),
+    ('direct-command-gather-callback-only',body.replace(gather_method,callback_only),None,
+     'closed command ingress consumed dirty records'),
+]
+command_bypasses={
+    'direct-command-flush-bypasses-manager':('gpu_thread.FlushCommands();','rasterizer->FlushCommands();'),
+    'direct-command-gather-bypasses-manager':('gpu_thread.InvalidateGPUCache();',
+        'std::function<void(PAddr,size_t)> callback([this](PAddr a,size_t n) {rasterizer->OnCacheInvalidation(a,n);}); source_system->GatherGPUDirtyMemory(callback);'),
+    'direct-command-end-bypasses-manager':('gpu_thread.OnCommandListEnd();',
+        'rasterizer->ReleaseFences(false); Settings::UpdateGPUAccuracy();'),
+}
+for name,changed,override,expected in direct_controls+cpu_write_controls+query_controls+command_controls:
     control_head=(head.replace(forward,'return rasterizer->OnCPUWrite(addr, size);')
                   if name=='direct-cpu-write-bypasses-manager' else head)
     if name=='direct-query-bypasses-manager':
         control_head=control_head.replace(query_forward,
             'const auto area = std::optional{rasterizer->GetFlushArea(addr, size)};')
+    if name in command_bypasses:
+        old,new=command_bypasses[name];assert control_head.count(old)==1
+        control_head=control_head.replace(old,new)
     assert changed!=body or override is not None or control_head!=head
     control=out/(name+'.cpp');control.write_text(control_head+changed+tail)
     mutant=out/(name+('.exe' if os.name=='nt' else ''))
@@ -556,6 +681,7 @@ for name,changed,override,expected in direct_controls+cpu_write_controls+query_c
 manifest['direct_control_mutants']=[entry[0] for entry in direct_controls]
 manifest['cpu_write_control_mutants']=[entry[0] for entry in cpu_write_controls]
 manifest['read_query_control_mutants']=[entry[0] for entry in query_controls]
+manifest['command_tail_control_mutants']=[entry[0] for entry in command_controls]
 if args.handoff_controls:
     admission = '++state.last_fence;\n    return true;'
     assert body.count(admission) == 1

@@ -1,5 +1,33 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: terminal command tail and whole dirty gather
+
+FlushCommands, InvalidateGPUCache and OnCommandListEnd now forward from the actual
+GPU facade to ThreadManager under its terminal counter. The dirty-gather entry
+precedes metadata consumption and covers all synchronous callbacks/owners, not
+just each callback. Already executing GPU-owner command tails may finish after
+external Close under worker join. ReleaseFences(false) then accuracy-update
+ordering remains unchanged; no new queue synchronization is introduced.
+
+Actual-body Windows ThreadManager tests pass three repeats with all earlier
+controls plus six command-tail controls. Actual System gather and dirty-manager
+Collect/Gather execute against two fixture owners. Both GPU modes, closed metadata
+preservation, whole-gather lifetime, exception exit and active owner tails are
+covered. GPU lifecycle/readback regressions also pass three repeats; production
+gpu_thread.cpp Windows syntax passes. The reused existing registration fixture
+also passes local WSL syntax with the current ThreadManager prefix; Windows lacks
+its Boost dependency, and registration-pipeline execution was not repeated. See
+[the retained Windows conclusion](M4_F3_COMMAND_TAIL_TERMINAL_VALIDATION.md).
+Temporary outputs are removed after verification. No new remote/Android build.
+
+Actual dirty Collect still works after Stop as an independent producer scope
+counterexample. Backend affinity/serialization, dirty callback partial-exception
+semantics, remaining raw/service/publication routes, native submissions and
+Unknown retirement remain unresolved by this terminal lifetime extension. It
+does not add reversible GPU stop or checked completion. All THREE M4 phases
+remain unfinished and ordinary GuestBackingAdmission remains Unknown. Main stays
+unchanged until M7's final zero-copy merge.
+
 ## 2026-10-22: terminal readback query and cancelled coverage
 
 GPU::Impl::OnCPURead now gets optional geometry through

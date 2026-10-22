@@ -276,6 +276,35 @@ std::optional<VideoCore::RasterizerDownloadArea> ThreadManager::TryGetFlushArea(
     return rasterizer->GetFlushArea(addr, size);
 }
 
+void ThreadManager::FlushCommands() {
+    const bool owner = IsGpuThread();
+    auto entry = owner ? std::optional<Common::TerminalIngress::Entry>{}
+                       : direct_invalidations.TryEnter();
+    if (!owner && !entry) return;
+    rasterizer->FlushCommands();
+}
+
+void ThreadManager::InvalidateGPUCache() {
+    const bool owner = IsGpuThread();
+    auto entry = owner ? std::optional<Common::TerminalIngress::Entry>{}
+                       : direct_invalidations.TryEnter();
+    if (!owner && !entry) return;
+    // Retain the entry before consuming any dirty records, through the entire
+    // gather and its synchronous callbacks. Closed ingress must not consume them.
+    std::function<void(PAddr, size_t)> callback_writes(
+        [this](PAddr address, size_t size) { rasterizer->OnCacheInvalidation(address, size); });
+    system.GatherGPUDirtyMemory(callback_writes);
+}
+
+void ThreadManager::OnCommandListEnd() {
+    const bool owner = IsGpuThread();
+    auto entry = owner ? std::optional<Common::TerminalIngress::Entry>{}
+                       : direct_invalidations.TryEnter();
+    if (!owner && !entry) return;
+    rasterizer->ReleaseFences(false);
+    Settings::UpdateGPUAccuracy();
+}
+
 u64 ThreadManager::PushCommand(CommandData&& command_data, bool block) {
     if (!is_async) {
         // In synchronous GPU mode, block the caller until the command has executed

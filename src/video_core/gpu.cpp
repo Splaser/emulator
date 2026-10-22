@@ -105,20 +105,17 @@ struct GPU::Impl {
 
     /// Flush all current written commands into the host GPU for execution.
     void FlushCommands() {
-        rasterizer->FlushCommands();
+        gpu_thread.FlushCommands();
     }
 
     /// Synchronizes CPU writes with Host GPU memory.
     void InvalidateGPUCache() {
-        std::function<void(PAddr, size_t)> callback_writes(
-            [this](PAddr address, size_t size) { rasterizer->OnCacheInvalidation(address, size); });
-        system.GatherGPUDirtyMemory(callback_writes);
+        gpu_thread.InvalidateGPUCache();
     }
 
     /// Signal the ending of command list.
     void OnCommandListEnd() {
-        rasterizer->ReleaseFences(false);
-        Settings::UpdateGPUAccuracy();
+        gpu_thread.OnCommandListEnd();
     }
 
     /// Request a host GPU memory flush from the CPU.
