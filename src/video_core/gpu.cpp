@@ -8,6 +8,7 @@
 #include <deque>
 #include <list>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 #include "common/assert.h"
@@ -33,6 +34,7 @@
 #include "video_core/host1x/syncpoint_manager.h"
 #include "video_core/memory_manager.h"
 #include "video_core/renderer_base.h"
+#include "video_core/rasterizer_binding_state.h"
 #include "video_core/shader_notify.h"
 
 namespace Tegra {
@@ -51,6 +53,7 @@ struct GPU::Impl {
         // destruction order alone cannot drain work or close callback admission.
         gpu_thread.Stop();
         owner_publications.Join();
+        rasterizer_binding->Join();
         CloseCompositeRequests();
         if (renderer) {
             renderer->Shutdown();
@@ -120,7 +123,7 @@ struct GPU::Impl {
     InitAddressSpace(Tegra::MemoryManager& memory_manager) {
         auto publication = owner_publications.TryEnter();
         if (!publication) return std::nullopt;
-        memory_manager.BindRasterizer(rasterizer);
+        if (!rasterizer || !memory_manager.AttachRasterizer(rasterizer_binding)) return std::nullopt;
         return publication;
     }
 
@@ -134,14 +137,27 @@ struct GPU::Impl {
 
     /// Binds a renderer to the GPU.
     void BindRenderer(std::unique_ptr<VideoCore::RendererBase> renderer_) {
+        auto publication = owner_publications.TryEnter();
+        if (!publication || !renderer_) throw std::runtime_error("Renderer binding closed or invalid");
         auto replacement = std::make_shared<CompositeState>();
         replacement->renderer = renderer_.get();
-        CloseCompositeRequests();
-        renderer = std::move(renderer_);
-        composite_state = std::move(replacement);
-        rasterizer = renderer->ReadRasterizer();
-        host1x.MemoryManager().BindInterface(rasterizer);
-        host1x.GMMU().BindRasterizer(rasterizer);
+        auto* target = renderer_->ReadRasterizer();
+        if (!rasterizer_binding->SetTarget(target)) {
+            throw std::runtime_error("Renderer binding is invalid or already initialized");
+        }
+        try {
+            if (!host1x.GMMU().AttachRasterizer(rasterizer_binding)) {
+                throw std::runtime_error("GMMU already belongs to another binding");
+            }
+            CloseCompositeRequests();
+            renderer = std::move(renderer_);
+            composite_state = std::move(replacement);
+            rasterizer = target;
+            host1x.MemoryManager().BindInterface(rasterizer);
+        } catch (...) {
+            NotifyShutdown();
+            throw;
+        }
     }
 
     /// Flush all current written commands into the host GPU for execution.
@@ -304,6 +320,7 @@ struct GPU::Impl {
 
     void NotifyShutdown() {
         owner_publications.Close();
+        rasterizer_binding->Close();
         {
             // Both kinds of CPU waiters must be released if GPU execution has failed.
             std::scoped_lock lk{sync_mutex, sync_request_mutex};
@@ -476,6 +493,8 @@ struct GPU::Impl {
     // Cold publications may precede GPU Start. Closed by NotifyShutdown, joined
     // before renderer teardown, including the caller's final owner publication.
     Common::TerminalIngress owner_publications;
+    std::shared_ptr<RasterizerBindingState> rasterizer_binding =
+        std::make_shared<RasterizerBindingState>();
     std::atomic_bool controlled_producer_conflict{};
 
     std::array<std::atomic<u32>, Service::Nvidia::MaxSyncPoints> syncpoints{};

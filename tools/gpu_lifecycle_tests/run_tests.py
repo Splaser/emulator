@@ -78,6 +78,7 @@ head = r'''
 #include <vector>
 #include "common/common_types.h"
 #include "common/terminal_ingress.h"
+#include "video_core/rasterizer_binding_state.h"
 using namespace std::chrono_literals;
 void Require(bool ok,const char* reason) { if(!ok) throw std::runtime_error(reason); }
 struct Event {
@@ -99,7 +100,7 @@ namespace Tegra { struct FramebufferConfig { int value=0; }; }
 namespace Service::Nvidia { struct NvFence { u32 id,value; }; }
 namespace VideoCore {
 struct RasterizerDownloadArea { u64 start_address=0,end_address=0; bool preemtive=false; };
-struct Rasterizer {
+struct RasterizerInterface {
     Life* life=nullptr; int flushes=0;
     Event* flush_entered=nullptr; Event* flush_release=nullptr;
     RasterizerDownloadArea GetFlushArea(u64 a,u64 n) { return {a,a+n,false}; }
@@ -111,6 +112,7 @@ struct Rasterizer {
         if(life) { if(!life->exited) life->order_bad=true; life->first_shutdown_step.Set(); }
     }
 };
+using Rasterizer = RasterizerInterface;
 struct Renderer {
     Rasterizer* rasterizer=nullptr;
     Event* capture_entered=nullptr; Event* capture_release=nullptr;
@@ -163,6 +165,7 @@ struct Impl {
     Host& host1x;
     std::atomic<bool> shutting_down=false;
     Common::TerminalIngress owner_publications;
+    std::shared_ptr<Tegra::RasterizerBindingState> rasterizer_binding=std::make_shared<Tegra::RasterizerBindingState>();
     std::mutex sync_mutex; std::condition_variable sync_cv;
     std::deque<std::function<void()>> sync_requests;
     std::atomic<u64> current_sync_fence=0; u64 last_sync_fence=0;

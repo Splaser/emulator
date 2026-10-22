@@ -1,5 +1,32 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: external GMMU binding terminal lifetime
+
+The public BindRasterizer bypass now uses a detached shared terminal state.
+First installation is private to GPU's retained publication, including Host1x
+renderer bootstrap. Public calls only confirm the enrolled immutable target
+while open; they never store a pointer or call a retired GPU. Shutdown closes
+the state; teardown joins entered calls before renderer retirement. Before-entry
+and post-GPU callers retain the state and refuse safely. Channel initialization
+uses its already enrolled GMMU. Native scheduler fixtures are adapted to the
+current allocation/enrollment APIs.
+
+Windows results: positives and ten lifecycle cases passed three repetitions;
+30 publication plus nine channel ownership controls hit precise runtime failures.
+Six real production units compiled to x64 COFF without diagnostics. All 38 input
+hash entries (19 unique inputs), object hashes and signatures matched. Final logs
+and manifests remain in `.diagnostics/m4-external-gmmu-results/`; the committed
+JSON report retains the checked inputs. All 132 generated exe files, six objects
+and other temporary files from this turn were removed (593 files total).
+No full app link, native Vulkan runtime, Linux/Android/device or native scheduler
+fixture build is claimed.
+
+See [failure-first evidence and Windows results](M4_F3_EXTERNAL_GMMU_BINDING.md).
+This supersedes historical public-BindRasterizer bypass notes below. Other GMMU,
+raw/mapping/native producers remain open. All THREE phases remain unfinished,
+GuestBackingAdmission remains Unknown and main remains untouched.
+
+
 ## 2026-10-22: refuse GMMU replacement after channel initialization effects
 
 After closing the Boost/production-object checkpoint at d40b0009c0, the new test

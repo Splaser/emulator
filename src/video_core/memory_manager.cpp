@@ -15,6 +15,7 @@
 #include "video_core/memory_manager.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_base.h"
+#include "video_core/rasterizer_binding_state.h"
 
 namespace Tegra {
 using Tegra::Memory::GuestMemoryFlags;
@@ -276,8 +277,24 @@ GPUVAddr MemoryManager::BigPageTableOp(GPUVAddr gpu_addr, [[maybe_unused]] DAddr
     return gpu_addr;
 }
 
-void MemoryManager::BindRasterizer(VideoCore::RasterizerInterface* rasterizer_) {
-    rasterizer = rasterizer_;
+bool MemoryManager::BindRasterizer(VideoCore::RasterizerInterface* rasterizer_) {
+    auto binding = rasterizer_binding.load(std::memory_order_acquire);
+    if (!binding) return false;
+    auto entry = binding->TryBind(rasterizer_);
+    if (!entry) return false;
+    // Enrollment installed the pointer before publishing binding. A public call
+    // only acknowledges that same owner; do not race readers with another store.
+    return true;
+}
+
+bool MemoryManager::AttachRasterizer(std::shared_ptr<RasterizerBindingState> binding) {
+    if (!binding || !binding->Target()) return false;
+    std::scoped_lock lock{rasterizer_binding_mutex};
+    auto current = rasterizer_binding.load(std::memory_order_acquire);
+    if (current) return current == binding;
+    rasterizer = binding->Target();
+    rasterizer_binding.store(std::move(binding), std::memory_order_release);
+    return true;
 }
 
 GPUVAddr MemoryManager::Map(GPUVAddr gpu_addr, DAddr dev_addr, std::size_t size, PTEKind kind,

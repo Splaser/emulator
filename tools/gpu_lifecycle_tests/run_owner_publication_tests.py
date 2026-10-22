@@ -12,6 +12,8 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--repeat', type=int, default=3)
 p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--output-dir', type=Path)
+p.add_argument('--control-prefix', action='append', default=[],
+               help='Run only mutation controls matching any prefix; positives always run')
 a = p.parse_args()
 if a.repeat < 1:
     p.error('--repeat must be positive')
@@ -46,9 +48,14 @@ assert base.count(stopped) == 1
 base = base.replace(stopped, stopped + '\n        if(stopped) stopped->Set();')
 
 memory = method(read('src/video_core/memory_manager.cpp'),
-                'void MemoryManager::BindRasterizer(').replace('MemoryManager::', '')
-memory = memory.replace('    rasterizer = rasterizer_;',
-                        '    if(bind_hook) bind_hook();\n    ++binds;\n    rasterizer = rasterizer_;')
+                'bool MemoryManager::BindRasterizer(').replace('MemoryManager::', '')
+memory = memory.replace('    auto entry = binding->TryBind(rasterizer_);',
+                        '    if(before_raw_enter) before_raw_enter();\n    auto entry = binding->TryBind(rasterizer_);')
+memory = memory.replace('    return true;', '    if(raw_bind_hook) raw_bind_hook();\n    return true;')
+attach = method(read('src/video_core/memory_manager.cpp'),
+                'bool MemoryManager::AttachRasterizer(').replace('MemoryManager::', '')
+attach = attach.replace('    rasterizer = binding->Target();',
+                        '    if(bind_hook) bind_hook();\n    ++binds;\n    rasterizer = binding->Target();')
 fake_memory = r'''
 struct TestAllocator {
     inline static int live=0,fail_after=-1;
@@ -58,12 +65,15 @@ struct TestAllocator {
 namespace Tegra {
 struct MemoryManager {
     inline static int live=0,binds=0; inline static bool fail=false;
-    inline static std::function<void()> bind_hook;
+    inline static std::function<void()> bind_hook,raw_bind_hook,before_raw_enter;
+    std::mutex rasterizer_binding_mutex;
+    std::atomic<std::shared_ptr<RasterizerBindingState>> rasterizer_binding;
     VideoCore::Rasterizer* rasterizer=nullptr;
-    template<class System> MemoryManager(System&,u64,u64,u64,u64) {if(fail)throw std::bad_alloc();++live;}
+    bool counted=false;MemoryManager()=default;
+    template<class System> MemoryManager(System&,u64,u64,u64,u64) {if(fail)throw std::bad_alloc();counted=true;++live;}
     std::function<void()> retire_hook;
-    ~MemoryManager() {if(retire_hook)retire_hook();--live;}
-''' + memory.replace('VideoCore::RasterizerInterface*', 'VideoCore::Rasterizer*') + '\n};\n}\n'
+    ~MemoryManager() {if(retire_hook)retire_hook();if(counted)--live;}
+''' + memory.replace('VideoCore::RasterizerInterface*', 'VideoCore::Rasterizer*') + '\n' + attach + '\n};\n}\n'
 channel_fixture = r'''
 namespace Tegra {
 struct CommandList {std::vector<int> entries;};
@@ -83,7 +93,7 @@ struct ChannelState {
 }
 }
 '''
-base = base.replace('struct Rasterizer {', '''struct Rasterizer {
+base = base.replace('struct RasterizerInterface {', '''struct RasterizerInterface {
     int channel_inits=0;std::function<void()> initialize_channel;
     int channel_binds=0;template<class Channel> void BindChannel(Channel&) {++channel_binds;}
     template<class Channel> void InitializeChannel(Channel& channel) {
@@ -102,7 +112,14 @@ base = base.replace('struct Scheduler {', '''struct Scheduler {
 ''' + declare)
 allocation_type = method(read('src/video_core/gpu.h'), '    struct ChannelAllocation {').replace(
     'Control::ChannelState', 'Tegra::Control::ChannelState') + ';\n'
-base = base.replace('struct Impl {', fake_memory + channel_fixture + '''
+base = base.replace('struct Host {', fake_memory + 'struct Host {', 1)
+base = base.replace('struct Renderer {', 'struct Renderer {\n    auto ReadRasterizer() {return rasterizer;}')
+base = base.replace('struct Host { Syncpoints points;', '''struct Host {
+    Tegra::MemoryManager host_gmmu;
+    struct {VideoCore::Rasterizer* target=nullptr;void BindInterface(VideoCore::Rasterizer* r) {target=r;}} interface;
+    auto& GMMU() {return host_gmmu;}auto& MemoryManager() {return interface;}
+    Syncpoints points;''')
+base = base.replace('struct Impl {', channel_fixture + '''
 ''' + allocation_type + '''
 struct Impl {
     int system=0,gpu=0;s32 new_channel_id=1;
@@ -119,9 +136,11 @@ allocation = method(gpu, '    std::optional<GPU::ChannelAllocation> AllocateChan
 binding = method(gpu, '    void BindChannel(s32 channel_id)').replace(
     'Control::ChannelState', 'Tegra::Control::ChannelState')
 binding_entry = method(gpu, '    std::optional<Common::TerminalIngress::Entry> AcquireChannelBinding()')
-base += '\n' + binding_entry + '\n' + init + '\n' + channel_init + '\n' + allocation + '\n' + binding + '\n};\n'
+renderer_bind = method(gpu, '    void BindRenderer(std::unique_ptr<VideoCore::RendererBase> renderer_)')
+base += '\n' + renderer_bind + '\n' + binding_entry + '\n' + init + '\n' + channel_init + '\n' + allocation + '\n' + binding + '\n};\n'
 public_init = method(gpu, 'std::optional<Common::TerminalIngress::Entry>\nGPU::InitAddressSpace(')
 public_init = public_init.replace('GPU::', '')
+public_renderer = method(gpu, 'void GPU::BindRenderer(').replace('GPU::', '')
 public_binding_entry = method(gpu, 'std::optional<Common::TerminalIngress::Entry> GPU::AcquireChannelBinding(').replace('GPU::', '')
 public_channel = method(gpu, 'std::optional<Common::TerminalIngress::Entry>\nGPU::InitChannel(')
 public_channel = public_channel.replace('GPU::', '').replace('Control::ChannelState', 'Tegra::Control::ChannelState')
@@ -138,7 +157,7 @@ allocate = allocate.replace(commit, '    if(commit_hook) commit_hook();\n' + com
 caller = r'''
 struct PublicGpu {Impl* impl;
     int submissions=0;void PushGPUEntries(s32,Tegra::CommandList&&) {++submissions;}
-''' + public_binding_entry + '\n' + public_init + '\n' + public_channel + '\n' + public_allocation + r'''
+''' + public_renderer + '\n' + public_binding_entry + '\n' + public_init + '\n' + public_channel + '\n' + public_allocation + r'''
 };
 struct FixtureSystem {PublicGpu& facade;PublicGpu& GPU() {return facade;}};
 enum class NvResult {Success,InvalidState,BadValue,AlreadyAllocated,BadParameter};
@@ -442,10 +461,11 @@ void CreationClosedAndAliasScope() {
             "closed channel address-space binding published owner");
     // The external GMMU route is deliberately independent of this NV entry family.
     VideoCore::Rasterizer external_raster;const auto binds=Tegra::MemoryManager::binds;
-    binder.gmmu->BindRasterizer(&external_raster);
-    Require(binder.gmmu->rasterizer==&external_raster && Tegra::MemoryManager::binds==binds+1,
-            "independent external GMMU scope witness disappeared");
-    std::cout<<"PASS independent external GMMU binding still bypasses terminal GPU closure\n";
+    const auto before=binder.gmmu->rasterizer;
+    Require(!binder.gmmu->BindRasterizer(&external_raster),"closed external GMMU accepted binding");
+    HardRequire(binder.gmmu->rasterizer==before && Tegra::MemoryManager::binds==binds,
+                "closed external GMMU changed rasterizer");
+    std::cout<<"PASS closed external GMMU binding refuses without pointer publication\n";
 }
 void CreationFailures() {
     Host host;Impl gpu{host};
@@ -560,7 +580,74 @@ void BindingLock(bool address_lock) {
 }
 '''
 
-tests = tests.replace('int main() {', channel_tests + creation_tests + binding_tests + '\nint main() {')
+
+external_tests = r'''
+void ExternalRawHealthy() {
+    Host host;VideoCore::Rasterizer raster,other;Impl gpu{host};gpu.rasterizer=&raster;
+    PublicGpu facade{&gpu};FixtureSystem system{facade};
+    auto mm=std::make_shared<Tegra::MemoryManager>(system,37,0,17,12);
+    Require(!mm->BindRasterizer(&raster) && !mm->rasterizer,"unenrolled external GMMU installed target");
+    auto publication=gpu.InitAddressSpace(*mm);Require(bool(publication),"healthy GMMU enrollment refused");publication.reset();
+    const auto binds=Tegra::MemoryManager::binds;
+    Require(mm->BindRasterizer(&raster) && !mm->BindRasterizer(&other) && !mm->BindRasterizer(nullptr),
+            "external GMMU accepted wrong target");
+    Require(mm->rasterizer==&raster && Tegra::MemoryManager::binds==binds,"external GMMU rewrote enrolled pointer");
+    auto alien=std::make_shared<Tegra::RasterizerBindingState>();alien->SetTarget(&other);
+    Require(!mm->AttachRasterizer(alien) && mm->rasterizer==&raster,"GMMU enrollment replaced an existing owner");
+    alien->Close();alien->Join();
+    Tegra::MemoryManager::raw_bind_hook=[] {throw std::runtime_error("raw binding exception");};
+    bool threw=false;try {mm->BindRasterizer(&raster);}catch(const std::runtime_error&) {threw=true;}
+    Require(threw,"raw entry exception hook missing");Tegra::MemoryManager::raw_bind_hook={};
+    gpu.NotifyShutdown();
+    HardRequire(!mm->BindRasterizer(&raster),"closed external GMMU accepted original target");
+    gpu.rasterizer_binding->Join();
+}
+void ExternalRawRetain(bool before_entry) {
+    Host host;VideoCore::Rasterizer raster;auto gpu=std::make_unique<Impl>(host);gpu->rasterizer=&raster;
+    gpu->renderer->rasterizer=&raster;PublicGpu facade{gpu.get()};FixtureSystem system{facade};
+    auto mm=std::make_shared<Tegra::MemoryManager>(system,37,0,17,12);
+    auto publication=gpu->InitAddressSpace(*mm);Require(bool(publication),"raw retain enrollment refused");publication.reset();
+    Event entered,release,stopped;auto block=[&] {entered.Set();release.Wait();};
+    if(before_entry)Tegra::MemoryManager::before_raw_enter=block;
+    else Tegra::MemoryManager::raw_bind_hook=block;
+    gpu->gpu_thread.stopped=&stopped;
+    auto bind=std::async(std::launch::async,[&] {return mm->BindRasterizer(&raster);});entered.Wait();
+    auto destroy=std::async(std::launch::async,[gpu=std::move(gpu)]() mutable {gpu.reset();});stopped.Wait();
+    if(before_entry)Ready(destroy);
+    else HardRequire(destroy.wait_for(100ms)!=std::future_status::ready,"teardown escaped external GMMU binding");
+    release.Set();Require(Ready(bind)==!before_entry,"external GMMU late-entry/entered result changed");
+    if(!before_entry)Ready(destroy);
+    Tegra::MemoryManager::before_raw_enter={};Tegra::MemoryManager::raw_bind_hook={};
+    Require(!mm->BindRasterizer(&raster) && mm->rasterizer==&raster,"retired GPU was used by external GMMU");
+}
+void RendererBootstrap(bool closed) {
+    Host host;VideoCore::Rasterizer raster,other;Impl gpu{host};PublicGpu facade{&gpu};
+    auto renderer=std::make_unique<VideoCore::Renderer>();renderer->rasterizer=&raster;
+    if(closed)gpu.NotifyShutdown();
+    bool threw=false;try {facade.BindRenderer(std::move(renderer));}catch(const std::runtime_error&) {threw=true;}
+    Require(threw==closed,"renderer bootstrap ignored terminal refusal");
+    if(closed) {Require(!host.GMMU().rasterizer && !host.interface.target,"closed renderer bootstrap published target");return;}
+    Require(host.GMMU().rasterizer==&raster && host.interface.target==&raster &&
+            host.GMMU().BindRasterizer(&raster),"renderer bootstrap did not enroll Host1x GMMU");
+    auto duplicate=std::make_unique<VideoCore::Renderer>();duplicate->rasterizer=&other;threw=false;
+    try {facade.BindRenderer(std::move(duplicate));}catch(const std::runtime_error&) {threw=true;}
+    Require(threw && host.GMMU().rasterizer==&raster && host.GMMU().BindRasterizer(&raster),
+            "duplicate renderer bootstrap replaced or closed current owner");
+}
+void RendererBootstrapRetain() {
+    Host host;VideoCore::Rasterizer raster;auto gpu=std::make_unique<Impl>(host);PublicGpu facade{gpu.get()};
+    Event entered,release,stopped;
+    Tegra::MemoryManager::bind_hook=[&] {entered.Set();release.Wait();};gpu->gpu_thread.stopped=&stopped;
+    auto renderer=std::make_unique<VideoCore::Renderer>();renderer->rasterizer=&raster;
+    auto bind=std::async(std::launch::async,[&facade,renderer=std::move(renderer)]() mutable {facade.BindRenderer(std::move(renderer));});entered.Wait();
+    auto destroy=std::async(std::launch::async,[gpu=std::move(gpu)]() mutable {gpu.reset();});stopped.Wait();
+    HardRequire(destroy.wait_for(100ms)!=std::future_status::ready,"teardown escaped renderer enrollment");
+    release.Set();Ready(bind);Ready(destroy);Tegra::MemoryManager::bind_hook={};
+    Require(!host.GMMU().BindRasterizer(&raster),"late renderer enrollment reopened closed binding");
+}
+'''
+
+tests = tests.replace('int main() {', channel_tests + creation_tests + binding_tests + external_tests + '\nint main() {')
 final_check='        Require(TestAllocator::live==0 && Tegra::MemoryManager::live==0,"fixture owners leaked");'
 assert tests.count(final_check)==1
 tests = tests.replace(final_check,
@@ -570,10 +657,17 @@ tests = tests.replace(final_check,
                       '        for(int stage=0;stage<5;++stage)CreationRetain(stage);\n'
                       '        BindingHealthy();for(int stage=0;stage<3;++stage)BindingRetain(stage);\n'
                       '        BindingLock(true);BindingLock(false);\n'
+                      '        ExternalRawHealthy();ExternalRawRetain(false);ExternalRawRetain(true);\n'
+                      '        RendererBootstrap(false);RendererBootstrap(true);RendererBootstrapRetain();\n'
+                      '        std::cout<<"PASS detached external GMMU binding: refusal, immutable target, close/join, late entry and retained state after GPU destruction\\n";\n'
                       '        std::cout<<"PASS retained channel address-space binding: closed refusal, cold/null assignment, lookup/replacement/ack join and both service locks\\n";\n'
                       '        Require(Tegra::Control::ChannelState::live==0,"channel owners leaked");\n'+final_check+
                       '\n        std::cout<<"PASS retained channel creation: refusal, rollback, concurrent IDs, lock order, fd/session join and provider retirement\\n";'+
                       '\n        std::cout<<"PASS retained channel initialization: deferred setup, ready commit, partial failure isolation and NV lease retention\\n";')
+# Model the renderer bootstrap performed before the real NV service becomes available.
+for form in ('gpu.', 'gpu->'):
+    tests = tests.replace(form + 'rasterizer=&raster;', form + 'rasterizer=&raster;' +
+                          form + 'rasterizer_binding->SetTarget(&raster);')
 source = '#include <algorithm>\n#include <cstdlib>\n#include <unordered_map>\n#include "common/bit_util.h"\n#define ASSERT(x) Require(bool(x),"missing channel binding")\n' + base + caller + tests
 flags = [a.cxx, '-std=c++23', '-O1', '-g', '-pthread', '-Wall', '-Wextra', '-Werror',
          '-I', str(root / 'src')]
@@ -590,7 +684,8 @@ for i in range(a.repeat):
     log = result.stdout + result.stderr;(out / f'positive-{i}.log').write_text(log)
     assert result.returncode == 0 and all(marker in log for marker in (
         'PASS retained GPU address-space publication:', 'PASS retained channel initialization:',
-        'PASS retained channel creation:', 'PASS retained channel address-space binding:')), log
+        'PASS retained channel creation:', 'PASS retained channel address-space binding:',
+        'PASS detached external GMMU binding:')), log
 print(f'PASS retained GPU owner publication ({a.repeat} repetitions)', flush=True)
 refusal = '    if (!publication) {\n        return NvResult::InvalidState;\n    }'
 assert allocate.count(refusal) == 1
@@ -669,7 +764,28 @@ binding_controls = [
         'std::scoped_lock lock(mutex);')),
      'channel binding bypassed setup-submit lock'),
 ]
-for name, changed, expected in controls + channel_controls + creation_controls + binding_controls:
+external_controls = [
+    ('external-missing-close', source.replace('        rasterizer_binding->Close();', '').replace(
+        '        ClosedAndFailure();', '        ExternalRawHealthy();ClosedAndFailure();'),
+     'closed external GMMU accepted original target'),
+    ('external-missing-join', source.replace('        rasterizer_binding->Join();', ''),
+     'teardown escaped external GMMU binding'),
+    ('external-early-release', source.replace('    if(raw_bind_hook) raw_bind_hook();',
+        '    entry.reset();\n    if(raw_bind_hook) raw_bind_hook();'),
+     'teardown escaped external GMMU binding'),
+    ('external-wrong-target', source.replace('binding->TryBind(rasterizer_)',
+        'binding->TryBind((static_cast<void>(rasterizer_), binding->Target()))'), 'external GMMU accepted wrong target'),
+    ('external-replaced-owner', source.replace('    if (current) return current == binding;',
+        '    (void)current;'), 'GMMU enrollment replaced an existing owner'),
+    ('renderer-early-release', source.replace('            if (!host1x.GMMU().AttachRasterizer(rasterizer_binding)) {',
+        '            publication.reset();\n            if (!host1x.GMMU().AttachRasterizer(rasterizer_binding)) {'),
+     'teardown escaped renderer enrollment'),
+]
+selected_controls = [c for c in controls + channel_controls + creation_controls + binding_controls + external_controls
+                     if not a.control_prefix or any(c[0].startswith(prefix) for prefix in a.control_prefix)]
+if not selected_controls:
+    p.error('No mutation controls match --control-prefix')
+for name, changed, expected in selected_controls:
     assert changed != source
     mutant = compile_source(name, changed)
     result = subprocess.run([str(mutant)], capture_output=True, text=True, timeout=30)
@@ -677,6 +793,7 @@ for name, changed, expected in controls + channel_controls + creation_controls +
     assert result.returncode != 0 and 'FAIL ' + expected in log, (name, log)
     print('PASS GPU publication control: ' + name, flush=True)
 paths = ['src/video_core/gpu.cpp', 'src/video_core/gpu.h', 'src/video_core/memory_manager.cpp',
+         'src/video_core/rasterizer_binding_state.h',
          'src/core/hle/service/nvdrv/devices/nvhost_as_gpu.cpp',
          'src/core/hle/service/nvdrv/devices/nvhost_as_gpu.h', 'src/common/terminal_ingress.h',
          'src/core/hle/service/nvdrv/devices/nvhost_gpu.cpp',
@@ -687,12 +804,14 @@ paths = ['src/video_core/gpu.cpp', 'src/video_core/gpu.h', 'src/video_core/memor
          'tools/gpu_lifecycle_tests/run_tests.py', 'tools/gpu_lifecycle_tests/run_owner_publication_tests.py']
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths},
-    'positive_repeats': a.repeat, 'controls': [c[0] for c in controls],
+    'positive_repeats': a.repeat, 'executed_controls': [c[0] for c in selected_controls],
+    'control_prefixes': a.control_prefix, 'controls': [c[0] for c in controls],
     'channel_controls': [c[0] for c in channel_controls],
     'creation_controls': [c[0] for c in creation_controls],
     'binding_controls': [c[0] for c in binding_controls],
+    'external_controls': [c[0] for c in external_controls],
     'actual': ['GPU publication API and forwarding', 'GPU destructor and NotifyShutdown',
-               'MemoryManager BindRasterizer assignment', 'AllocAsEx and VM layout',
+               'MemoryManager public BindRasterizer and private AttachRasterizer; GPU renderer bootstrap', 'AllocAsEx and VM layout',
                'GPU channel initialization/allocation, terminal binding Entry and internal scheduler binding', 'Scheduler DeclareChannel',
                'NV SetupGPFIFOChannel and SubmitGPFIFOImpl', 'NV GPU constructor/destructor and OnOpen',
                'Module GPU builder, OpenResult, Open, GetDevice and destructor', 'NV address-space BindChannel'],

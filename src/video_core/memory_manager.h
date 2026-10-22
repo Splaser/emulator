@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string_view>
@@ -36,6 +37,9 @@ class System;
 
 namespace Tegra {
 
+class GPU;
+class RasterizerBindingState;
+
 class MemoryManager final {
 public:
     explicit MemoryManager(Core::System& system_, u64 address_space_bits_ = 40,
@@ -50,8 +54,9 @@ public:
         return unique_identifier;
     }
 
-    /// Binds a renderer to the memory manager.
-    void BindRasterizer(VideoCore::RasterizerInterface* rasterizer);
+    /// Cold compatibility check only: accepts the enrolled owner/target while
+    /// open. Never installs/replaces a raw pointer or calls back into the GPU.
+    [[nodiscard]] bool BindRasterizer(VideoCore::RasterizerInterface* rasterizer);
 
     [[nodiscard]] std::optional<DAddr> GpuToCpuAddress(GPUVAddr addr) const;
 
@@ -189,6 +194,12 @@ public:
     u8* GetSpan(const GPUVAddr src_addr, const std::size_t size);
 
 private:
+    friend class GPU;
+    // Only the GPU's retained publication path may perform first enrollment.
+    bool AttachRasterizer(std::shared_ptr<RasterizerBindingState> binding);
+    std::mutex rasterizer_binding_mutex;
+    std::atomic<std::shared_ptr<RasterizerBindingState>> rasterizer_binding;
+
     template <bool is_big_pages, typename FuncMapped, typename FuncReserved, typename FuncUnmapped>
     inline void MemoryOperation(GPUVAddr gpu_src_addr, std::size_t size, FuncMapped&& func_mapped,
                                 FuncReserved&& func_reserved, FuncUnmapped&& func_unmapped) const;

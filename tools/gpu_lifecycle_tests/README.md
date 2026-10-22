@@ -335,3 +335,12 @@ For focused real Windows production object compilation after these changes, use
 `python tools/physical_coherency_tests/run_windows_production_checks.py --fetch-boost`
 once to populate the SHA256-verified shared Boost cache, then omit `--fetch-boost`
 for subsequent runs. No app linking/runtime/device acceptance is inferred.
+
+External GMMU rasterizer binding now uses detached terminal state. The publication
+runner executes actual public/private binding and renderer bootstrap bodies, with
+before-entry, entered-call and Host1x enrollment teardown gates. Unregistered,
+wrong/null target, closed and post-GPU calls refuse. An open same-target
+confirmation never stores a pointer. Six further controls check Close, Join,
+Entry lifetime, target/owner identity and renderer publication retention.
+This supersedes the historical successful raw-binding bypass witness above.
+See [current evidence and limits](../../docs/M4_F3_EXTERNAL_GMMU_BINDING.md).

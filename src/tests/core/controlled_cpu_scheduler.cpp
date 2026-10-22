@@ -412,10 +412,18 @@ TEST_CASE("Controlled writes cross real guest fibers and process finalization",
     };
     auto& rasterizer = renderer->rasterizer;
     auto& device_memory = system.Host1x().MemoryManager();
-    auto channel = gpu.AllocateChannel();
-    channel->memory_manager = std::make_shared<Tegra::MemoryManager>(system);
+    auto channel = [&] {
+        auto allocation = gpu.AllocateChannel();
+        REQUIRE(allocation.has_value());
+        auto manager = std::make_shared<Tegra::MemoryManager>(system);
+        auto publication = gpu.InitAddressSpace(*manager);
+        REQUIRE(publication.has_value());
+        allocation->channel->memory_manager = std::move(manager);
+        return allocation->channel;
+    }();
     gpu.RunOnGpuThread([&] {
-        gpu.InitChannel(*channel, 0);
+        auto initialization = gpu.InitChannel(*channel, 0);
+        REQUIRE(initialization.has_value());
         gpu.BindChannel(channel->bind_id);
     });
 
@@ -807,9 +815,20 @@ TEST_CASE("F3 ordinary staged physical aliases reproduce stale content",
     auto& gpu = system.GPU();
     auto& rasterizer = renderer->rasterizer;
     auto& device_memory = system.Host1x().MemoryManager();
-    auto channel = gpu.AllocateChannel();
-    channel->memory_manager = std::make_shared<Tegra::MemoryManager>(system);
-    gpu.RunOnGpuThread([&] { gpu.InitChannel(*channel, 0); gpu.BindChannel(channel->bind_id); });
+    auto channel = [&] {
+        auto allocation = gpu.AllocateChannel();
+        REQUIRE(allocation.has_value());
+        auto manager = std::make_shared<Tegra::MemoryManager>(system);
+        auto publication = gpu.InitAddressSpace(*manager);
+        REQUIRE(publication.has_value());
+        allocation->channel->memory_manager = std::move(manager);
+        return allocation->channel;
+    }();
+    gpu.RunOnGpuThread([&] {
+        auto initialization = gpu.InitChannel(*channel, 0);
+        REQUIRE(initialization.has_value());
+        gpu.BindChannel(channel->bind_id);
+    });
     Process owner{system};
     auto& memory = owner.process->GetMemory();
     auto* keeper = owner.Start([&] {
@@ -1000,9 +1019,20 @@ TEST_CASE("Admitted staged alias adapter copies exact physical dirty intersectio
         });
         if (error) std::rethrow_exception(error);
     };
-    auto channel = gpu.AllocateChannel();
-    channel->memory_manager = std::make_shared<Tegra::MemoryManager>(system);
-    on_gpu([&] { gpu.InitChannel(*channel, 0); gpu.BindChannel(channel->bind_id); });
+    auto channel = [&] {
+        auto allocation = gpu.AllocateChannel();
+        REQUIRE(allocation.has_value());
+        auto manager = std::make_shared<Tegra::MemoryManager>(system);
+        auto publication = gpu.InitAddressSpace(*manager);
+        REQUIRE(publication.has_value());
+        allocation->channel->memory_manager = std::move(manager);
+        return allocation->channel;
+    }();
+    on_gpu([&] {
+        auto initialization = gpu.InitChannel(*channel, 0);
+        REQUIRE(initialization.has_value());
+        gpu.BindChannel(channel->bind_id);
+    });
     Process owner{system};
     auto& memory = owner.process->GetMemory();
     auto* keeper = owner.Start([&] {
@@ -1231,9 +1261,20 @@ TEST_CASE("Checked write provenance separates emission completion and current re
         });
         if (error) std::rethrow_exception(error);
     };
-    auto channel = gpu.AllocateChannel();
-    channel->memory_manager = std::make_shared<Tegra::MemoryManager>(system);
-    on_gpu([&] { gpu.InitChannel(*channel, 0); gpu.BindChannel(channel->bind_id); });
+    auto channel = [&] {
+        auto allocation = gpu.AllocateChannel();
+        REQUIRE(allocation.has_value());
+        auto manager = std::make_shared<Tegra::MemoryManager>(system);
+        auto publication = gpu.InitAddressSpace(*manager);
+        REQUIRE(publication.has_value());
+        allocation->channel->memory_manager = std::move(manager);
+        return allocation->channel;
+    }();
+    on_gpu([&] {
+        auto initialization = gpu.InitChannel(*channel, 0);
+        REQUIRE(initialization.has_value());
+        gpu.BindChannel(channel->bind_id);
+    });
     Process owner{system};
     auto& memory = owner.process->GetMemory();
     auto* keeper = owner.Start([&] {
