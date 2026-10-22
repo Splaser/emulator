@@ -2,6 +2,15 @@
 
 ## 2026-10-22: repair CI negative control and cache ASID owner routing
 
+Implementation source: `4786d2de77def3e0a721def442b8c2cb91ce0108`, pushed to
+`codex/issue-372-fixes` with the preceding negative-control fix. Exact-source
+Linux-only run [39717929077](https://github.com/Splaser/emulator/actions/runs/39717929077)
+is in progress; do not duplicate dispatch. Android is excluded. Actual production
+`gpu_device_memory_manager.cpp` syntax also passes locally
+(`.diagnostics/m4-device-cache-owner-production-syntax.log`). Artifact recovery
+must require the new cache owner manifest, three repeats and three precise mutants;
+the ignored recovery helper is updated. The existing heartbeat remains PAUSED.
+
 The atomic-cancellation run
 [39713592657](https://github.com/Splaser/emulator/actions/runs/39713592657)
 FAILED at controlled arena verification. All early batch/stop/cohort/mapping/owner
