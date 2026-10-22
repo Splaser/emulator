@@ -11,9 +11,14 @@ class KernelCore;
 // Single orchestration thread; caller keeps KernelCore alive. Never a signal API.
 class GuestExecutionDrain {
     friend class KernelCore;
+    friend class ProcessExecutionStop;
     using Closure=Common::ProducerDrain::Closure;
     std::array<std::optional<Closure>,Core::Hardware::NUM_CPU_CORES> cores;
     GuestExecutionDrain()=default;
+    bool AppendCancellation(Common::ProducerDrain::ResumeBatch& batch) noexcept {
+        for (auto& core : cores) if (!core || !batch.Add(*core)) return false;
+        return true;
+    }
 public:
     using Result=Common::ProducerDrain::Result;
     GuestExecutionDrain(GuestExecutionDrain&&)=default;
@@ -30,8 +35,8 @@ public:
     }
     bool CancelNoEffects() noexcept {
         if(Poll()!=Result::DrainedSubset) return false;
-        // Cancellation only: this type never authorizes asynchronous effects.
-        for(auto& core:cores) if(!core->ResumeNoEffects()){Quarantine();return false;}
+        Common::ProducerDrain::ResumeBatch batch;
+        if (!AppendCancellation(batch) || !batch.Commit()) { Quarantine(); return false; }
         return true;
     }
     void Quarantine() noexcept {for(auto& core:cores) if(core) core->Quarantine();}

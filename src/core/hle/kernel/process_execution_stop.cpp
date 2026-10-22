@@ -43,7 +43,14 @@ ProcessExecutionStop::Result ProcessExecutionStop::Poll() {
         Quarantine();
         return Result::Unknown;
     }
-    if (stopped) return Result::BackendsStopped;
+    if (stopped) {
+        if (initialization.Poll() == Common::ProducerDrain::Result::Unknown ||
+            execution.Poll() == Common::ProducerDrain::Result::Unknown) {
+            Quarantine();
+            return Result::Unknown;
+        }
+        return Result::BackendsStopped;
+    }
     if (!remaining) {
         Quarantine();
         return Result::Unknown;
@@ -84,13 +91,15 @@ ProcessExecutionStop::Result ProcessExecutionStop::Poll() {
     return Result::BackendsStopped;
 }
 
+bool ProcessExecutionStop::AppendCancellation(Common::ProducerDrain::ResumeBatch& batch) {
+    if (unknown || !OwnerCurrent() || Poll() != Result::BackendsStopped) return false;
+    return execution.AppendCancellation(batch) && batch.Add(initialization);
+}
+
 bool ProcessExecutionStop::CancelNoEffects() {
     if (unknown || !OwnerCurrent() || Poll() != Result::BackendsStopped) return false;
-    if (!execution.CancelNoEffects()) {
-        Quarantine();
-        return false;
-    }
-    if (!initialization.ResumeNoEffects()) {
+    Common::ProducerDrain::ResumeBatch batch;
+    if (!AppendCancellation(batch) || !batch.Commit()) {
         Quarantine();
         return false;
     }

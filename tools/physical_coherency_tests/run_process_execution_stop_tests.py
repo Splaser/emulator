@@ -142,6 +142,10 @@ assert methods.count(initialization) == 1
 execute('omit-initialization-drain', source.replace(initialization,
         '    const auto initialized = Common::ProducerDrain::Result::DrainedSubset;'),
         'initialization must drain before halt request')
+latch=methods[methods.index('    if (stopped) {'):methods.index('    if (!remaining) {')]
+assert latch
+execute('stopped-forgets-seal',source.replace(latch,'    if (stopped) return Result::BackendsStopped;\n'),
+        'stopped latch must observe a later Seal')
 paths = [core, 'src/core/hle/kernel/physical_core.h', 'src/core/hle/kernel/k_process.cpp',
          'src/core/hle/kernel/k_process.h', 'src/core/hle/kernel/kernel.h',
          'src/tests/core/controlled_cpu_scheduler.cpp',
@@ -153,7 +157,7 @@ paths = [core, 'src/core/hle/kernel/physical_core.h', 'src/core/hle/kernel/k_pro
 (out / 'extraction.json').write_text(json.dumps({
     'positive_repeats': 3,
     'assertion_mutants': ['count-suspended-svc-as-backend', 'request-is-acknowledgement',
-                         'omit-running-owner-retention', 'omit-initialization-drain'],
+                         'omit-running-owner-retention', 'omit-initialization-drain', 'stopped-forgets-seal'],
     'sha256': {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths},
     'boundary': 'Actual execution/stop bodies; injected backend/kernel, no NCE or guest admission proof',
 }, indent=2) + '\n')

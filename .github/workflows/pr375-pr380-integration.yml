@@ -120,6 +120,8 @@ jobs:
         run: python tools/physical_coherency_tests/run_cross_call_ownership_audit.py
       - name: Verify owner teardown entries and retained TLS cleanup
         run: python tools/physical_coherency_tests/run_process_teardown_tests.py
+      - name: Verify atomic no-effects release and concurrent Seal isolation
+        run: python tools/physical_coherency_tests/run_resume_batch_tests.py
       - name: Verify process-owned backend stop and omitted service writer control
         run: python tools/physical_coherency_tests/run_process_execution_stop_tests.py
       - name: Verify sustained creation, initialization and cold publication across cohort stop
@@ -286,6 +288,7 @@ jobs:
             .diagnostics/m4-producer-coverage/*
             .diagnostics/m4-private-guard/*
             .diagnostics/m4-producer-drain/*
+            .diagnostics/m4-resume-batch/*
             .diagnostics/m4-host-mapping-freeze/*
             .diagnostics/m4-controlled-owner/*
             .diagnostics/m4-cpu-preparation-owner/*

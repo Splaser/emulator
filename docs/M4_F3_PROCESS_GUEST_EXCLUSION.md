@@ -73,9 +73,62 @@ reopening any domain and validates its retained snapshot revision under that sam
 reservation. Contention or intervening retirement refuses with all those gates
 still closed. The reservation spans only stopped-state validation and atomic gate
 operations; it spans no callbacks, owner destruction, or roster re-entry. This
-removes the fallible late creation-release lock, but does not make sequential
-ProducerDrain resumes atomic against concurrent Seal. Cross-domain cancellation
-and durable Unknown ownership must be resolved before any effect-bearing adoption.
+removes the fallible late creation-release lock. CPU, initialization and cold
+publication cancellation now share the ResumeBatch protocol below. Durable Unknown
+resource ownership is still required before any effect-bearing adoption.
+
+## Atomic managed-domain cancellation (phase-one prerequisite)
+
+ProducerDrain::ResumeBatch collects actual owned closures, each already closed and
+drained. It publishes permanent shared-gate membership while those local domains
+remain closed, reopens local count words behind the closed shared gate, then opens
+that gate with one final CAS. All CPU cores, initialization and cold publication
+participate in one cohort cancellation batch; creation commits afterward under
+its previously acquired, revision-validated roster reservation, with no further
+fallible step. Backend-only cancellation batches the cores and initialization.
+
+| Cancellation point | Producer entry | Seal/failure disposition |
+| --- | --- | --- |
+| Collect/validate | Every participating local closure remains closed | No reopening; quarantine owned closures |
+| Publish membership | Shared gate closed; local words still closed | Failed publication CAS preserves local closure and seals the group |
+| Reopen local words | Shared gate still closed | Even already reopened members remain unavailable |
+| Final gate CAS | Entries can resume only after success | A preceding Seal prevents success and keeps the group closed |
+| Successful cancellation | Normal managed entry resumes | A later Seal is a separate event, still propagated to the group |
+
+The shared owner is assigned before the release CAS that first publishes Grouped
+in the local word and is immutable afterward. Seal reads it only after acquiring
+that bit. A Seal that wins before publication makes the publication CAS fail; the
+batch then seals its gate before any local resume. For a participating member,
+the local reopen CAS publishes the already-closed shared gate. A late successful
+entry CAS acquires that publication and rechecks the shared gate before returning
+an entry; refusal rolls the count back. This closes the delayed-entry/ABA window.
+
+There is no raw coordinator pointer, atomic shared_ptr, callback, wait or retry in
+the release protocol. A fixed-size batch holds at most sixteen borrowed closures
+which must outlive it. First group formation allocates once, before any reopening;
+allocation failure refuses. Ungrouped ordinary entry keeps its single CAS path;
+grouped entry adds gate reads before and after that CAS. Member domains own the
+shared gate directly, so dropping a failed batch cannot remove its protection.
+
+Membership remains until domain destruction; subsequent cancellation reuses the
+same gate and can extend it with previously ungrouped domains. Existing distinct
+groups cannot be merged or detached. Seal/retirement of a joined member propagates
+conservatively to the shared gate. A subset cancellation does not prove that other
+members have drained, and the gate is not a whole-guest exclusion certificate.
+Old released or moved-from closures cannot reopen or quarantine a new operation.
+
+The stopped backend latch also revalidates initialization/core closures, so a
+later Seal cannot remain hidden behind a previous BackendsStopped observation.
+Standalone tests exercise normal and scheduled production bodies, with precise
+mutants for early group opening, missing Seal propagation, destructive batch drop,
+and omitted late-entry rollback. Actual cohort-body tests separately reject an
+omitted publication member and the old sequential cancellation implementation.
+
+This protocol covers no-effects cancellation only. Ordinary writes, cache/fault
+PTE mutation, NCE, host-service/raw-pointer writers and GPU queues still require
+their own closure/join/freeze facts. It adds no GPU adoption, checked completion
+or durable backing/resource quarantine registry. Ordinary Guest admission remains
+Unknown, and all three M4 phases remain unfinished.
 
 ## Evidence and limits
 

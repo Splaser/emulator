@@ -53,6 +53,8 @@ int main() {
         auto moved=std::make_optional(std::move(*stop));
         assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());stop.reset();
         assert(moved->Poll()==R::BackendsStopped && moved->CancelNoEffects());
+        assert(kernel.ProcessPublicationDomain()->TryEnter() &&
+               "successful cohort cancellation must restore publication");
         auto next=caller.TryStopProcessCohort(64);assert(next);
         assert(!moved->CancelNoEffects());
         assert(next->Poll()==R::BackendsStopped && next->CancelNoEffects());
@@ -104,6 +106,21 @@ int main() {
         assert(!kernel.PhysicalCore(0).TryCloseGuestExecution(8));
         assert(!kernel.TryEnterGuestProcessInitialization() &&
                !kernel.ProcessPublicationDomain()->TryEnter());
+    }
+    for (bool late : {false,true}) { // Seal during local release or just before group commit.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto stop=caller.TryStopProcessCohort(64);assert(stop&&stop->Poll()==R::BackendsStopped);
+        if (late) ResumeBatchTest::before_commit=[&] {kernel.ProcessPublicationDomain()->Seal();};
+        else ResumeBatchTest::after_resume=[&](size_t i) {if(i==0)kernel.ProcessPublicationDomain()->Seal();};
+        assert(!stop->CancelNoEffects());
+        ResumeBatchTest::before_commit={};ResumeBatchTest::after_resume={};
+        assert(!kernel.PhysicalCore(0).TryCloseGuestExecution(8) &&
+               "failed cohort release must keep every CPU closed");
+        assert(!kernel.TryEnterGuestProcessInitialization()&&!kernel.ProcessPublicationDomain()->TryEnter());
+        bool refused=false;
+        try {Kernel::KProcess escaped{kernel};} catch(const Kernel::ProcessOwnerRoster::CreationRefused&) {refused=true;}
+        assert(refused);stop.reset();
+        assert(!kernel.PhysicalCore(3).TryCloseGuestExecution(8));
     }
     { // A zero-ref owner cannot be omitted or resurrected to certify a cohort.
         Kernel::KernelCore kernel;Kernel::KProcess caller{kernel},unready{kernel};

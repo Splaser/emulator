@@ -50,6 +50,7 @@ class ProcessExecutionStop {
                          Common::ProducerDrain::Closure&& initialization_,
                          GuestExecutionDrain&& execution_, u32 budget);
     bool OwnerCurrent() const;
+    bool AppendCancellation(Common::ProducerDrain::ResumeBatch& batch);
 
 public:
     enum class Result { Pending, BackendsStopped, Unknown };

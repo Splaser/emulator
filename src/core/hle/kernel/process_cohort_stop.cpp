@@ -70,9 +70,11 @@ bool ProcessCohortStop::CancelNoEffects() {
     // lifecycle callbacks, release retained owners, or acquire the roster lock.
     auto reservation = creation.TryReserveCancel(std::addressof(*owners));
     if (!reservation) { Quarantine(); return false; }
-    if (!execution->CancelNoEffects() || !publication.ResumeNoEffects()) {
+    Common::ProducerDrain::ResumeBatch batch;
+    if (!execution->AppendCancellation(batch) || !batch.Add(publication) || !batch.Commit()) {
         Quarantine(); return false;
     }
+    execution->released = true;
     reservation->Commit();
     released = true;
     return true;

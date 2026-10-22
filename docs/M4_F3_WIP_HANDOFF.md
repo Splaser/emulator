@@ -1,12 +1,65 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: atomic no-effects release across managed domains (phase one)
+
+The previous exact-source Linux run
+[39705537466](https://github.com/Splaser/emulator/actions/runs/39705537466)
+completed successfully at `233cf67b6d58660f4e556eebf26c4c9e561eaabd`, including
+the final lifecycle integration regressions. Android was skipped. This confirms
+GitHub job success, not independent artifact download/hash recovery.
+
+ProducerDrain::ResumeBatch now validates actual closed/drained closures, publishes
+immutable shared-gate membership, reopens local words behind that closed gate,
+then opens the shared gate with a final CAS. Seal propagates from a joined member
+to the gate, so a failed later local resume/final commit cannot expose an already
+resumed CPU. Domains retain the gate after a failed batch is destroyed. A delayed
+entry CAS rechecks the gate and rolls back before returning an entry. Ungrouped
+entry retains the single CAS path; grouped entry adds shared-gate checks. No raw
+coordinator, atomic shared_ptr, callback, wait or retry is added. First group
+formation allocates before reopening; failed allocation refuses. Membership is
+permanent and reused, can extend to fresh domains, and cannot merge distinct groups.
+Member retirement conservatively seals the group. A subset batch never proves
+that other group members drained. See M4_F3_PROCESS_GUEST_EXCLUSION.md for the
+release table and publication/ABA ordering argument.
+
+GuestExecutionDrain cancels all cores in one batch. ProcessExecutionStop adds its
+initialization closure; ProcessCohortStop adds cold publication to that SAME batch,
+then commits creation under the previously reserved/validated roster mutex.
+No later fallible step follows gate commit. The stopped backend latch rechecks
+initialization/core uncertainty instead of hiding a later Seal. APIs remain
+single-orchestration-thread, no-effects precursors with no asynchronous adoption.
+
+Local Linux checks passed:
+- Resume batch: three normal and three scheduled production repeats, four precise
+  mutants (early group open, missing Seal propagation, destructive batch drop,
+  omitted post-entry check); reused/extended groups, subset/stale cancellation,
+  member retirement and pending/abandoned/incompatible-group refusal.
+- Actual cohort bodies: three repeats/eight mutants, including omitted publication
+  membership and the former sequential release; Seal after the first local resume
+  and after all local resumes keeps CPU/init/publication/creation closed.
+- Actual stop bodies: three repeats/five mutants, adding stopped-forgets-seal.
+- Existing ProducerDrain, mapping publication, teardown, cross-call ownership and
+  roster suites, plus actual stop/cohort/roster production TU syntax.
+Logs: `.diagnostics/m4-batch-{transaction,cohort,stop,primitive,mapping,teardown,
+ownership,roster}-regression.log`, `m4-batch-production-syntax.log`.
+TSan did NOT run: the WSL runtime exits immediately with `unexpected memory mapping`
+before executing tests (`m4-batch-tsan.log`). Do not report a TSan pass. The workflow
+now runs the batch suite early and uploads `.diagnostics/m4-resume-batch/*`.
+
+This closes the identified managed-domain no-effects cancellation race. It does
+not finish phase one or create effect-bearing release/admission. Cache/fault PTE,
+manual lifecycle/facade boundaries, independent CPU/native/service/raw-pointer/GPU
+producers and durable resource ownership remain outstanding. All THREE M4 phases
+remain unfinished, ordinary GuestBackingAdmission stays Unknown, and the F2/F3
+negative controls remain mandatory. EPUB/CBZ tools belong only in E:\Books\epub2cbz;
+their accidental emulator commit was reverted, preserving M4 code.
+
 ## 2026-10-22: reserve roster cancellation before reopening (phase one)
 
 Implementation source: `233cf67b6d58660f4e556eebf26c4c9e561eaabd`, pushed to
 `codex/issue-372-fixes`. Linux-only validation
 [39705537466](https://github.com/Splaser/emulator/actions/runs/39705537466)
-is in progress at container setup; Android is confirmed skipped. Do not duplicate
-dispatch. ProducerDrain regressions also passed locally in
+completed successfully; Android was skipped. ProducerDrain regressions also passed locally in
 `.diagnostics/m4-cancel-primitive-regression.log`.
 
 The previous exact-source Linux run

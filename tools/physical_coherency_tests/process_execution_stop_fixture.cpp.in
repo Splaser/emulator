@@ -316,6 +316,13 @@ int main() {
         assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
         assert(!old.expired());stop.reset();assert(old.expired());
     }
+    { // A stopped latch must not hide a later initialization/domain Seal.
+        Kernel::KernelCore kernel;Kernel::KProcess process{kernel};
+        auto stop=process.TryStopGuestExecution();assert(stop&&stop->Poll()==R::BackendsStopped);
+        kernel.impl->guest_process_initialization->Seal();
+        assert(stop->Poll()==R::Unknown && "stopped latch must observe a later Seal");
+        assert(!stop->CancelNoEffects()&&!kernel.PhysicalCore(0).TryCloseGuestExecution(8));
+    }
     { // Failed storage capture precedes every core closure or owner reference.
         Kernel::KernelCore kernel;Kernel::KProcess process{kernel};
         kernel.system.device.buffer.allocation.reset();

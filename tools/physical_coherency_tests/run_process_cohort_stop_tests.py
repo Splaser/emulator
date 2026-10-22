@@ -51,7 +51,8 @@ variants += [
 ]
 reservation=('    auto reservation = creation.TryReserveCancel(std::addressof(*owners));\n'
              '    if (!reservation) { Quarantine(); return false; }\n')
-release=('    if (!execution->CancelNoEffects() || !publication.ResumeNoEffects()) {\n'
+release=('    Common::ProducerDrain::ResumeBatch batch;\n'
+         '    if (!execution->AppendCancellation(batch) || !batch.Add(publication) || !batch.Commit()) {\n'
          '        Quarantine(); return false;\n    }\n')
 assert source.count(reservation)==1 and source.count(release)==1
 variants += [('reserve-roster-after-reopening', source.replace(reservation,'').replace(
@@ -61,8 +62,26 @@ revision=('    if (expected && (expected->state != state || expected->revision !
 assert source.count(revision)==1
 variants += [('omit-reserved-cohort-revision',source.replace(revision,'    (void)expected;\n'),
               'a changed cohort must refuse cancellation before reopening')]
+variants += [('omit-publication-from-batch', source.replace('!batch.Add(publication)', 'false'),
+              'successful cohort cancellation must restore publication')]
+legacy=('    if (!execution->CancelNoEffects() || !publication.ResumeNoEffects()) {\n'
+        '        Quarantine(); return false;\n    }\n')
+variants += [('sequential-cohort-release',source.replace(release,legacy),
+              'failed cohort release must keep every CPU closed')]
+# Schedule Seal inside the actual shared primitive used by all extracted bodies.
+# Only timing annotations are added; no gate or lock operation is replaced.
+batch_header=(root/'src/common/producer_drain.h').read_text()
+local='                // Local reopening is invisible to producers until gate commit.'
+commit='            u64 closed = Closed;'
+assert batch_header.count(local)==1 and batch_header.count(commit)==1
+batch_header=batch_header.replace(local,local+'\n                if (ResumeBatchTest::after_resume) ResumeBatchTest::after_resume(i);')
+batch_header=batch_header.replace(commit,'            if (ResumeBatchTest::before_commit) ResumeBatchTest::before_commit();\n'+commit)
+batch_header=batch_header.replace('#pragma once','#pragma once\n#include <functional>\nnamespace ResumeBatchTest {\n'
+    'inline std::function<void(size_t)> after_resume;\ninline std::function<void()> before_commit;\n}\n')
+batch_stubs=out/'stubs';(batch_stubs/'common').mkdir(parents=True,exist_ok=True)
+(batch_stubs/'common/producer_drain.h').write_text(batch_header)
 command=[os.environ.get('CXX','g++'),'-std=c++23','-O1','-pthread','-Wall','-Wextra','-Werror',
-         '-Wno-unused-parameter','-I',str(root/'.diagnostics/m4-process-execution-stop/stubs'),'-I',str(root/'src')]
+         '-Wno-unused-parameter','-I',str(batch_stubs),'-I',str(root/'.diagnostics/m4-process-execution-stop/stubs'),'-I',str(root/'src')]
 for name,text,expected in variants:
     assert expected is None or text!=source
     cpp=out/(name+'.cpp');cpp.write_text(text)
