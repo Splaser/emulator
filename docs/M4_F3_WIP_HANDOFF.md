@@ -1,5 +1,36 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: refuse GMMU replacement after channel initialization effects
+
+After closing the Boost/production-object checkpoint at d40b0009c0, the new test
+reproduced a ready channel dropping its original GMMU owner while the actual
+ChannelState::Init body left engines referring to it. NV binding now rejects a
+different/null manager once channel initialization succeeds or has partial effects.
+The state/identity check uses the existing Setup/Submit channel lock and AS lock.
+Idempotent binding requires both object address and shared control-block identity;
+it cannot clear failure isolation. Equal addresses with another owner, or equal
+owners with another address, refuse. Cold replacement/null and deferred Setup-
+before-bind remain supported.
+
+Windows validation: new actual-body engine/GMMU ownership positives passed three
+repeats and all nine precise controls; the retained publication suite passed
+three repeats and all 24 controls plus its ten-case lifecycle/cancelled-read
+prerequisite. Five complete production files again generated real x64 COFF
+objects without diagnostics. All 34 source-hash entries across three manifests
+(17 unique inputs), five object digests and machine signatures were matched.
+No full application link, native Vulkan or new remote/Android build is claimed.
+The existing Linux workflow will run the new test on future dispatches. Automatic
+approval blocked temporary-directory cleanup with no specific reason; current
+fixtures/objects/logs remain in ignored .diagnostics directories. The complete
+shared Boost cache and reproducible source helpers remain available.
+
+This is another phase-two ownership prerequisite. It does not implement native
+engine rebind, certify all engine destruction, close external GMMU/raw/mapping
+producers, add reversible cohort exclusion or retain durable native Unknown work.
+The existing external BindRasterizer bypass remains. All THREE phases remain
+unfinished and GuestBackingAdmission stays Unknown; main still waits for M7.
+See [engine/GMMU ownership validation](M4_F3_CHANNEL_GMMU_OWNERSHIP.md).
+
 ## 2026-10-22: complete Boost and real Windows production objects
 
 The user asked to resolve the local dependency blocker before further M4 work.

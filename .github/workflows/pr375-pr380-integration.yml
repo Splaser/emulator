@@ -119,7 +119,9 @@ jobs:
       - name: Verify terminal direct rasterizer ingress and owner join
         run: python tools/gpu_lifecycle_tests/run_thread_tests.py --repeat 3 --handoff-controls
       - name: Verify retained GPU address-space and channel owner publication
-        run: python tools/gpu_lifecycle_tests/run_owner_publication_tests.py --repeat 3
+        run: |
+          python tools/gpu_lifecycle_tests/run_owner_publication_tests.py --repeat 3
+          python tools/gpu_lifecycle_tests/run_channel_rebind_tests.py --repeat 3
       - name: Verify process unmap reference cleanup on refusal and uncertainty
         run: python tools/physical_coherency_tests/run_process_unmap_tests.py
       - name: Verify cross-call mapping ownership and finalization bookkeeping

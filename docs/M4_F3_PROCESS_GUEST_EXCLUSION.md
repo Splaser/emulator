@@ -445,8 +445,14 @@ missing Boost dependency; no current-source Linux/device validation is inferred.
 See [the Windows validation boundary](M4_F3_CHANNEL_BINDING_VALIDATION.md).
 
 Externally retained GMMU BindRasterizer remains a successful post-Close actual-body
-scope counterexample. Initialized engines still hold old-manager references; safe
-live-engine rebinding is not established by serializing the service methods.
+scope counterexample. Initialized engines still hold old-manager references. The
+follow-up guard rejects different/null GMMU replacement under the shared AS and
+channel locks once initialized or initialization_failed is set. Idempotent binding requires equal addresses and shared control-block identity;
+refused aliases cannot replace the true owner. Failure isolation and deferred/cold
+binding behavior are preserved.
+Actual engine-construction and Setup/Bind bodies pass controlled ownership and
+serialized initialization tests; native engine rebind/retirement remains unproved.
+See [the engine-owner validation](M4_F3_CHANNEL_GMMU_OWNERSHIP.md).
 Complete facade/Module/service lifetime, output copying, mapping/alias producers,
 native completion and durable Unknown retirement remain separate. This terminal
 counter is not wired into reversible ProcessCohortStop and grants no guest backing
@@ -742,4 +748,6 @@ runtime acceptance for this integration is pending its exact-source Linux CI.
    failure/remap/teardown/retirement and preserve independent original F2/F3 negatives.
 
 No normal guest route or physical latest-writer authority is enabled. F2/F3
-remain Open. Validation continues on Linux; Android is not requested.
+remain Open. The current iteration uses focused Windows production-object and
+deterministic regression checks; Linux/native-device acceptance remains a separate
+exact-source obligation. Android is not requested.

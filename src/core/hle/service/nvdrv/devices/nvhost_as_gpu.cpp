@@ -480,6 +480,16 @@ NvResult nvhost_as_gpu::BindChannel(IoctlBindChannel& params) {
     std::shared_ptr<Tegra::MemoryManager> previous;
     {
         std::scoped_lock lock(mutex, gpu_channel_device->channel_mutex);
+        const auto& channel = *gpu_channel_device->channel_state;
+        const bool same_gmmu_owner = channel.memory_manager && gmmu &&
+                                     channel.memory_manager.get() == gmmu.get() &&
+                                     !channel.memory_manager.owner_before(gmmu) &&
+                                     !gmmu.owner_before(channel.memory_manager);
+        if ((channel.initialized || channel.initialization_failed) && !same_gmmu_owner) {
+            return NvResult::InvalidState;
+        }
+        // The engine constructors keep references to their original GMMU. A
+        // different owner requires a real engine retirement/rebuild protocol.
         previous = std::exchange(gpu_channel_device->channel_state->memory_manager, gmmu);
     }
     // Old mapping retirement may need its own locks. Retire outside the service

@@ -319,3 +319,19 @@ scope witness now calls actual BindRasterizer through an external GMMU after
 Close. Safe live-engine rebind, raw/mapping/native producers, reversible cohort
 stop and durable Unknown retirement are unproved. Guest admission stays Unknown.
 See [the Windows report](../../docs/M4_F3_CHANNEL_BINDING_VALIDATION.md).
+
+Materialized channel GMMU ownership is checked separately with
+`python tools/gpu_lifecycle_tests/run_channel_rebind_tests.py --repeat 3`.
+It executes real engine-construction/initialization and NV binding/Setup bodies
+against fixture engines retaining manager references. Ready or partially initialized
+channels reject different/null managers; idempotent binding requires equal object
+address and shared control-block identity. Cold/deferred Setup/bind is preserved.
+Nine controls cover refusal, ownership aliasing, failure
+isolation and real shared-mutex serialization across initialization and terminal
+Close. This is metadata/reference ownership evidence, not native engine execution
+or real guest-backed admission. See [validation](../../docs/M4_F3_CHANNEL_GMMU_OWNERSHIP.md).
+
+For focused real Windows production object compilation after these changes, use
+`python tools/physical_coherency_tests/run_windows_production_checks.py --fetch-boost`
+once to populate the SHA256-verified shared Boost cache, then omit `--fetch-boost`
+for subsequent runs. No app linking/runtime/device acceptance is inferred.
