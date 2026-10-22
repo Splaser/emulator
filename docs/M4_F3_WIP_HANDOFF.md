@@ -1,11 +1,57 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-22: terminal direct invalidation ingress (within phase two)
+
+The previous Linux-only run
+[39717929077](https://github.com/Splaser/emulator/actions/runs/39717929077)
+completed successfully at `4786d2de77def3e0a721def442b8c2cb91ce0108`, including
+production compilation, native CTests, Vulkan/F2/F3 controls and final regressions.
+Android was skipped. This is GitHub job success; independent artifact recovery is
+not yet complete.
+
+ThreadManager::Stop previously joined command-worker execution but its direct
+InvalidateRegion/FlushAndInvalidateRegion methods could still touch the rasterizer
+outside queue admission. They now acquire a TerminalIngress entry for external
+calls, retained until the actual callback returns or throws. Entry is lock-free
+load/fetch-add/fetch-sub with no CAS contention refusal, allocation, wait, mutex,
+or waiter notification. Delayed prefix reads are checked at the admission RMW.
+Only cold Join sleeps, after direct/queue closure, worker cancellation/join and
+unexecuted queue capture destruction. Cancel captures before waiting for an
+entered caller that may depend on their retirement. Already entered GPU-owner
+invalidation may finish inline under worker-join ownership. Pre-start/post-stop
+external calls refuse before touching rasterizer. Facade lifetime, serialized
+start and terminal owner-thread teardown remain caller obligations.
+
+Actual ThreadManager/RunThread/MPSC queue tests pass three normal repeats, with
+five precise direct controls (premature guard release, missing Stop ingress,
+join-before-capture-cancel, late entry bypass, rejected entered-owner work), plus
+the existing blocking-handoff negative. Tests include both methods, 8,000 healthy
+concurrent calls, exception exit, late RMW and cancellation dependency. GPU,
+renderer and FenceManager lifecycle regressions also pass three repeats; actual
+gpu_thread.cpp syntax passes. Logs:
+`.diagnostics/m4-direct-invalidation-{thread,gpu,renderer,fence,syntax}.log`.
+First-registration positives/three original controls and the actual registration
+pipeline pass three repeats, including its original ownership/Unknown/coverage
+negative controls. Logs:
+`.diagnostics/m4-direct-invalidation-{first-registration,registration-pipeline}.log`.
+The workflow now runs direct ingress tests early and uploads their exact-source
+manifest, logs and actual-body fixtures.
+
+Scope is deliberately terminal: no new live/reversible GPU freeze, device
+completion, Guest-backed admission or durable Unknown resource owner. The actual
+GPU::Impl::OnCPUWrite sibling route is an independent successful bypass control
+in the test fixture. Other rasterizer/service/raw calls, suspended channels,
+parked continuations and native GPU work still need their own owned closure/join/
+completion protocol. Cache/fault publication still uses its independent path.
+All THREE M4 phases remain unfinished; ordinary GuestBackingAdmission stays Unknown.
+Do not count this producer-family lifetime fix as a separate M4 milestone.
+
 ## 2026-10-22: repair CI negative control and cache ASID owner routing
 
 Implementation source: `4786d2de77def3e0a721def442b8c2cb91ce0108`, pushed to
 `codex/issue-372-fixes` with the preceding negative-control fix. Exact-source
 Linux-only run [39717929077](https://github.com/Splaser/emulator/actions/runs/39717929077)
-is in progress; do not duplicate dispatch. Android is excluded. Actual production
+completed successfully; Android was excluded. Actual production
 `gpu_device_memory_manager.cpp` syntax also passes locally
 (`.diagnostics/m4-device-cache-owner-production-syntax.log`). Artifact recovery
 must require the new cache owner manifest, three repeats and three precise mutants;

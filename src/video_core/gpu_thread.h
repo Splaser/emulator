@@ -15,6 +15,7 @@
 
 #include "common/bounded_threadsafe_queue.h"
 #include "common/polyfill_thread.h"
+#include "common/terminal_ingress.h"
 #include "video_core/framebuffer_config.h"
 
 namespace Tegra {
@@ -126,8 +127,10 @@ public:
     void StartThread(VideoCore::RendererBase& renderer, Core::Frontend::GraphicsContext& context,
                      Tegra::Control::Scheduler& scheduler);
 
-    /// Owner-thread teardown: reject new commands, stop/join, then destroy queued captures.
+    /// Owner-thread teardown: close queue/direct invalidation ingress, stop/join,
+    /// cancel queued captures, then join entered external invalidation callbacks.
     /// The renderer, control scheduler and channels must remain alive until this returns.
+    /// Caller/facade lifetime remains externally owned. This is not a live GPU freeze.
     void Stop();
 
     /// Push GPU command entries to be processed
@@ -160,6 +163,9 @@ private:
     Core::System& system;
     const bool is_async;
     VideoCore::RasterizerInterface* rasterizer = nullptr;
+
+    // Outlives worker and entered direct invalidations. No GPU completion claim.
+    Common::TerminalIngress direct_invalidations;
 
     SynchState state;
     std::jthread thread;

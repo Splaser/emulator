@@ -161,11 +161,14 @@ void ThreadManager::StartThread(VideoCore::RendererBase& renderer,
     });
     std::scoped_lock lk{state.write_lock};
     state.stop_token = thread.get_stop_token();
+    direct_invalidations.Open();
     state.accepting = true;
 }
 
 void ThreadManager::Stop() {
+    direct_invalidations.Close();
     if (!thread.joinable()) {
+        direct_invalidations.Join();
         return;
     }
     // Called by the owning teardown thread, never by RunThread's failure callback.
@@ -184,6 +187,9 @@ void ThreadManager::Stop() {
     while (state.queue.TryPop(cancelled)) {
         cancelled = {};
     }
+    // An entered invalidation can be waiting for a queued preservation callback.
+    // Cancel unexecuted captures first, outside write_lock, so it can leave.
+    direct_invalidations.Join();
 }
 
 void ThreadManager::SubmitList(s32 channel, Tegra::CommandList&& entries) {
@@ -236,10 +242,20 @@ bool ThreadManager::TryQueueCpuWrite(std::function<bool()> poll) {
 }
 
 void ThreadManager::InvalidateRegion(DAddr addr, u64 size) {
+    // Work already executing on the owner is covered by thread.join(). External
+    // calls, including the legacy fault path, acquire a non-waiting lifetime entry.
+    const bool owner = IsGpuThread();
+    auto entry = owner ? std::optional<Common::TerminalIngress::Entry>{}
+                       : direct_invalidations.TryEnter();
+    if (!owner && !entry) return;
     rasterizer->OnCacheInvalidation(addr, size);
 }
 
 void ThreadManager::FlushAndInvalidateRegion(DAddr addr, u64 size) {
+    const bool owner = IsGpuThread();
+    auto entry = owner ? std::optional<Common::TerminalIngress::Entry>{}
+                       : direct_invalidations.TryEnter();
+    if (!owner && !entry) return;
     // Skip flush on asynch mode, as FlushAndInvalidateRegion is not used for anything too important
     rasterizer->OnCacheInvalidation(addr, size);
 }

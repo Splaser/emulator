@@ -184,7 +184,8 @@ before merging the lifecycle change.
 The terminal normal-shutdown order is now explicit:
 
 ```
-GPU Impl: close sync requests -> GPU emulation Stop/join -> close CompositeState
+GPU Impl: close sync requests -> GPU emulation Stop/join (including direct invalidations)
+  -> close CompositeState
   -> RendererVulkan::Shutdown
        -> RasterizerVulkan::Shutdown
             close render entries and release shutdown_mutex
@@ -225,3 +226,14 @@ actions, or performs a zero-fence composite. With unresolved guest fences it has
 actions still present only when all required fences arrive. The new normal-wait
 tests distinguish all three boundaries. Only shutdown permits early cancellation;
 cancellation is not reported as successful execution internally.
+
+ThreadManager Stop also closes external InvalidateRegion/FlushAndInvalidateRegion
+before worker cancellation. It joins the worker, destroys unexecuted queue captures
+outside write_lock, then joins entered external invalidations while the rasterizer
+is still alive. Already executing GPU-owner calls are covered by the worker join
+and remain able to finish. The entry guard never waits, retries a CAS, allocates,
+or refuses ordinary reader-count contention; only the cold terminal owner waits.
+Caller/facade lifetime remains externally owned. The actual-thread suite includes
+five precise negative controls for this boundary and a successful sibling
+GPU::OnCPUWrite bypass counterexample. This terminal guard covers neither all
+rasterizer ingress nor native device completion and is not live M4 admission.

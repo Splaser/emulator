@@ -167,6 +167,51 @@ through checked completion before publishing a cache/mapping freeze capability.
 No new fault-handler wait, broad throwing gate, queue-barrier admission certificate,
 or ordinary Guest admission is introduced by this routing correction.
 
+## Terminal direct invalidation close-and-join (phase-two prerequisite)
+
+ThreadManager::Stop now closes its two direct invalidation entry points as well
+as command enqueue. External InvalidateRegion/FlushAndInvalidateRegion calls acquire
+a TerminalIngress entry before touching the rasterizer and retain it through the
+last callback effect/exception. This entry uses lock-free counter operations only:
+no CAS retry, allocation, mutex, condition-variable notification, or waiting is
+added to the calling/fault path. Healthy simultaneous readers are all admitted.
+
+| Terminal transition | Ownership fact |
+| --- | --- |
+| Before StartThread | Counter closed; no external callback can use the unpublished rasterizer |
+| External entry | Its admission RMW must precede Close; even a delayed initial read cannot bypass closure |
+| Stop begins | Close direct entry and queue ingress before requesting worker cancellation |
+| Worker join | Already executing owner-thread invalidations may finish; the worker join covers them |
+| Queue cancellation | Destroy unexecuted captures outside write_lock, allowing entered callers awaiting their retirement to exit |
+| Direct join | Cold owner waits for counted external calls, with no queue/cache/PTE lock held |
+| Parent renderer shutdown | May proceed after these two entry families have exited |
+
+Only the cold terminal owner sleeps while joining. Entry release is just an atomic
+decrement; it does not notify through a library waiter pool from signal context.
+Open/start and terminal teardown are owner-serialized, with caller/facade lifetime
+still protected externally, including refused calls. Join is not a bounded live
+stop poll and must not be called from an entry, fault, backend or worker callback.
+This guard does not make the existing rasterizer/fault implementation signal-safe.
+
+The actual ThreadManager/RunThread/queue fixture now covers both direct methods,
+pre/post-start refusal, active external join after worker exit, 8,000 healthy
+entries across eight concurrent callers, exception exit, queued-capture retirement before direct join,
+delayed entry RMW, and already-entered worker continuation after external closure.
+Five precise controls reject premature guard release, legacy Stop without ingress,
+join-before-capture-cancellation, a stale prefix read bypassing Close, and refusal
+of an already executing GPU-owner callback. The older blocking-handoff dependency
+counterexample remains separate.
+
+A successful bypass counterexample executes the actual GPU::Impl::OnCPUWrite body
+after ThreadManager Stop against a live fixture rasterizer: this sibling entry is
+still independent. Other raw rasterizer calls, services, callbacks, and native GPU
+work also remain outside this guard. Stop cancels parked CPU-write captures;
+suspended channels remain owned by the scheduler. Cancellation and worker join
+are not checked device completion. No reversible
+GPU freeze, Guest admission, alias/backing pin or durable Unknown registry is added.
+This is one closed terminal ingress family within phase two, not a new milestone
+or completion of any of the three M4 phases.
+
 ## Evidence and limits
 
 The actual-body Linux fixture covers Run and Step, a halt request followed by a

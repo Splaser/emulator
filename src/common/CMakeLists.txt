@@ -31,6 +31,7 @@ add_library(common STATIC
     bit_set.h
     bit_util.h
     bounded_threadsafe_queue.h
+    terminal_ingress.h
     cityhash.cpp
     cityhash.h
     common_funcs.h

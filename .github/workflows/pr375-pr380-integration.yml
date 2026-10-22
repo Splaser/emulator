@@ -116,6 +116,8 @@ jobs:
         run: python tools/physical_coherency_tests/run_mapping_publication_tests.py
       - name: Verify cache publication targets across process ASID transitions
         run: python tools/physical_coherency_tests/run_device_cache_owner_tests.py
+      - name: Verify terminal direct rasterizer ingress and owner join
+        run: python tools/gpu_lifecycle_tests/run_thread_tests.py --repeat 3 --handoff-controls
       - name: Verify process unmap reference cleanup on refusal and uncertainty
         run: python tools/physical_coherency_tests/run_process_unmap_tests.py
       - name: Verify cross-call mapping ownership and finalization bookkeeping
@@ -296,6 +298,11 @@ jobs:
             .diagnostics/m4-cpu-preparation-owner/*
             .diagnostics/m4-mapping-publication/*
             .diagnostics/m4-device-cache-owner/*
+            .diagnostics/gpu-lifecycle/linux/thread-extraction.json
+            .diagnostics/gpu-lifecycle/linux/thread-*.log
+            .diagnostics/gpu-lifecycle/linux/direct-*.log
+            .diagnostics/gpu-lifecycle/linux/gpu_thread.cpp
+            .diagnostics/gpu-lifecycle/linux/direct-*.cpp
             .diagnostics/m4-process-unmap/*
             .diagnostics/m4-cross-call-audit/*
             .diagnostics/m4-process-teardown/*
