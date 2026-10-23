@@ -1,5 +1,9 @@
 # GPU lifecycle correctness: F4/F5
 
+Warm VI Conductor/timing drainage and event borrow/unlink interleavings use
+`../physical_coherency_tests/run_vi_conductor_drain_tests.py`. See
+[CPU drain and remaining native slot boundary](../../docs/M4_P2_VI_CONDUCTOR_DRAIN.md).
+
 VI stop/lazy-publication races and all eight nullable VI/AM caller bodies are
 covered by `../physical_coherency_tests/run_vi_termination_tests.py`. See
 [terminal-publication scope](../../docs/M4_P2_VI_TERMINAL_PUBLICATION.md).

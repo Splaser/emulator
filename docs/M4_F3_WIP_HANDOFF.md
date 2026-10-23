@@ -1,5 +1,22 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: warm VI Conductor and event-borrow drainage
+
+From `31d980ce84`, three actual-body witnesses reproduced warm termination
+returning with a live Conductor, destructor-body return before explicit join and
+terminal unlink retaining Event pointers. OnTerminate now closes entries, waits
+for timing callbacks and explicitly joins the VSync worker outside m_lock, then
+performs its existing cleanup. A separate owner mutex serializes repeated stop;
+terminal unlink stays available and a manager mutex spans each signal borrow.
+Ten deterministic paths/eleven exact controls pass three times; terminal
+publication/session/composition/disposal regressions pass, and six Windows
+production objects compile without diagnostics. See [audit and next boundary](M4_P2_VI_CONDUCTOR_DRAIN.md)
+and [results](M4_P2_VI_CONDUCTOR_RESULTS.json). Current-run executables/objects
+are cleaned after preserving logs/hashes. No main merge or native/device/CI
+acceptance is claimed. Next: warm slot/GraphicBuffer and HardwareComposer cached
+framebuffer owner release versus native completion, including pre-close escaped
+producers. Cleanup remains before GPU drain. M4 incomplete; admission Unknown.
+
 ## 2026-10-23: VI terminal publication after OnTerminate
 
 From `dc5d532840`, actual stop/owner/GPU-order audit found cold and paused VI lazy

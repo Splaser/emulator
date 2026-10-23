@@ -5,6 +5,11 @@ Fork/PR375/local heads agreed before work. Main remains
 `b6a2ce9488d78efdbbeb0efe14c2ec5c0a263e76`. This repairs a terminal
 publication gap; it does not complete M4 P2 or certify GPU/native retirement.
 
+Follow-up: [warm Conductor/event-borrow drainage](M4_P2_VI_CONDUCTOR_DRAIN.md)
+adds an explicit CPU callback/worker stop boundary and terminal unlink. The
+limits below describe this earlier terminal-publication slice; native slot and
+escaped-producer retirement remain separate.
+
 ## Actual shutdown/owner interaction
 
 System::ShutdownMainProcess first calls GPU::NotifyShutdown, then

@@ -87,6 +87,9 @@ public:
     bool ComposeOnDisplay(s32* out_swap_interval, f32* out_compose_speed_scale, u64 display_id);
 
 private:
+    // Serialize the complete close/drain sequence, including repeated callbacks.
+    // Conductor never takes this lock.
+    std::mutex m_termination_lock{};
     std::mutex m_lock{};
     DisplayList m_displays{};
     LayerList m_layers{};

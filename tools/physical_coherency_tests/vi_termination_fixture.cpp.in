@@ -79,11 +79,11 @@ struct SharedBufferManager{
     template<class... T>int CancelSharedFrameBuffer(T&&...){++trace->manager_calls;return 0;}
     template<class... T>int WriteAppletCaptureBuffer(T&&...){++trace->manager_calls;return 0;}
 };
-struct Conductor{Conductor(System& s,Container&,Displays&){++s.trace->conductors;}};
+struct Conductor{Conductor(System& s,Container&,Displays&){++s.trace->conductors;}void Stop(){}};
 struct Mutex{std::mutex actual;std::atomic<bool> held=false;std::function<void()> before_lock;
     void lock(){auto hook=before_lock;if(hook)hook();actual.lock();held=true;}void unlock(){held=false;actual.unlock();}};
 struct Container{
-    Mutex m_lock;Displays m_displays;Layers m_layers;
+    std::mutex m_termination_lock;Mutex m_lock;Displays m_displays;Layers m_layers;
     std::shared_ptr<Nvnflinger::IHOSBinderDriver> m_binder_driver;
     std::shared_ptr<Nvnflinger::SurfaceFlinger> m_surface_flinger;
     std::optional<SharedBufferManager> m_shared_buffer_manager;

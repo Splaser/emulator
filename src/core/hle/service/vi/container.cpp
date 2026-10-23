@@ -26,14 +26,23 @@ Container::~Container() {
 }
 
 void Container::OnTerminate() {
-    std::scoped_lock lk{m_lock};
-
-    m_is_shut_down = true;
-
-    if (!m_is_initialized) {
-        return;
+    std::scoped_lock terminal_lk{m_termination_lock};
+    Conductor* conductor{};
+    {
+        std::scoped_lock lk{m_lock};
+        if (m_is_shut_down) return;
+        m_is_shut_down = true;
+        if (!m_is_initialized) return;
+        conductor = std::addressof(*m_conductor);
     }
 
+    // Do not wait while holding m_lock: in-flight timing/composition can need it.
+    // This drains CPU callback/event borrows, not native GPU submissions.
+    if (conductor) {
+        conductor->Stop();
+    }
+
+    std::scoped_lock lk{m_lock};
     m_layers.ForEachLayer([&](auto& layer) { this->DestroyLayerLocked(layer.GetId()); });
 
     m_displays.ForEachDisplay(
@@ -199,9 +208,10 @@ void Container::LinkVsyncEvent(u64 display_id, Event* event) {
 }
 
 void Container::UnlinkVsyncEvent(u64 display_id, Event* event) {
-    if (!this->EnsureInitialized()) return;
     std::scoped_lock lk{m_lock};
-    if (m_is_shut_down) return;
+    // Revocation must remain available while Stop drains an old signal borrow.
+    // Never lazily initialize resources merely to remove an event.
+    if (!m_is_initialized) return;
     m_conductor->UnlinkVsyncEvent(display_id, event);
 }
 

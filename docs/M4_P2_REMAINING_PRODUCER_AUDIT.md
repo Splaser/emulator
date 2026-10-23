@@ -3,6 +3,11 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [warm VI Conductor follow-up](M4_P2_VI_CONDUCTOR_DRAIN.md) now closes and
+drains timing/VSync CPU accesses before existing warm cleanup, with synchronized
+event unlink that remains available after closure. This does not move layer/slot
+retirement past native GPU drain or cover already escaped producer/manager uses.
+
 The [VI terminal-publication follow-up](M4_P2_VI_TERMINAL_PUBLICATION.md) prevents
 cold/paused lazy initialization and retained-facade access from reopening VI after
 OnTerminate. Its same-mutex gate and nullable caller checks are terminal refusal,
