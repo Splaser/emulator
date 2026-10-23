@@ -1,5 +1,10 @@
 # GPU lifecycle correctness: F4/F5
 
+Desktop Turbo native dispatch ownership: `run_turbo_dispatch_tests.py` extracts
+the complete production Run/destructor bodies. It checks exact Vulkan results,
+timeout retention, pending-work stop/idle disposal, and five mutation controls.
+See [M4 P2 evidence](../../docs/M4_P2_TURBO_DISPATCH_LIFETIME.md).
+
 Scope: explicit GPU emulation-thread teardown and ownership of CPU sync-request
 arguments/results. This does not implement M3B admission, physical coherency,
 Vulkan submission acknowledgements, device-loss recovery or producer leases.

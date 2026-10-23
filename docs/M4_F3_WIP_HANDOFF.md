@@ -1,5 +1,20 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: afternoon sync and desktop Turbo pending dispatch
+
+Fast-forwarded 16 afternoon commits to `664136bb76`, matching PR375. A test-first
+follow-up reproduced five actual Turbo Run defects: inverted VkResult handling,
+pending native resource reuse, stop-time false completion and ignored submit/wait
+errors. The worker now retains its one pending dispatch across timeouts and pauses,
+reuses only after VK_SUCCESS, and applies existing no-unwind Fail-Stop on native
+errors. Stop leaves pending work for destructor checked device idle. Five paths
+and five precise controls pass three times; the whole-owner regression and actual
+Windows Turbo production compilation pass. See [evidence and continuation](M4_P2_TURBO_DISPATCH_LIFETIME.md)
+and [recorded results](M4_P2_TURBO_DISPATCH_RESULTS.json). Temporary executables and
+objects are cleaned after recording results. Main is unchanged; P2/M4 remain open,
+GuestBackingAdmission Unknown. Next: remaining producer/raw-alias closure audit;
+do not promote this separate desktop device witness to Guest-backed admission.
+
 ## 2026-10-23: whole-owner terminal disposal and no-unwind failure
 
 The owning System shutdown now drains GPU before service/Process/PageTable
