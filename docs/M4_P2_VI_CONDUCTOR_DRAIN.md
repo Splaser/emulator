@@ -6,6 +6,10 @@ local/fork/PR375 heads agreed before work. Work remains on
 is unchanged. This is a CPU callback/worker lifetime repair, not native GPU
 retirement or completion of M4 P2.
 
+Follow-up: [warm slot/escaped producer publication](M4_P2_ABANDONED_SLOT_PUBLICATION.md)
+closes the abandoned-queue SetPreallocatedBuffer hole. It preserves the separate
+cached framebuffer/GraphicBuffer owners; it supplies no native completion proof.
+
 ## Actual ordering and the concrete gap
 
 The real System shutdown sequence is GPU NotifyShutdown, synchronous

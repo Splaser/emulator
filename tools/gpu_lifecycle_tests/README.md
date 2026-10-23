@@ -1,5 +1,9 @@
 # GPU lifecycle correctness: F4/F5
 
+Warm slot/backing/cache ownership and escaped producer publication use
+`../physical_coherency_tests/run_abandoned_slot_tests.py`. See
+[local queue boundary and remaining native retirement](../../docs/M4_P2_ABANDONED_SLOT_PUBLICATION.md).
+
 Warm VI Conductor/timing drainage and event borrow/unlink interleavings use
 `../physical_coherency_tests/run_vi_conductor_drain_tests.py`. See
 [CPU drain and remaining native slot boundary](../../docs/M4_P2_VI_CONDUCTOR_DRAIN.md).

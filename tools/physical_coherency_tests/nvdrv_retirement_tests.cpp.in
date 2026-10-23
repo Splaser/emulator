@@ -107,7 +107,7 @@ namespace BufferQueueDefs {constexpr s32 NUM_BUFFER_SLOTS=4;}
 struct Fence {static Fence NoFence(){return {};}};
 struct Slot {Fence fence;std::shared_ptr<GraphicBuffer> graphic_buffer;int frame_number=0;bool is_preallocated=false;};
 struct QueueCore {
-    std::mutex mutex;std::array<Slot,4> slots;int override_max_buffer_count=0,signals=0;u32 default_width=0,default_height=0;PixelFormat default_buffer_format{};
+    std::mutex mutex;bool is_abandoned=false;std::array<Slot,4> slots;int override_max_buffer_count=0,signals=0;u32 default_width=0,default_height=0;PixelFormat default_buffer_format{};
     int GetPreallocatedBufferCountLocked(){return 1;}void SignalDequeueCondition(){++signals;}
 };
 struct Event {int signals=0;void Signal(){++signals;}};

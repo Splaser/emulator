@@ -2,6 +2,10 @@
 
 Date: 2026-10-23 (Asia/Singapore). Baseline: `4c1e8e0f05`.
 
+Follow-up: [abandoned queue publication](M4_P2_ABANDONED_SLOT_PUBLICATION.md)
+checks SetPreallocatedBuffer's local queue lifetime before effects and final
+publication. Its refused candidate uses the prepared retirement described here.
+
 ## Owned lifecycle instead of destructor-time borrowed access
 
 GraphicBuffer previously kept a raw NvMap pointer and directly unpinned/freed

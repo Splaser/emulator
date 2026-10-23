@@ -1,5 +1,23 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: escaped producer cannot resurrect abandoned warm slots
+
+From `1c1348d777`, actual warm layer/consumer teardown plus producer bodies
+reproduced two slot resurrection witnesses before repair. SetPreallocatedBuffer
+now checks queue abandonment under the same mutex as Disconnect, both before
+backing effects and at final publication. Refused prepared candidates retire
+unlocked through existing counted/deferred/quarantined records; no slot reset,
+dimension/count change or notification follows terminal refusal. Cache fixtures
+retain the original GraphicBuffer independently of a refused candidate. Twelve
+paths/ten precise controls pass three times, plus retirement/Conductor/session
+regressions; seven real Windows production objects compile without diagnostics.
+See [audit/protocol](M4_P2_ABANDONED_SLOT_PUBLICATION.md) and
+[results](M4_P2_ABANDONED_SLOT_RESULTS.json). Current-run exe/objects/generated
+sources are cleaned, evidence preserved; main untouched. Next: final uncached
+unpin/free and cached framebuffer release versus checked native/presentation
+completion. Local queue closure does not prove full producer drainage, revoke
+escaped aliases or complete M4/F2/F3; GuestBackingAdmission remains Unknown.
+
 ## 2026-10-23: warm VI Conductor and event-borrow drainage
 
 From `31d980ce84`, three actual-body witnesses reproduced warm termination

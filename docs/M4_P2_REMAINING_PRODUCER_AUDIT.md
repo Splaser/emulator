@@ -3,6 +3,12 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [warm slot/escaped-producer follow-up](M4_P2_ABANDONED_SLOT_PUBLICATION.md)
+prevents SetPreallocatedBuffer from resurrecting an abandoned queue, including
+when Disconnect wins during backing preparation. Candidate retirement preserves
+the existing effects/owner boundary; cached framebuffers are separate strong
+owners. Native-use drainage and final backing retirement remain unproved.
+
 The [warm VI Conductor follow-up](M4_P2_VI_CONDUCTOR_DRAIN.md) now closes and
 drains timing/VSync CPU accesses before existing warm cleanup, with synchronized
 event unlink that remains available after closure. This does not move layer/slot

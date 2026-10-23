@@ -746,11 +746,23 @@ Status BufferQueueProducer::SetPreallocatedBuffer(s32 slot,
         return Status::BadValue;
     }
 
+    {
+        std::scoped_lock lock{core->mutex};
+        // An escaped producer can outlive its consumer/layer. Global dispatch
+        // admission does not authorize reopening an abandoned queue.
+        if (core->is_abandoned) return Status::NoInit;
+    }
+
     auto dispatch = nvdrv->TryEnterDispatch();
     if (!dispatch) return Status::WouldBlock;
     auto graphic_buffer = GraphicBuffer::TryCreate(nvdrv, buffer, *dispatch);
     if (!graphic_buffer) return Status::WouldBlock;
     std::scoped_lock lock{core->mutex};
+
+    // Disconnect may have cleared every slot during backing preparation.
+    // Refuse before any slot/metadata/notification effect. The unpublished
+    // candidate retires after unlocking, through its prepared owner record.
+    if (core->is_abandoned) return Status::NoInit;
 
     slots[slot] = {};
     slots[slot].fence = Fence::NoFence();
