@@ -706,6 +706,13 @@ void Scheduler::RecordProvenanceBarrier(VkPipelineStageFlags source,
 
 void Scheduler::RetireCheckedWritesAfterDeviceIdle() {
     if (observed_submission) return; // Device idle does not submit recorded host work.
+    for (const auto& write : checked_writes) {
+        // Device idle cannot drain a command still waiting on the host worker.
+        // Preflight every owner before releasing any write/transfer resources.
+        if (!write->submission ||
+            !write->submission->queue_attempted.load(std::memory_order_acquire) ||
+            write->submission->result.load(std::memory_order_acquire) == VK_NOT_READY) return;
+    }
     for (const auto& transfer : checked_transfers) {
         if (transfer->worker_pending.load(std::memory_order_acquire) ||
             !transfer->submission->queue_attempted.load(std::memory_order_acquire) ||

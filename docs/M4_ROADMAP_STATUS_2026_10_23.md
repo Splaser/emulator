@@ -41,6 +41,11 @@ to release backing.
 
 ## Recent concrete progress
 
+- A subsequent [checked-write retirement repair](M4_F3_CHECKED_WRITE_RETIREMENT.md)
+  retains write and transfer owners when any checked write remains host-pending,
+  even if device idle is asserted. This is another phase-two ownership guard,
+  not completion of that phase.
+
 - Channel creation, binding and GMMU mapping/initialization now retain terminal
   publication ownership across their actual NV acknowledgements.
 - Checked unmap/callback handling distinguishes cancellation, failure and partial

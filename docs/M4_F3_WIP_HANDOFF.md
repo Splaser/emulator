@@ -1,5 +1,18 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: checked write host-pending owners block idle retirement
+
+The actual retirement body could release checked write holders while their host
+submission was still missing/unattempted/pending; only transfers had analogous
+guards. It now preflights all writes before releasing any write/transfer owners,
+including settled prefixes. Three actual-body repeats/two exact controls pass;
+the existing synchronization/content positive regression passes (Windows private
+OS fixture explicitly skipped), and Scheduler/Rasterizer production objects
+compile. See [retirement ownership](M4_F3_CHECKED_WRITE_RETIREMENT.md).
+Normal renderer shutdown already joins its host worker before device idle; this
+strengthens the explicit retirement boundary, not whole-guest admission. All
+THREE phases remain incomplete and admission Unknown.
+
 ## 2026-10-23: roadmap comparison and fence pool retirement failure
 
 The [roadmap snapshot](M4_ROADMAP_STATUS_2026_10_23.md) maps M0–M7 and the three
