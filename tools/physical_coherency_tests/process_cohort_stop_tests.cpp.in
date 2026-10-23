@@ -59,6 +59,7 @@ int main() {
         assert(kernel.AudioRenderDomain()->TryEnter() && "cohort cancellation must restore audio rendering");
         assert(kernel.AudioCallbackDomain()->TryEnter() && "cohort cancellation must restore audio callbacks");
         assert(kernel.Host1xSubmitDomain()->TryEnter() && "cohort cancellation must restore host1x submits");
+        assert(kernel.NvdrvDispatchDomain()->TryEnter() && "cohort cancellation must restore nvdrv dispatch");
         auto next=caller.TryStopProcessCohort(64);assert(next);
         assert(!moved->CancelNoEffects());
         assert(next->Poll()==R::BackendsStopped && next->CancelNoEffects());
@@ -238,6 +239,35 @@ int main() {
         assert(!kernel.PhysicalCore(0).TryCloseGuestExecution(8));
         assert(!kernel.AudioRenderDomain()->TryEnter() && !kernel.AudioCallbackDomain()->TryEnter());
         assert(!kernel.Host1xSubmitDomain()->TryEnter() && !kernel.ManagedGuestWriteDomain()->TryEnter());
+    }
+    { // Outer dispatch may enter host1x later; leave the inner domain open until it drains.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto dispatch=kernel.NvdrvDispatchDomain()->EnterCold();assert(dispatch);
+        auto stop=caller.TryStopProcessCohort(64);assert(stop);
+        assert(stop->Poll()==R::Pending && "cohort must join admitted nvdrv dispatch");
+        assert(!kernel.NvdrvDispatchDomain()->TryEnter());
+        assert(kernel.Host1xSubmitDomain()->TryEnter() && "outer dispatch must drain before inner host1x closes");
+        assert(kernel.ManagedGuestWriteDomain()->TryEnter());
+        dispatch.reset();assert(stop->Poll()==R::BackendsStopped);
+        assert(stop->CancelNoEffects() && kernel.NvdrvDispatchDomain()->TryEnter());
+    }
+    { // Late exception quarantine cannot leave a stale stopped receipt.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto stop=caller.TryStopProcessCohort(64);assert(stop&&stop->Poll()==R::BackendsStopped);
+        kernel.NvdrvDispatchDomain()->Seal();
+        assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
+        assert(!kernel.Host1xSubmitDomain()->TryEnter() && !kernel.ManagedGuestWriteDomain()->TryEnter());
+    }
+    for (bool late : {false,true}) {
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto stop=caller.TryStopProcessCohort(64);assert(stop&&stop->Poll()==R::BackendsStopped);
+        if (late) ResumeBatchTest::before_commit=[&] {kernel.NvdrvDispatchDomain()->Seal();};
+        else ResumeBatchTest::after_resume=[&](size_t i) {if(i==0)kernel.NvdrvDispatchDomain()->Seal();};
+        assert(!stop->CancelNoEffects());
+        ResumeBatchTest::before_commit={};ResumeBatchTest::after_resume={};
+        assert(!kernel.PhysicalCore(0).TryCloseGuestExecution(8));
+        assert(!kernel.NvdrvDispatchDomain()->TryEnter() && !kernel.Host1xSubmitDomain()->TryEnter());
+        assert(!kernel.AudioRenderDomain()->TryEnter() && !kernel.ManagedGuestWriteDomain()->TryEnter());
     }
     std::cout<<"PASS sustained process cohort: creation/init/cold publication held, real owner retention "
                  "before backend halt, Unknown and stale-cancel isolation; independent cache/service/GPU routes remain open\n";

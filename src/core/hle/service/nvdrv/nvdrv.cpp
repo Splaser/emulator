@@ -2,11 +2,14 @@
 // SPDX-FileCopyrightText: 2021 Skyline Team and Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <exception>
 #include <utility>
 
 #include <fmt/format.h>
+#include "common/scope_exit.h"
 #include "core/core.h"
 #include "core/hle/kernel/k_event.h"
+#include "core/hle/kernel/kernel.h"
 #include "core/hle/service/ipc_helpers.h"
 #include "core/hle/service/nvdrv/core/container.h"
 #include "core/hle/service/nvdrv/devices/nvdevice.h"
@@ -71,7 +74,8 @@ void LoopProcess(Core::System& system) {
 }
 
 Module::Module(Core::System& system)
-    : container{system.Host1x()}, service_context{system, "nvdrv"}, events_interface{*this} {
+    : dispatch_domain{system.Kernel().NvdrvDispatchDomain()}, container{system.Host1x()},
+      service_context{system, "nvdrv"}, events_interface{*this} {
     builders["/dev/nvhost-as-gpu"] = [this, &system](DeviceFD fd) {
         auto device = std::make_shared<Devices::nvhost_as_gpu>(system, *this, container);
         return open_files.emplace(fd, std::move(device)).first;
@@ -134,6 +138,12 @@ NvResult Module::VerifyFD(DeviceFD fd) const {
 }
 
 DeviceFD Module::Open(const std::string& device_name, NvCore::SessionId session_id) {
+    auto dispatch = dispatch_domain->EnterCold();
+    if (!dispatch) return INVALID_NVDRV_FD;
+    const auto exception_depth = std::uncaught_exceptions();
+    SCOPE_EXIT {
+        if (std::uncaught_exceptions() > exception_depth) dispatch_domain->Seal();
+    };
     auto it = builders.find(device_name);
     if (it == builders.end()) {
         LOG_ERROR(Service_NVDRV, "Trying to open unknown device {}", device_name);
@@ -153,6 +163,12 @@ DeviceFD Module::Open(const std::string& device_name, NvCore::SessionId session_
 
 NvResult Module::Ioctl1(DeviceFD fd, Ioctl command, std::span<const u8> input,
                         std::span<u8> output) {
+    auto dispatch = dispatch_domain->EnterCold();
+    if (!dispatch) return NvResult::Busy;
+    const auto exception_depth = std::uncaught_exceptions();
+    SCOPE_EXIT {
+        if (std::uncaught_exceptions() > exception_depth) dispatch_domain->Seal();
+    };
     if (fd < 0) {
         LOG_ERROR(Service_NVDRV, "Invalid DeviceFD={}!", fd);
         return NvResult::InvalidState;
@@ -170,6 +186,12 @@ NvResult Module::Ioctl1(DeviceFD fd, Ioctl command, std::span<const u8> input,
 
 NvResult Module::Ioctl2(DeviceFD fd, Ioctl command, std::span<const u8> input,
                         std::span<const u8> inline_input, std::span<u8> output) {
+    auto dispatch = dispatch_domain->EnterCold();
+    if (!dispatch) return NvResult::Busy;
+    const auto exception_depth = std::uncaught_exceptions();
+    SCOPE_EXIT {
+        if (std::uncaught_exceptions() > exception_depth) dispatch_domain->Seal();
+    };
     if (fd < 0) {
         LOG_ERROR(Service_NVDRV, "Invalid DeviceFD={}!", fd);
         return NvResult::InvalidState;
@@ -187,6 +209,12 @@ NvResult Module::Ioctl2(DeviceFD fd, Ioctl command, std::span<const u8> input,
 
 NvResult Module::Ioctl3(DeviceFD fd, Ioctl command, std::span<const u8> input, std::span<u8> output,
                         std::span<u8> inline_output) {
+    auto dispatch = dispatch_domain->EnterCold();
+    if (!dispatch) return NvResult::Busy;
+    const auto exception_depth = std::uncaught_exceptions();
+    SCOPE_EXIT {
+        if (std::uncaught_exceptions() > exception_depth) dispatch_domain->Seal();
+    };
     if (fd < 0) {
         LOG_ERROR(Service_NVDRV, "Invalid DeviceFD={}!", fd);
         return NvResult::InvalidState;
@@ -203,6 +231,12 @@ NvResult Module::Ioctl3(DeviceFD fd, Ioctl command, std::span<const u8> input, s
 }
 
 NvResult Module::Close(DeviceFD fd) {
+    auto dispatch = dispatch_domain->EnterCold();
+    if (!dispatch) return NvResult::Busy;
+    const auto exception_depth = std::uncaught_exceptions();
+    SCOPE_EXIT {
+        if (std::uncaught_exceptions() > exception_depth) dispatch_domain->Seal();
+    };
     if (fd < 0) {
         LOG_ERROR(Service_NVDRV, "Invalid DeviceFD={}!", fd);
         return NvResult::InvalidState;
@@ -223,6 +257,12 @@ NvResult Module::Close(DeviceFD fd) {
 }
 
 NvResult Module::QueryEvent(DeviceFD fd, u32 event_id, Kernel::KEvent*& event) {
+    auto dispatch = dispatch_domain->EnterCold();
+    if (!dispatch) return NvResult::Busy;
+    const auto exception_depth = std::uncaught_exceptions();
+    SCOPE_EXIT {
+        if (std::uncaught_exceptions() > exception_depth) dispatch_domain->Seal();
+    };
     if (fd < 0) {
         LOG_ERROR(Service_NVDRV, "Invalid DeviceFD={}!", fd);
         return NvResult::InvalidState;

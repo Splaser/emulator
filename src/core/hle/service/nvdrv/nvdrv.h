@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "common/common_types.h"
+#include "common/producer_drain.h"
 #include "common/terminal_ingress.h"
 #include "core/hle/service/kernel_helpers.h"
 #include "core/hle/service/nvdrv/core/container.h"
@@ -96,6 +97,8 @@ public:
 
 private:
     friend class EventInterface;
+
+    const std::shared_ptr<Common::ProducerDrain> dispatch_domain;
 
     /// Manages syncpoints on the host
     NvCore::Container container;

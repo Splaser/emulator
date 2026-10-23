@@ -52,6 +52,12 @@ variants += [('omit-audio-callback-drain',source.replace('    const auto callbac
     '    const auto callbacks = D::DrainedSubset;'),'cohort must join admitted audio callbacks')]
 variants += [('omit-host1x-submit-drain',source.replace('    const auto submits = host1x_submits->Poll();',
     '    const auto submits = D::DrainedSubset;'),'cohort must join admitted host1x submits')]
+variants += [('omit-nvdrv-dispatch-drain',source.replace('    const auto nvdrv = nvdrv_dispatch->Poll();',
+    '    const auto nvdrv = D::DrainedSubset;'),'cohort must join admitted nvdrv dispatch')]
+nvdrv_block = methods[methods.index('    // Outer device dispatch'):methods.index('    if (!audio_render) {')]
+variants += [('close-inner-before-dispatch-drain', source.replace(nvdrv_block, '').replace(
+    '    // Admitted render cycles', nvdrv_block + '    // Admitted render cycles'),
+    'outer dispatch must drain before inner host1x closes')]
 # The publication mutant must reach an early halt assertion, before producer exit.
 variants[2]=(variants[2][0],variants[2][1], 'writer.backend.requests==0')
 variants += [
@@ -66,6 +72,7 @@ reservation=('    auto reservation = creation.TryReserveCancel(std::addressof(*o
              '    if (!reservation) { Quarantine(); return false; }\n')
 release=('    Common::ProducerDrain::ResumeBatch batch;\n'
              '    if (!execution->AppendCancellation(batch) || !batch.Add(publication) ||\n'
+             '        !nvdrv_dispatch || !batch.Add(*nvdrv_dispatch) ||\n'
              '        !audio_render || !batch.Add(*audio_render) ||\n'
              '        !audio_callbacks || !batch.Add(*audio_callbacks) ||\n'
              '        !host1x_submits || !batch.Add(*host1x_submits) ||\n'
@@ -89,7 +96,10 @@ variants += [('omit-audio-callbacks-from-batch', source.replace('!batch.Add(*aud
               'cohort cancellation must restore audio callbacks')]
 variants += [('omit-host1x-submits-from-batch', source.replace('!batch.Add(*host1x_submits)', 'false'),
               'cohort cancellation must restore host1x submits')]
+variants += [('omit-nvdrv-dispatch-from-batch', source.replace('!batch.Add(*nvdrv_dispatch)', 'false'),
+              'cohort cancellation must restore nvdrv dispatch')]
 legacy=('    if (!execution->CancelNoEffects() || !publication.ResumeNoEffects() ||\n'
+        '        !nvdrv_dispatch->ResumeNoEffects() ||\n'
         '        !audio_render->ResumeNoEffects() || !audio_callbacks->ResumeNoEffects() ||\n'
         '        !host1x_submits->ResumeNoEffects() ||\n'
         '        !managed_writes->ResumeNoEffects()) {\n'
@@ -109,7 +119,7 @@ batch_header=batch_header.replace('#pragma once','#pragma once\n#include <functi
 batch_stubs=out/'stubs';(batch_stubs/'common').mkdir(parents=True,exist_ok=True)
 (batch_stubs/'common/producer_drain.h').write_text(batch_header)
 command=[os.environ.get('CXX','g++'),'-std=c++23','-O1','-pthread','-Wall','-Wextra','-Werror',
-         '-Wno-unused-parameter','-I',str(batch_stubs),'-I',str(root/'.diagnostics/m4-process-execution-stop/stubs'),'-I',str(root/'src')]
+         '-Wno-unused-parameter','-I',str(batch_stubs),'-I',str(prerequisite.parent/'stubs'),'-I',str(root/'src')]
 for name,text,expected in variants:
     assert expected is None or text!=source
     cpp=out/(name+'.cpp');cpp.write_text(text)

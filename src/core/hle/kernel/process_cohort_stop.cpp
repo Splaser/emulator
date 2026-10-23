@@ -36,7 +36,8 @@ ProcessCohortStop::Result ProcessCohortStop::Poll() {
         Quarantine(); return Result::Unknown;
     }
     if (stopped) {
-        if (!audio_render || audio_render->Poll() != D::DrainedSubset ||
+        if (!nvdrv_dispatch || nvdrv_dispatch->Poll() != D::DrainedSubset ||
+            !audio_render || audio_render->Poll() != D::DrainedSubset ||
             !audio_callbacks || audio_callbacks->Poll() != D::DrainedSubset ||
             !host1x_submits || host1x_submits->Poll() != D::DrainedSubset ||
             !managed_writes || managed_writes->Poll() != D::DrainedSubset) {
@@ -69,6 +70,16 @@ ProcessCohortStop::Result ProcessCohortStop::Poll() {
         Quarantine(); return Result::Unknown;
     }
     if (result != Result::BackendsStopped) return result;
+    // Outer device dispatch can enter host1x operations later in the same call.
+    // Drain it before closing the inner host1x or managed Memory domains.
+    if (!nvdrv_dispatch) {
+        auto closure = kernel.NvdrvDispatchDomain()->TryClose(remaining + 1);
+        if (!closure) { Quarantine(); return Result::Unknown; }
+        nvdrv_dispatch.emplace(std::move(*closure));
+    }
+    const auto nvdrv = nvdrv_dispatch->Poll();
+    if (nvdrv == D::Unknown) { Quarantine(); return Result::Unknown; }
+    if (nvdrv == D::Pending) return Result::Pending;
     if (!audio_render) {
         auto closure = kernel.AudioRenderDomain()->TryClose(remaining + 1);
         if (!closure) { Quarantine(); return Result::Unknown; }
@@ -115,6 +126,7 @@ bool ProcessCohortStop::CancelNoEffects() {
     if (!reservation) { Quarantine(); return false; }
     Common::ProducerDrain::ResumeBatch batch;
     if (!execution->AppendCancellation(batch) || !batch.Add(publication) ||
+        !nvdrv_dispatch || !batch.Add(*nvdrv_dispatch) ||
         !audio_render || !batch.Add(*audio_render) ||
         !audio_callbacks || !batch.Add(*audio_callbacks) ||
         !host1x_submits || !batch.Add(*host1x_submits) ||
@@ -129,6 +141,7 @@ bool ProcessCohortStop::CancelNoEffects() {
 void ProcessCohortStop::Quarantine() {
     unknown = true;
     if (execution) execution->Quarantine();
+    if (nvdrv_dispatch) nvdrv_dispatch->Quarantine();
     if (audio_render) audio_render->Quarantine();
     if (audio_callbacks) audio_callbacks->Quarantine();
     if (host1x_submits) host1x_submits->Quarantine();

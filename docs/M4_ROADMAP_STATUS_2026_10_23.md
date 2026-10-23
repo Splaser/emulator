@@ -46,6 +46,12 @@ to release backing.
 
 ## Recent concrete progress
 
+- [Ordinary NVDRV dispatch closure](M4_P2_NVDRV_DISPATCH_CLOSURE.md) now drains
+  all six Module dispatch/lifecycle entry bodies before inner host1x closure.
+  NVDRV Initialize shares the domain through session publication and local reply.
+  The [remaining producer audit](M4_P2_REMAINING_PRODUCER_AUDIT.md) records actual
+  bypasses and the lifecycle/native ownership facts still needed for P2.
+
 - [Host1x mapping ioctl closure](M4_P2_HOST1X_MAPPING_CLOSURE.md) now shares the
   Submit domain with MapBuffer/UnmapBuffer; partial pin/unpin failure cannot
   become a drained receipt. Other direct nvmap/mapping/alias routes remain open.

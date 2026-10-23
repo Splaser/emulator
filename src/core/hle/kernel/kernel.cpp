@@ -817,6 +817,8 @@ struct KernelCore::Impl {
         std::make_shared<Common::ProducerDrain>();
     std::shared_ptr<Common::ProducerDrain> host1x_submits =
         std::make_shared<Common::ProducerDrain>();
+    std::shared_ptr<Common::ProducerDrain> nvdrv_dispatch =
+        std::make_shared<Common::ProducerDrain>();
 
     // OS wrapper publication list, not an exhaustive KProcess/backing owner census.
     std::mutex process_list_lock;
@@ -1352,6 +1354,9 @@ const std::shared_ptr<Common::ProducerDrain>& KernelCore::AudioCallbackDomain() 
 }
 const std::shared_ptr<Common::ProducerDrain>& KernelCore::Host1xSubmitDomain() const {
     return impl->host1x_submits;
+}
+const std::shared_ptr<Common::ProducerDrain>& KernelCore::NvdrvDispatchDomain() const {
+    return impl->nvdrv_dispatch;
 }
 
 void KernelCore::ShutdownCores() {

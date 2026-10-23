@@ -1,5 +1,20 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: ordinary NVDRV dispatch and remaining producer audit
+
+Six actual Module methods now retain one Kernel-shared dispatch entry: Open,
+Ioctl1/2/3, Close and QueryEvent. Exceptions seal before count exit; ordinary
+returned errors remain unchanged. Cohort drains the outer domain before inner
+host1x/memory closures and atomically resumes it with the others. Three focused
+suites, 46 exact controls and five Windows production objects pass; see
+[protocol and validation](M4_P2_NVDRV_DISPATCH_CLOSURE.md).
+NVDRV Initialize now shares this domain; it cannot publish a session after
+closure or fabricate Success while an initialization exception unwinds.
+The [actual remaining-route audit](M4_P2_REMAINING_PRODUCER_AUDIT.md) identifies
+GraphicBuffer direct pin/unpin/free, session publication/teardown, escaped views,
+NCE and native GPU/Unknown owner requirements. P2 is NOT complete and ordinary
+GuestBackingAdmission remains Unknown.
+
 ## 2026-10-23: host1x MapBuffer/UnmapBuffer share the Submit closure
 
 Both common VIC/NVDEC mapping ioctls now enter the same domain as Submit, before

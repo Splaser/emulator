@@ -285,6 +285,7 @@ public:
     const std::shared_ptr<Common::ProducerDrain>& AudioRenderDomain() const;
     const std::shared_ptr<Common::ProducerDrain>& AudioCallbackDomain() const;
     const std::shared_ptr<Common::ProducerDrain>& Host1xSubmitDomain() const;
+    const std::shared_ptr<Common::ProducerDrain>& NvdrvDispatchDomain() const;
 
     /// Exceptional exit application process.
     void ExceptionalExitApplication();

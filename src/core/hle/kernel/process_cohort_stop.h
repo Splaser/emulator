@@ -22,6 +22,7 @@ class ProcessCohortStop {
     Common::ProducerDrain::Closure publication;
     Common::ProducerDrain::Closure initialization;
     std::optional<ProcessExecutionStop> execution;
+    std::optional<Common::ProducerDrain::Closure> nvdrv_dispatch;
     std::optional<Common::ProducerDrain::Closure> audio_render;
     std::optional<Common::ProducerDrain::Closure> audio_callbacks;
     std::optional<Common::ProducerDrain::Closure> host1x_submits;

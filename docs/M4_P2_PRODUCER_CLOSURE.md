@@ -4,6 +4,12 @@ Date: 2026-10-23 (Asia/Singapore). Baseline: `1157bf0d04`.
 
 ## Phase status and ownership boundary
 
+The [ordinary NVDRV dispatch closure](M4_P2_NVDRV_DISPATCH_CLOSURE.md) now spans
+Open, Ioctl1/2/3, Close and QueryEvent, including ordinary nvhost-as-gpu/nvmap
+calls. NVDRV session Initialize shares that domain through its local reply.
+The [remaining actual-route audit](M4_P2_REMAINING_PRODUCER_AUDIT.md)
+identifies escaped GraphicBuffer/session/teardown and native ownership gaps.
+
 The [shared host1x mapping ioctl closure](M4_P2_HOST1X_MAPPING_CLOSURE.md) extends
 the Submit domain to MapBuffer/UnmapBuffer, including partial-failure sealing.
 Direct nvmap/device mapping routes and complete alias ownership remain open.
