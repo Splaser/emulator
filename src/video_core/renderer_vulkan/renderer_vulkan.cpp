@@ -171,7 +171,15 @@ void RendererVulkan::Shutdown() {
         // across worker drains, which may submit their final command buffers.
         std::scoped_lock lock{scheduler.submit_mutex};
         const auto idle = device.GetLogical().WaitIdle();
-        if (idle == VK_SUCCESS) rasterizer.RetireControlledTransfersAfterDeviceIdle();
+        if (idle == VK_SUCCESS) {
+            if (!rasterizer.RetireControlledTransfersAfterDeviceIdle()) {
+                LOG_ERROR(Render_Vulkan,
+                          "Terminal transfer disposal refused: host submission ownership unsettled");
+            }
+        } else {
+            LOG_ERROR(Render_Vulkan, "Terminal GPU drain failed: device idle result {}",
+                      static_cast<int>(idle));
+        }
     }
     scheduler.GetMasterSemaphore().Shutdown(); // no remaining completion-helper access
     is_shut_down = true;

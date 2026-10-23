@@ -704,19 +704,20 @@ void Scheduler::RecordProvenanceBarrier(VkPipelineStageFlags source,
     });
 }
 
-void Scheduler::RetireCheckedWritesAfterDeviceIdle() {
-    if (observed_submission) return; // Device idle does not submit recorded host work.
+bool Scheduler::RetireCheckedWritesAfterDeviceIdle() {
+    if (observed_submission) return false; // Device idle does not submit recorded host work.
     for (const auto& write : checked_writes) {
         // Device idle cannot drain a command still waiting on the host worker.
         // Preflight every owner before releasing any write/transfer resources.
         if (!write->submission ||
             !write->submission->queue_attempted.load(std::memory_order_acquire) ||
-            write->submission->result.load(std::memory_order_acquire) == VK_NOT_READY) return;
+            write->submission->result.load(std::memory_order_acquire) == VK_NOT_READY) return false;
     }
     for (const auto& transfer : checked_transfers) {
-        if (transfer->worker_pending.load(std::memory_order_acquire) ||
+        if (!transfer->submission ||
+            transfer->worker_pending.load(std::memory_order_acquire) ||
             !transfer->submission->queue_attempted.load(std::memory_order_acquire) ||
-            transfer->submission->result.load(std::memory_order_acquire) == VK_NOT_READY) return;
+            transfer->submission->result.load(std::memory_order_acquire) == VK_NOT_READY) return false;
     }
     for (const auto& write : checked_writes) {
         write->retired = true;
@@ -730,6 +731,7 @@ void Scheduler::RetireCheckedWritesAfterDeviceIdle() {
         transfer->exclusion.reset();
     }
     checked_transfers.clear();
+    return true;
 }
 
 void Scheduler::Finish(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {

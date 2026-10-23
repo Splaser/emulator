@@ -1,5 +1,20 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: native terminal drain witness and disposal ordering
+
+Prioritize native drain and whole-owner terminal disposal; do not grow retirement
+queues as a substitute. Scheduler now reports settled-owner disposal explicitly;
+Rasterizer checks it before releasing any runtime transfer pins/readback. Missing
+transfer submission refuses safely. Four exact controls detect preflight bypass
+and the previous cross-layer release order. Three Windows production objects and
+the renderer/worker cases pass. A real RTX 4060 witness passes checked idle,
+barrier/invalidate/readback and native disposal three times, with an omitted-tail
+negative control. It uses dedicated native allocations, not Guest backing.
+Critically, refusal still does not prevent later C++ member/allocator destruction;
+whole-owner failure propagation remains the next gate. See
+[evidence, disposal table and limits](M4_P2_NATIVE_TERMINAL_DRAIN.md).
+P2 remains incomplete and GuestBackingAdmission stays Unknown.
+
 ## 2026-10-23: GraphicBuffer and session retained retirement
 
 GraphicBuffer uses a shared Module provider and a preallocated unique retirement

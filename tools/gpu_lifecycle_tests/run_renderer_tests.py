@@ -12,11 +12,12 @@ p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--case', action='append')
 p.add_argument('--repeat', type=int, default=10)
 p.add_argument('--sanitize', choices=['address', 'thread'])
+p.add_argument('--output-dir', type=Path)
 args = p.parse_args()
 if args.repeat < 1:
     p.error('--repeat must be positive')
 root = Path(__file__).resolve().parents[2]
-out = root/'.diagnostics/gpu-lifecycle'/('windows' if os.name=='nt' else 'linux')
+out = args.output_dir or root/'.diagnostics/gpu-lifecycle'/('windows' if os.name=='nt' else 'linux')
 out.mkdir(parents=True, exist_ok=True)
 def extract(path, marker):
     text=(root/path).read_text()
@@ -75,6 +76,7 @@ using VideoCommon::ControlledProducerConflict;
 #define CITRON_PROFILE_SCOPE(...) ((void)0)
 template<class... T> void Log(const T&...) {}
 #define LOG_INFO(category, format, ...) Log(__VA_ARGS__)
+#define LOG_ERROR(category, format, ...) Log(__VA_ARGS__)
 using namespace std::chrono_literals;
 constexpr int VK_SUCCESS=0;
 void Require(bool b,const char* m) { if(!b) throw std::runtime_error(m); }
@@ -163,7 +165,11 @@ struct AliasOp {
 };
 struct RasterizerVulkan {
     std::vector<std::shared_ptr<AliasOp>> controlled_alias_copies;
-    void RetireControlledTransfersAfterDeviceIdle() {order.push_back("controlled_retire");}
+    bool retirement_ready=true;
+    bool RetireControlledTransfersAfterDeviceIdle() {
+        if(!retirement_ready) return false;
+        order.push_back("controlled_retire"); return true;
+    }
     std::atomic<bool> is_shutting_down=false; std::shared_mutex shutdown_mutex; bool physical_shadow=false;
     struct Cache { std::mutex mutex; void SetPhysicalShadow(void*){} } texture_cache,buffer_cache;
     void ReportPhysicalShadow(){}
@@ -260,6 +266,10 @@ void renderer_failed_idle() {
     order.clear(); {RendererVulkan renderer;renderer.device.idle_result=-4;renderer.Shutdown();}
     for(const auto& event:order) Require(event!="controlled_retire","failed idle retired controlled resources");
 }
+void renderer_pending_disposal() {
+    order.clear(); {RendererVulkan renderer;renderer.rasterizer.retirement_ready=false;renderer.Shutdown();}
+    for(const auto& event:order) Require(event!="controlled_retire","unsettled ownership retired controlled resources");
+}
 void scheduler_drain() {
     Scheduler scheduler; scheduler.Start(); Event entered,release,draining;
     std::atomic<int> count=0;
@@ -328,6 +338,7 @@ int main(int argc,char** argv) {
         std::string test=argc>1?argv[1]:"renderer_order";
         if(test=="renderer_order") renderer_order(); else if(test=="scheduler") scheduler_drain();
         else if(test=="renderer_failed_idle") renderer_failed_idle();
+        else if(test=="renderer_pending_disposal") renderer_pending_disposal();
         else if(test=="scheduler_cancel") scheduler_cancel();
         else if(test=="presentation") present_drain(); else if(test=="fencing") fence_cancel();
         else if(test=="turbo") turbo_drain(); else if(test=="completion") completion_drain();
@@ -353,7 +364,7 @@ subprocess.run(flags+[str(cpp),'-o',str(exe)],check=True)
     'instrumentation':['signal on entry to wait/drain'],
 },indent=2))
 failed=False
-for case in args.case or ['renderer_order','renderer_failed_idle','scheduler','scheduler_cancel','presentation','fencing','turbo','completion']:
+for case in args.case or ['renderer_order','renderer_failed_idle','renderer_pending_disposal','scheduler','scheduler_cancel','presentation','fencing','turbo','completion']:
     for i in range(args.repeat):
         result=subprocess.run([str(exe),case],capture_output=True,text=True,timeout=20)
         (out/f'renderer-{case}-{i}.log').write_text(result.stdout+result.stderr)

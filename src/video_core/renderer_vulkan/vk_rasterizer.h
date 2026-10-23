@@ -198,9 +198,12 @@ public:
         const ControlledRegistrationPtr& operation) {
         return buffer_cache.BeginControlledRefresh(operation);
     }
-    void RetireControlledTransfersAfterDeviceIdle() {
+    bool RetireControlledTransfersAfterDeviceIdle() {
+        // One preflight covers both layers. Cache pins/readback allocations must
+        // survive a scheduler refusal just as the checked submission owners do.
+        if (!scheduler.RetireCheckedWritesAfterDeviceIdle()) return false;
         buffer_cache_runtime.RetireControlledTransfersAfterDeviceIdle();
-        scheduler.RetireCheckedWritesAfterDeviceIdle();
+        return true;
     }
     [[nodiscard]] Core::Memory::PreparedCpuWriteResult WriteControlledCached8(
         const ControlledRegistrationPtr&, Core::Memory::Memory&,

@@ -106,7 +106,7 @@ for marker in ['Scheduler::Submission Scheduler::FlushChecked(',
                'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
                'bool Scheduler::InvalidatePhysicalWrite(', 'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
                'const TransferContent* Scheduler::CompletedTransferContent(',
-               'void Scheduler::RetireCheckedWritesAfterDeviceIdle(']:
+               'bool Scheduler::RetireCheckedWritesAfterDeviceIdle(']:
     submission += body(scheduler_path, marker) + '\n'
 runtime_path = 'src/video_core/renderer_vulkan/vk_buffer_cache.cpp'
 transfer = body(runtime_path, 'VkBufferCopy MakeBufferCopy(') + '\n'

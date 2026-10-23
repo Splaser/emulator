@@ -19,13 +19,22 @@ out = (a.output_dir or root / '.diagnostics/m4-checked-retirement').resolve()
 out.mkdir(parents=True, exist_ok=True)
 path = 'src/video_core/renderer_vulkan/vk_scheduler.cpp'
 production = (root / path).read_text()
-start = production.index('void Scheduler::RetireCheckedWritesAfterDeviceIdle()')
+start = production.index('bool Scheduler::RetireCheckedWritesAfterDeviceIdle()')
 pos = production.index('{', start)
 depth, end = 1, pos + 1
 while depth:
     depth += (production[end] == '{') - (production[end] == '}')
     end += 1
 body = production[start:end].replace('Scheduler::', '')
+rasterizer_path = 'src/video_core/renderer_vulkan/vk_rasterizer.h'
+rasterizer = (root / rasterizer_path).read_text()
+start = rasterizer.index('    bool RetireControlledTransfersAfterDeviceIdle()')
+pos = rasterizer.index('{', start)
+depth, end = 1, pos + 1
+while depth:
+    depth += (rasterizer[end] == '{') - (rasterizer[end] == '}')
+    end += 1
+disposal = rasterizer[start:end]
 source = r'''
 #include <atomic>
 #include <cstdlib>
@@ -50,6 +59,24 @@ struct Scheduler {
     std::vector<std::shared_ptr<Transfer>> checked_transfers;
 ''' + body + r'''
 };
+struct Rasterizer {
+    Scheduler scheduler;
+    struct Runtime {int retired=0;void RetireControlledTransfersAfterDeviceIdle(){++retired;}} buffer_cache_runtime;
+''' + disposal + r'''
+};
+void CacheDisposal() {
+    Rasterizer rasterizer;auto transfer=std::make_shared<Transfer>();
+    rasterizer.scheduler.checked_transfers.push_back(transfer);
+    auto pin=transfer->resources.front();
+    Require(!rasterizer.RetireControlledTransfersAfterDeviceIdle() &&
+            rasterizer.buffer_cache_runtime.retired==0 && transfer->resources.front()==pin,
+            "cache disposal bypassed scheduler refusal");
+    transfer->submission->queue_attempted=true;transfer->submission->result=VK_SUCCESS;
+    Require(rasterizer.RetireControlledTransfersAfterDeviceIdle() &&
+            rasterizer.buffer_cache_runtime.retired==1 && transfer->resources.empty(),
+            "settled cache disposal failed");
+    Require(rasterizer.RetireControlledTransfersAfterDeviceIdle(),"empty disposal refused");
+}
 void PendingWrite(int stage) {
     Scheduler scheduler;auto write=std::make_shared<Write>();
     auto settled=std::make_shared<Write>();settled->submission->queue_attempted=true;
@@ -62,7 +89,7 @@ void PendingWrite(int stage) {
     if(stage==1)write->submission->queue_attempted=true;
     if(stage==2)write->submission->result=VK_ERROR_DEVICE_LOST;
     if(stage==3)write->submission.reset();
-    scheduler.RetireCheckedWritesAfterDeviceIdle();
+    Require(!scheduler.RetireCheckedWritesAfterDeviceIdle(),"pending write reported disposal success");
     Require(!settled->retired && settled->resources && !write->retired && write->resources && !transfer->retired &&
             !transfer->resources.empty() && transfer->exclusion==exclusion && exclusion->quarantined==0 &&
             scheduler.checked_writes.size()==2 && scheduler.checked_transfers.size()==1,
@@ -75,7 +102,7 @@ void PendingWrite(int stage) {
             scheduler.checked_transfers.empty(),"settled checked owners failed idle retirement");
 }
 void PriorGuards() {
-    for(int stage=0;stage<4;++stage) {
+    for(int stage=0;stage<5;++stage) {
         Scheduler scheduler;auto write=std::make_shared<Write>();auto transfer=std::make_shared<Transfer>();
         write->submission->queue_attempted=true;write->submission->result=VK_SUCCESS;
         transfer->submission->queue_attempted=true;transfer->submission->result=VK_SUCCESS;
@@ -84,7 +111,8 @@ void PriorGuards() {
         if(stage==1)transfer->worker_pending=true;
         if(stage==2)transfer->submission->queue_attempted=false;
         if(stage==3)transfer->submission->result=VK_NOT_READY;
-        scheduler.RetireCheckedWritesAfterDeviceIdle();
+        if(stage==4)transfer->submission.reset();
+        Require(!scheduler.RetireCheckedWritesAfterDeviceIdle(),"pending transfer reported disposal success");
         Require(!write->retired && write->resources && !transfer->retired && !transfer->resources.empty(),
                 "device idle bypassed pending transfer or observed work");
     }
@@ -95,7 +123,7 @@ void PriorGuards() {
     scheduler.checked_writes.push_back(write);scheduler.RetireCheckedWritesAfterDeviceIdle();
     Require(write->retired && !write->resources,"settled failed write lost idle cleanup");
 }
-int main() {for(int stage=0;stage<4;++stage)PendingWrite(stage);PriorGuards();
+int main() {for(int stage=0;stage<4;++stage)PendingWrite(stage);PriorGuards();CacheDisposal();
     std::cout<<"PASS checked retirement retains all owners while host work is pending\n";}
 '''
 flags = [a.cxx, '-std=c++23', '-O1', '-pthread', '-Wall', '-Wextra', '-Werror']
@@ -120,9 +148,17 @@ guard_start = body.index('    for (const auto& write : checked_writes) {')
 guard_end = body.index('    for (const auto& transfer : checked_transfers)', guard_start)
 guard = body[guard_start:guard_end]
 controls = [
-    ('omit-write-admission-check', source.replace(guard, ''), 'device idle retired host-pending write owners'),
+    ('omit-write-admission-check', source.replace(guard, ''), 'pending write reported disposal success'),
     ('omit-transfer-pending-check', source.replace('transfer->worker_pending.load(std::memory_order_acquire) ||', ''),
-     'device idle bypassed pending transfer or observed work'),
+     'pending transfer reported disposal success'),
+    ('ignore-scheduler-refusal', source.replace(
+        'if (!scheduler.RetireCheckedWritesAfterDeviceIdle()) return false;',
+        '(void)scheduler.RetireCheckedWritesAfterDeviceIdle();'),
+     'cache disposal bypassed scheduler refusal'),
+    ('cache-release-before-preflight', source.replace(disposal, disposal.replace(
+        '        if (!scheduler.RetireCheckedWritesAfterDeviceIdle()) return false;\n        buffer_cache_runtime.RetireControlledTransfersAfterDeviceIdle();',
+        '        buffer_cache_runtime.RetireControlledTransfersAfterDeviceIdle();\n        if (!scheduler.RetireCheckedWritesAfterDeviceIdle()) return false;')),
+     'cache disposal bypassed scheduler refusal'),
 ]
 for name, changed, expected in controls:
     assert changed != source
@@ -132,7 +168,7 @@ for name, changed, expected in controls:
     (out / (name + '.log')).write_text(log)
     assert result.returncode != 0 and 'FAIL ' + expected in log, (name, log)
     print('PASS retirement control: ' + name, flush=True)
-paths = [path, 'src/video_core/renderer_vulkan/vk_scheduler.h',
+paths = [path, rasterizer_path, 'src/video_core/renderer_vulkan/vk_scheduler.h',
          'tools/gpu_lifecycle_tests/run_checked_retirement_tests.py']
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in paths},

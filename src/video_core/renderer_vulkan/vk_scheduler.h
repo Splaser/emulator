@@ -532,7 +532,8 @@ public:
         return result;
     }
     // Caller has joined producers and successfully waited for real device idle.
-    void RetireCheckedWritesAfterDeviceIdle();
+    // False leaves every holder intact; callers must not retire dependent cache holders.
+    bool RetireCheckedWritesAfterDeviceIdle();
 
     explicit Scheduler(const Device& device, StateTracker& state_tracker);
     ~Scheduler();

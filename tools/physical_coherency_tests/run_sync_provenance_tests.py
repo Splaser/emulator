@@ -67,7 +67,7 @@ methods = '\n'.join(body(cpp, marker) for marker in [
     'Scheduler::WriteState Scheduler::PollCheckedTransfer(',
     'bool Scheduler::InvalidatePhysicalWrite(', 'void Scheduler::RevokeBufferContent(', 'void Scheduler::RecordBufferFill(', 'void Scheduler::RecordBufferCopy(',
     'const TransferContent* Scheduler::CompletedTransferContent(',
-    'void Scheduler::RetireCheckedWritesAfterDeviceIdle('])
+    'bool Scheduler::RetireCheckedWritesAfterDeviceIdle('])
 master = 'src/video_core/renderer_vulkan/vk_master_semaphore.cpp'
 methods += '\n' + body(master, 'static constexpr std::array<VkPipelineStageFlags, 2> master_wait_stage_masks') + ';\n'
 methods += body(master, 'VkResult MasterSemaphore::SubmitQueueTimeline(')

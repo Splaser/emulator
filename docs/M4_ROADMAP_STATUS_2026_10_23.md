@@ -10,6 +10,12 @@ Windows production units. No fresh whole-project/device acceptance is implied.
 
 ## Overall position
 
+Latest native-drain follow-up: [terminal disposal evidence](M4_P2_NATIVE_TERMINAL_DRAIN.md)
+repairs cross-layer preflight ordering and records a real Windows RTX 4060
+idle/visibility/disposal witness. It does not cover ordinary Guest backing or
+protect the full owner graph from later C++ destruction after drain refusal.
+Global teardown outcome/ownership is the next priority; P2 stays incomplete.
+
 | Roadmap item | Current position | Still required |
 | --- | --- | --- |
 | M0 independent DMA snapshot | Existing source-snapshot implementation and recorded regression evidence | Android DMA-heavy runtime/default-rollout acceptance remains separate |

@@ -219,7 +219,7 @@ public:
     void RecordProvenanceBarrier(VkPipelineStageFlags,VkPipelineStageFlags,const VkMemoryBarrier&);
     Write RecordCheckedWrite(std::shared_ptr<const void>,const void*,u64,u64,u64,std::function<bool(vk::CommandBuffer)>);
     WriteState PollCheckedWrite(const Write&) const noexcept;
-    void RetireCheckedWritesAfterDeviceIdle();
+    bool RetireCheckedWritesAfterDeviceIdle();
     u64 SubmitExecution(VkSemaphore,VkSemaphore,Submission checked={});
     bool fail_end_pending{};
     void EndPendingOperations() {if(fail_end_pending) throw std::runtime_error("host submit failure");}
