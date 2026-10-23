@@ -10,7 +10,7 @@ import subprocess
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--repeat', type=int, default=3)
-p.add_argument('--case', choices=['all', 'pending', 'active'], default='all')
+p.add_argument('--case', choices=['all', 'pending', 'active', 'duplicate'], default='all')
 p.add_argument('--output-dir', type=Path)
 a = p.parse_args()
 if a.repeat < 1:
@@ -85,12 +85,39 @@ void InlineAndNormal() {
     Require(Observe([](auto) {throw std::bad_alloc();},[] {},escaped)==CallbackOutcome::Failed && !escaped,
             "pre-enqueue exception escaped checked failure result");
 }
+void DuplicateAdmission(bool action_fails) {
+    Event entered,release,thrown;std::jthread worker;bool escaped=false;
+    std::atomic<int> effects=0;
+    auto dispatch=[&](auto callback) {
+        worker=std::jthread([callback] {try {callback();}catch(...) {}});
+        entered.Wait();
+        // A retained copy arriving while Running must neither execute nor
+        // acknowledge completion on behalf of the original invocation.
+        std::jthread duplicate([callback] {callback();});duplicate.join();
+        thrown.Set();throw std::runtime_error("after duplicate invocation");
+    };
+    auto request=std::async(std::launch::async,[&] {
+        return Observe(dispatch,[&] {
+            Require(effects.fetch_add(1)==0,"duplicate dispatch replayed running action");
+            entered.Set();release.Wait();if(action_fails)throw std::bad_alloc();
+        },escaped);
+    });
+    thrown.Wait();
+    Require(request.wait_for(100ms)!=std::future_status::ready,
+            "duplicate dispatch acknowledged unfinished original action");
+    release.Set();Require(Ready(request)==CallbackOutcome::Failed && !escaped,
+                         "duplicate dispatch lost exceptional failure");
+    worker.join();Require(effects==1,"duplicate dispatch changed effect count");
+    std::cout<<"PASS duplicate retained closure cannot replay or complete running action\n";
+}
 int main(int argc,char** argv) {
     const std::string which=argc>1?argv[1]:"all";
-    if(which=="active") {ActiveException(false);ActiveException(true);}
+    if(which=="duplicate") {DuplicateAdmission(false);DuplicateAdmission(true);}
+    else if(which=="active") {ActiveException(false);ActiveException(true);}
     else {
         PendingException();
-        if(which=="all") {ActiveException(false);ActiveException(true);InlineAndNormal();}
+        if(which=="all") {ActiveException(false);ActiveException(true);InlineAndNormal();
+                         DuplicateAdmission(false);DuplicateAdmission(true);}
     }
     std::cout<<"PASS exceptional dispatch completion boundary\n";
 }
@@ -125,13 +152,19 @@ if a.case == 'all':
         ('exception-is-completion', header.replace('return dispatch_failed ? CallbackOutcome::Failed : CallbackOutcome::Completed;',
                                                   'return CallbackOutcome::Completed;'),
          'active dispatch exception became success or escaped'),
+        ('duplicate-running-admission', header.replace(
+            'if (!request->admission.compare_exchange_strong(expected, Request::Admission::Running))',
+            'if (!request->admission.compare_exchange_strong(expected, Request::Admission::Running) && '
+            'expected != Request::Admission::Running)'),
+         'duplicate dispatch replayed running action'),
     ]
 shim = out / 'shims/video_core/acknowledged_callback.h';shim.parent.mkdir(parents=True, exist_ok=True)
 for name, changed, expected in controls:
     assert changed != header
     try:
         shim.write_text(changed);mutant = compile_source(name)
-        result = subprocess.run([str(mutant), 'active' if name == 'early-exception-return' else 'all'], capture_output=True, text=True, timeout=15)
+        case = 'duplicate' if name == 'duplicate-running-admission' else ('active' if name == 'early-exception-return' else 'all')
+        result = subprocess.run([str(mutant), case], capture_output=True, text=True, timeout=15)
         log = result.stdout + result.stderr;(out / (name + '.log')).write_text(log)
         assert result.returncode != 0 and 'FAIL ' + expected in log, (name, log)
     finally:

@@ -1,5 +1,16 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: synchronized morning commits and duplicate callback proof
+
+Fast-forwarded seven remote morning commits to b6d1f03b65 without conflicts.
+The dispatch regression now also invokes a retained closure copy while its
+original action is Running, then throws. Neither replay nor early completion
+acknowledgement is permitted. Both successful/throwing originals pass three
+repetitions; a new precise mutation rejects admission of an already Running copy.
+No production change was needed for this boundary. See
+[local continuation](M4_F3_OCT23_LOCAL_CONTINUATION.md) for validation and limits.
+Main is unchanged; all THREE phases remain incomplete and guest admission Unknown.
+
 ## 2026-10-23: morning checkpoint — exceptional dispatch return
 
 Continued from the clean, remotely matching 0bb6abcc71. Two new deterministic
