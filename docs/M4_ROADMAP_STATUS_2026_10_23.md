@@ -46,6 +46,11 @@ to release backing.
 
 ## Recent concrete progress
 
+- [Synchronous host1x Submit closure](M4_P2_HOST1X_SUBMIT_CLOSURE.md) now refuses
+  closed common VIC/NVDEC submissions before effects, drains admitted bodies
+  before managed writes and quarantines partial failure. Other device, alias,
+  mapping and native-completion boundaries remain separate.
+
 - [AudioManager callback closure](M4_P2_AUDIO_CALLBACK_CLOSURE.md) now pauses
   callback sweeps outside the event mutex, drains them before managed writes,
   and composes atomic resume and failure quarantine. Device/sink callbacks,

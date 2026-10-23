@@ -50,6 +50,8 @@ variants += [('omit-audio-render-drain',source.replace('    const auto audio = a
     '    const auto audio = D::DrainedSubset;'),'cohort must join admitted audio render cycles')]
 variants += [('omit-audio-callback-drain',source.replace('    const auto callbacks = audio_callbacks->Poll();',
     '    const auto callbacks = D::DrainedSubset;'),'cohort must join admitted audio callbacks')]
+variants += [('omit-host1x-submit-drain',source.replace('    const auto submits = host1x_submits->Poll();',
+    '    const auto submits = D::DrainedSubset;'),'cohort must join admitted host1x submits')]
 # The publication mutant must reach an early halt assertion, before producer exit.
 variants[2]=(variants[2][0],variants[2][1], 'writer.backend.requests==0')
 variants += [
@@ -66,6 +68,7 @@ release=('    Common::ProducerDrain::ResumeBatch batch;\n'
              '    if (!execution->AppendCancellation(batch) || !batch.Add(publication) ||\n'
              '        !audio_render || !batch.Add(*audio_render) ||\n'
              '        !audio_callbacks || !batch.Add(*audio_callbacks) ||\n'
+             '        !host1x_submits || !batch.Add(*host1x_submits) ||\n'
              '        !managed_writes || !batch.Add(*managed_writes) || !batch.Commit()) {\n'
          '        Quarantine(); return false;\n    }\n')
 assert source.count(reservation)==1 and source.count(release)==1
@@ -84,8 +87,11 @@ variants += [('omit-audio-render-from-batch', source.replace('!batch.Add(*audio_
               'cohort cancellation must restore audio rendering')]
 variants += [('omit-audio-callbacks-from-batch', source.replace('!batch.Add(*audio_callbacks)', 'false'),
               'cohort cancellation must restore audio callbacks')]
+variants += [('omit-host1x-submits-from-batch', source.replace('!batch.Add(*host1x_submits)', 'false'),
+              'cohort cancellation must restore host1x submits')]
 legacy=('    if (!execution->CancelNoEffects() || !publication.ResumeNoEffects() ||\n'
         '        !audio_render->ResumeNoEffects() || !audio_callbacks->ResumeNoEffects() ||\n'
+        '        !host1x_submits->ResumeNoEffects() ||\n'
         '        !managed_writes->ResumeNoEffects()) {\n'
         '        Quarantine(); return false;\n    }\n')
 variants += [('sequential-cohort-release',source.replace(release,legacy),

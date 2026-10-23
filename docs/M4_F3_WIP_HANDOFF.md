@@ -1,5 +1,17 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: synchronous VIC/NVDEC Submit closure
+
+The shared nvhost_nvdec_common Submit body now retains a Kernel-owned producer
+entry through command reads, synchronous CDma dispatch and local response
+serialization. Closed admission returns Busy before effects. Partial prefixes,
+refused suffixes and exceptions after an effect boundary seal before count exit.
+Cohort drains the domain before managed writes and composes atomic cancellation.
+Three focused suites, 27 exact controls and five Windows production objects
+pass; see [protocol and evidence](M4_P2_HOST1X_SUBMIT_CLOSURE.md).
+This is not all public VIC/host1x routes, mapping protection, native completion
+or durable Unknown owner retention. P2 remains incomplete; Guest admission Unknown.
+
 ## 2026-10-23: AudioManager input/output callback closure
 
 AudioManager callback sweeps now enter a Kernel-shared domain outside the event

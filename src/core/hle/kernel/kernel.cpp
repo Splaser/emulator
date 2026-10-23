@@ -815,6 +815,8 @@ struct KernelCore::Impl {
         std::make_shared<Common::ProducerDrain>();
     std::shared_ptr<Common::ProducerDrain> audio_callbacks =
         std::make_shared<Common::ProducerDrain>();
+    std::shared_ptr<Common::ProducerDrain> host1x_submits =
+        std::make_shared<Common::ProducerDrain>();
 
     // OS wrapper publication list, not an exhaustive KProcess/backing owner census.
     std::mutex process_list_lock;
@@ -1347,6 +1349,9 @@ const std::shared_ptr<Common::ProducerDrain>& KernelCore::AudioRenderDomain() co
 }
 const std::shared_ptr<Common::ProducerDrain>& KernelCore::AudioCallbackDomain() const {
     return impl->audio_callbacks;
+}
+const std::shared_ptr<Common::ProducerDrain>& KernelCore::Host1xSubmitDomain() const {
+    return impl->host1x_submits;
 }
 
 void KernelCore::ShutdownCores() {

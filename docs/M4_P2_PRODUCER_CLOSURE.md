@@ -4,6 +4,10 @@ Date: 2026-10-23 (Asia/Singapore). Baseline: `1157bf0d04`.
 
 ## Phase status and ownership boundary
 
+The [synchronous host1x Submit closure](M4_P2_HOST1X_SUBMIT_CLOSURE.md) now counts
+the common VIC/NVDEC ioctl, refuses closed submissions before effects and seals
+partial failures. Other public device/mapping/alias/native routes remain open.
+
 Further follow-up: [AudioManager callback closure](M4_P2_AUDIO_CALLBACK_CLOSURE.md)
 also drains its input/output callback sweeps before managed writes close. Direct
 service calls, sink/backend callbacks and other independent producers remain open.
@@ -23,7 +27,7 @@ one counter.
 | PhysicalCore / checked Dynarmic execution | Existing real-backend stop prerequisite, retained Process roster and continuous cold publication gates; managed write closure acquired only afterward | Complete integration with all fastmem stores and outstanding host continuations; local fixture is not native acceptance |
 | NCE native stores / signal interpreter | Explicitly unsupported for this managed domain in HAS_NCE builds; domain sealed and closure unavailable | Safe native halt and signal-store protocol; no new signal waiting/exception/parking is added |
 | Audio/services using ordinary Memory WriteBlockUnsafe etc. | Individual Memory calls count on non-NCE builds; SystemManager render cycles and AudioManager callback sweeps now have sustained pause/drain domains | Direct service calls, sink/backend callbacks, Opus and other worker/queued routes remain independent; these subsets do not stop whole services |
-| VIC/host1x/device mappings | Separate device memory interfaces remain independent | Whole producer stop and mapping/alias ownership |
+| VIC/host1x/device mappings | Shared synchronous VIC/NVDEC ioctl Submit now has a retained closure and partial-effect sealing; separate public device/mapping APIs remain independent | Whole producer stop, decoder/device lifetime and mapping/alias ownership |
 | Raw GetPointer/GetSpan, external maps, direct prepared-page stores | Explicitly outside this facade domain | Inventory and revoke/retain every escaped borrow; closure must span its actual use |
 | GPU queued/recorded transfer and shader/image writers | Existing terminal ingress, checked callback/submission and fence failure repairs | A sustained reversible GPU stop and visibility proof across every writer |
 | Unknown backing/alias/native resource owners | Scheduler retains checked holders; premature host-pending retirement fixed | Complete durable owner bundle including allocator/device and backing/alias protection, not fence handles alone |

@@ -38,6 +38,7 @@ ProcessCohortStop::Result ProcessCohortStop::Poll() {
     if (stopped) {
         if (!audio_render || audio_render->Poll() != D::DrainedSubset ||
             !audio_callbacks || audio_callbacks->Poll() != D::DrainedSubset ||
+            !host1x_submits || host1x_submits->Poll() != D::DrainedSubset ||
             !managed_writes || managed_writes->Poll() != D::DrainedSubset) {
             Quarantine(); return Result::Unknown;
         }
@@ -84,6 +85,14 @@ ProcessCohortStop::Result ProcessCohortStop::Poll() {
     const auto callbacks = audio_callbacks->Poll();
     if (callbacks == D::Unknown) { Quarantine(); return Result::Unknown; }
     if (callbacks == D::Pending) return Result::Pending;
+    if (!host1x_submits) {
+        auto closure = kernel.Host1xSubmitDomain()->TryClose(remaining + 1);
+        if (!closure) { Quarantine(); return Result::Unknown; }
+        host1x_submits.emplace(std::move(*closure));
+    }
+    const auto submits = host1x_submits->Poll();
+    if (submits == D::Unknown) { Quarantine(); return Result::Unknown; }
+    if (submits == D::Pending) return Result::Pending;
     // Admitted render cycles must finish their Memory writes before that
     // domain closes. New cycles pause outside all service/list locks.
     if (!managed_writes) {
@@ -108,6 +117,7 @@ bool ProcessCohortStop::CancelNoEffects() {
     if (!execution->AppendCancellation(batch) || !batch.Add(publication) ||
         !audio_render || !batch.Add(*audio_render) ||
         !audio_callbacks || !batch.Add(*audio_callbacks) ||
+        !host1x_submits || !batch.Add(*host1x_submits) ||
         !managed_writes || !batch.Add(*managed_writes) || !batch.Commit()) {
         Quarantine(); return false;
     }
@@ -121,6 +131,7 @@ void ProcessCohortStop::Quarantine() {
     if (execution) execution->Quarantine();
     if (audio_render) audio_render->Quarantine();
     if (audio_callbacks) audio_callbacks->Quarantine();
+    if (host1x_submits) host1x_submits->Quarantine();
     if (managed_writes) managed_writes->Quarantine();
     initialization.Quarantine(); publication.Quarantine(); creation.Quarantine();
 }

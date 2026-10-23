@@ -93,6 +93,8 @@ public:
             std::make_shared<Common::ProducerDrain>();
         std::shared_ptr<Common::ProducerDrain> audio_callbacks=
             std::make_shared<Common::ProducerDrain>();
+        std::shared_ptr<Common::ProducerDrain> host1x_submits=
+            std::make_shared<Common::ProducerDrain>();
     };
     Core::System system;
     std::unique_ptr<Impl> impl=std::make_unique<Impl>();
@@ -109,6 +111,7 @@ public:
     const std::shared_ptr<Common::ProducerDrain>& ManagedGuestWriteDomain() const {return impl->managed_guest_writes;}
     const std::shared_ptr<Common::ProducerDrain>& AudioRenderDomain() const {return impl->audio_render;}
     const std::shared_ptr<Common::ProducerDrain>& AudioCallbackDomain() const {return impl->audio_callbacks;}
+    const std::shared_ptr<Common::ProducerDrain>& Host1xSubmitDomain() const {return impl->host1x_submits;}
 };
 struct PageTable {
     Common::PageTable table;
