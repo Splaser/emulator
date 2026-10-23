@@ -53,13 +53,14 @@ void Require(bool value,const char* reason) {
     if(!value) {std::cerr<<"FAIL "<<reason<<"\n";std::cerr.flush();std::_Exit(91);}
 }
 namespace vk {
-struct Exception {int result;explicit Exception(int r):result{r} {}};
+struct Exception {int result;explicit Exception(int r):result{r} {} int GetResult() const {return result;}};
 struct Fence {
     int id=0,result=0;inline static std::atomic<int> resets=0;
+    inline static int reset_result=VK_SUCCESS;
     Fence()=default;Fence(int i,int r):id{i},result{r} {}
     Fence(Fence&& other) noexcept:id{std::exchange(other.id,0)},result{other.result} {}
     Fence& operator=(Fence&& other) noexcept {id=std::exchange(other.id,0);result=other.result;return *this;}
-    int Wait() {return result;}void Reset() {++resets;}
+    int Wait() {return result;}void Reset() {++resets;if(reset_result!=VK_SUCCESS)throw Exception(reset_result);}
 };
 }
 namespace Common {
@@ -80,28 +81,33 @@ struct Master {
     bool IsFree(u64 tick) {return gpu_tick.load()>=tick;}void Refresh() {}
 ''' + wait + '\n' + worker + r'''
 };
-void Check(int result) {
-    Master master;vk::Fence::resets=0;
+void Check(int result,int reset_error=VK_SUCCESS) {
+    Master master;vk::Fence::resets=0;vk::Fence::reset_result=reset_error;
+    const int outcome=result!=VK_SUCCESS?result:reset_error;
     master.wait_queue.emplace(7,vk::Fence{17,result});
     // Later submissions must not leap over an unknown earlier completion.
-    if(result!=VK_SUCCESS)master.wait_queue.emplace(8,vk::Fence{18,VK_SUCCESS});
+    if(outcome!=VK_SUCCESS)master.wait_queue.emplace(8,vk::Fence{18,VK_SUCCESS});
     auto first=std::async(std::launch::async,[&] {
         try {master.Wait(7);return VK_SUCCESS;}catch(const vk::Exception& e) {return e.result;}
     });
     auto second=std::async(std::launch::async,[&] {
         try {master.Wait(7);return VK_SUCCESS;}catch(const vk::Exception& e) {return e.result;}
     });
-    std::jthread worker([&](std::stop_token token) {master.WaitThread(token);});
+    std::jthread worker([&](std::stop_token token) {
+        try {master.WaitThread(token);}catch(...) {
+            Require(false,"native fence reset exception escaped completion worker");
+        }
+    });
     Require(first.wait_for(3s)==std::future_status::ready && second.wait_for(3s)==std::future_status::ready,
             "native fence failure stranded completion waiters");
     const auto first_result=first.get(),second_result=second.get();
     worker.request_stop();master.wait_cv.notify_all();worker.join();
-    if(result==VK_SUCCESS) {
+    if(outcome==VK_SUCCESS) {
         Require(first_result==VK_SUCCESS && second_result==VK_SUCCESS && master.gpu_tick==7 &&
                 vk::Fence::resets==1 && master.free_queue.size()==1,"successful native fence failed to retire");
     } else {
-        Require(first_result==result && second_result==result,"failed native fence reported completion");
-        Require(master.gpu_tick==0 && vk::Fence::resets==0 && master.free_queue.empty(),
+        Require(first_result==outcome && second_result==outcome,"failed native fence reported completion");
+        Require(master.gpu_tick==0 && vk::Fence::resets==(reset_error!=VK_SUCCESS?1:0) && master.free_queue.empty(),
                 "failed native fence advanced tick or recycled resource");
         Require(master.failed_wait && master.failed_wait->second.id==17 && master.wait_queue.size()==1,
                 "unknown native fence or queued suffix lost ownership");
@@ -109,7 +115,7 @@ void Check(int result) {
         std::cout<<"PASS native fence failure wakes waiters and retains unknown prefix/suffix\n";
     }
 }
-int main() {Check(VK_SUCCESS);Check(VK_ERROR_DEVICE_LOST);Check(VK_TIMEOUT);}
+int main() {Check(VK_SUCCESS);Check(VK_ERROR_DEVICE_LOST);Check(VK_TIMEOUT);Check(VK_SUCCESS,VK_ERROR_DEVICE_LOST);}
 '''
 source = '#include <utility>\n' + source
 flags = [a.cxx, '-std=c++23', '-O1', '-pthread', '-Wall', '-Wextra', '-Werror']
@@ -128,7 +134,7 @@ for i in range(a.repeat):
     result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=12)
     log = result.stdout + result.stderr
     (out / f'positive-{i}.log').write_text(log)
-    assert result.returncode == 0 and log.count('PASS native fence failure') == 2, log
+    assert result.returncode == 0 and log.count('PASS native fence failure') == 3, log
 print(f'PASS actual native fence completion bodies ({a.repeat} repetitions)', flush=True)
 controls = [
     ('ignore-wait-result', source.replace('if (result != VK_SUCCESS) {', 'if (false) {'),
@@ -136,6 +142,9 @@ controls = [
     ('recycle-unknown-fence', source.replace('failed_wait.emplace(host_tick, std::move(fence));',
         'fence.Reset();free_queue.push_back(std::move(fence));'),
      'failed native fence advanced tick or recycled resource'),
+    ('reset-exception-escapes', source.replace(
+        'result = error.GetResult();', 'throw;'),
+     'native fence reset exception escaped completion worker'),
 ]
 for name, changed, expected in controls:
     assert changed != source

@@ -1,5 +1,16 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: native fence Reset exception is acknowledged failure
+
+A successful native wait followed by a Reset exception escaped the completion
+worker and stranded waiters. Reset's vk::Exception now joins the existing
+terminal failure path, retaining its fence/queued suffix and waking waiters with
+the original error, without tick publication or reuse. Four result variants pass
+three repetitions and three exact mutation controls. See
+[reset failure and remaining submit transaction](M4_F3_NATIVE_FENCE_RESET_FAILURE.md).
+Queue acceptance followed by wait_queue allocation failure remains an explicit
+ownership gap; no whole-GPU Unknown registry or guest admission is established.
+
 ## 2026-10-23: native fence fallback failure cannot retire resources
 
 The fence fallback ignored vkWaitForFences results before Reset/recycle and

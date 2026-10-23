@@ -221,7 +221,17 @@ void MasterSemaphore::WaitThread(std::stop_token token) {
             wait_queue.pop();
         }
 
-        const auto result = fence.Wait();
+        auto result = fence.Wait();
+        if (result == VK_SUCCESS) {
+            try {
+                fence.Reset();
+            } catch (const vk::Exception& error) {
+                // Native completion does not certify successful fence reuse.
+                // Keep the handle and wake waiters rather than terminating
+                // the helper thread with their targets permanently pending.
+                result = error.GetResult();
+            }
+        }
         if (result != VK_SUCCESS) {
             failed_wait.emplace(host_tick, std::move(fence));
             {
@@ -233,8 +243,6 @@ void MasterSemaphore::WaitThread(std::stop_token token) {
             free_cv.notify_all();
             return;
         }
-        fence.Reset();
-
         {
             std::scoped_lock lock{free_mutex};
             free_queue.push_front(std::move(fence));
