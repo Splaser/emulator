@@ -16,11 +16,12 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--boost-include', type=Path)
 p.add_argument('--repeat', type=int, default=10)
+p.add_argument('--output-dir', type=Path)
 a = p.parse_args()
 if a.repeat < 1:
     p.error('--repeat must be positive')
 root = Path(__file__).resolve().parents[2]
-out = root / '.diagnostics/m3b-first-registration'
+out = (a.output_dir or root / '.diagnostics/m3b-first-registration').resolve()
 stubs = out / 'stubs'
 for directory in ['common', 'core', 'fmt', 'video_core/host1x']:
     (stubs / directory).mkdir(parents=True, exist_ok=True)
@@ -71,7 +72,7 @@ def method(path, marker, closing='\n    }'):
 tree = ast.parse(read('tools/physical_coherency_tests/run_cpu_mapping_tests.py'))
 head = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
             and any(isinstance(t, ast.Name) and t.id == 'head' for t in n.targets))
-cpu = '#include <bit>\n#include "common/swap.h"\n#define LOG_ERROR(...) ((void)0)\n#define CITRON_PROFILE_MEM_SCOPE(...) ((void)0)\n' + head.replace(
+cpu = '#include <bit>\n#include "core/managed_guest_writes.h"\n#include "common/swap.h"\n#define LOG_ERROR(...) ((void)0)\n#define CITRON_PROFILE_MEM_SCOPE(...) ((void)0)\n' + head.replace(
     'using Core::Memory::PreparedCpuPage;', 'using Core::Memory::PreparedCpuPage;\nusing Core::Memory::ScopedCpuWrite;')
 cpu += r'''
     size_t legacy_pointer_lookups=0,legacy_callbacks=0;
@@ -99,6 +100,7 @@ cpu += '''
 namespace Core::Memory {
 struct Memory {
     Cpu* impl;
+    ManagedGuestWrites managed_writes{std::make_shared<Common::ProducerDrain>()};
     std::shared_ptr<CpuWriteOwner> controlled_owner{std::make_shared<CpuWriteOwner>(this)};
     void SealControlledCpuWrites();
     ~Memory() { SealControlledCpuWrites(); }

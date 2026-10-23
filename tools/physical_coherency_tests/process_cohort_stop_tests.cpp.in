@@ -55,6 +55,7 @@ int main() {
         assert(moved->Poll()==R::BackendsStopped && moved->CancelNoEffects());
         assert(kernel.ProcessPublicationDomain()->TryEnter() &&
                "successful cohort cancellation must restore publication");
+        assert(kernel.ManagedGuestWriteDomain()->TryEnter() && "cohort cancellation must restore managed writes");
         auto next=caller.TryStopProcessCohort(64);assert(next);
         assert(!moved->CancelNoEffects());
         assert(next->Poll()==R::BackendsStopped && next->CancelNoEffects());
@@ -141,6 +142,24 @@ int main() {
         bool refused=false;
         try {Kernel::KProcess late{kernel};} catch(const Kernel::ProcessOwnerRoster::CreationRefused&) {refused=true;}
         assert(refused);
+    }
+    { // Shared managed writers drain after backend stop and resume in the same batch.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto writer=kernel.ManagedGuestWriteDomain()->EnterCold();assert(writer);
+        auto stop=caller.TryStopProcessCohort(64);assert(stop);
+        assert(stop->Poll()==R::Pending && "cohort must join active managed writes");
+        assert(!kernel.ManagedGuestWriteDomain()->TryEnter() && "cohort must close shared managed writes");
+        writer.reset();
+        assert(stop->Poll()==R::BackendsStopped);
+        assert(stop->GuestBackingAdmission()==Common::ProducerDrain::Result::Unknown);
+        assert(stop->CancelNoEffects());
+        assert(kernel.ManagedGuestWriteDomain()->TryEnter() && "cohort cancellation must restore managed writes");
+    }
+    { // A Seal after successful stop cannot yield a stale stopped receipt.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto stop=caller.TryStopProcessCohort(64);assert(stop && stop->Poll()==R::BackendsStopped);
+        kernel.ManagedGuestWriteDomain()->Seal();
+        assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
     }
     std::cout<<"PASS sustained process cohort: creation/init/cold publication held, real owner retention "
                  "before backend halt, Unknown and stale-cancel isolation; independent cache/service/GPU routes remain open\n";

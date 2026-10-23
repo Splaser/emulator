@@ -28,6 +28,11 @@ producer and native ownership coverage dominates the correctness risk.
 
 ## M4: the three actual acceptance phases
 
+The subsequent [P2 producer-closure update](M4_P2_PRODUCER_CLOSURE.md) adds the
+shared non-NCE Memory facade write domain and atomic cohort cancellation. It
+narrows the managed-write gap but does not close NCE/service/raw/native-owner
+coverage or complete P2. HAS_NCE explicitly refuses this domain's closure.
+
 | Phase | Implemented prerequisites / evidence | Missing acceptance facts |
 | --- | --- | --- |
 | 1. Retained Process roster plus real execution drainage | Roster ownership, sustained cold creation/init/publication gates, cohort cancellation and checked backend integration slices are recorded | Complete continuous boundary over every relevant publisher/view; real execution halt and lifecycle composition across all supported paths |

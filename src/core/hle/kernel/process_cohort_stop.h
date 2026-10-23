@@ -7,7 +7,8 @@
 namespace Kernel {
 // Phase-one cohort prerequisite. Owned creation/initialization/cold publication
 // closures outlive capture and real backend drainage. NOT Guest Exclusion:
-// cache PTE changes, ordinary writes, services, NCE/raw aliases and GPU remain open.
+// Managed Memory facade writes close only after backends stop. Cache PTE changes,
+// services outside these writes, NCE/raw aliases and GPU remain independent.
 // Single orchestration thread; caller keeps System/Kernel/HostMemory facades alive.
 // No asynchronous GPU work can adopt this type or its BackendsStopped result.
 class ProcessCohortStop {
@@ -21,6 +22,7 @@ class ProcessCohortStop {
     Common::ProducerDrain::Closure publication;
     Common::ProducerDrain::Closure initialization;
     std::optional<ProcessExecutionStop> execution;
+    std::optional<Common::ProducerDrain::Closure> managed_writes;
     u32 remaining;
     std::thread::id owner_thread{std::this_thread::get_id()};
     bool unknown{}, released{}, stopped{};

@@ -15,6 +15,7 @@
 #include "core/guest_memory.h"
 #include "core/controlled_cpu_page.h"
 #include "core/controlled_mapping_publication.h"
+#include "core/managed_guest_writes.h"
 #include "core/hle/result.h"
 
 namespace Common {
@@ -608,6 +609,7 @@ private:
     [[nodiscard]] ControlledCpuWriteRequestPtr PrepareControlledWrite(
         Common::ProcessAddress, ControlledCpuWriteRequest::Value);
     Core::System& system;
+    ManagedGuestWrites managed_writes;
     std::shared_ptr<CpuWriteOwner> controlled_owner{std::make_shared<CpuWriteOwner>(this)};
     ControlledMappingPublication mapping_publications;
 

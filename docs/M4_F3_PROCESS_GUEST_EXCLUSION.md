@@ -726,6 +726,11 @@ runtime acceptance for this integration is pending its exact-source Linux CI.
 
 ## Remaining roadmap: three phases
 
+The [2026-10-23 P2 coverage update](M4_P2_PRODUCER_CLOSURE.md) adds a shared
+non-NCE managed Memory write closure to the cohort. Prepared entries remain
+bounded. NCE/service/raw/GPU-owner coverage is still incomplete; these phases
+retain their original acceptance gates.
+
 1. **Roster plus real execution drainage — in progress.** Finish the continuous
    creation/initialization/publication ownership boundary and scheduler/lifecycle
    protocol. The sustained cold-route integration above does not close independent

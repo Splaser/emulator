@@ -35,7 +35,12 @@ ProcessCohortStop::Result ProcessCohortStop::Poll() {
     if (initialized == D::Unknown || published == D::Unknown) {
         Quarantine(); return Result::Unknown;
     }
-    if (stopped) return Result::BackendsStopped;
+    if (stopped) {
+        if (!managed_writes || managed_writes->Poll() != D::DrainedSubset) {
+            Quarantine(); return Result::Unknown;
+        }
+        return Result::BackendsStopped;
+    }
     if (!remaining) { Quarantine(); return Result::Unknown; }
     --remaining;
     if (initialized == D::Pending || published == D::Pending) return Result::Pending;
@@ -60,8 +65,17 @@ ProcessCohortStop::Result ProcessCohortStop::Poll() {
     if (result == Result::Unknown || !owners->IsCurrent()) {
         Quarantine(); return Result::Unknown;
     }
-    stopped = result == Result::BackendsStopped;
-    return result;
+    if (result != Result::BackendsStopped) return result;
+    if (!managed_writes) {
+        auto closure = kernel.ManagedGuestWriteDomain()->TryClose(remaining + 1);
+        if (!closure) { Quarantine(); return Result::Unknown; }
+        managed_writes.emplace(std::move(*closure));
+    }
+    const auto writes = managed_writes->Poll();
+    if (writes == D::Unknown) { Quarantine(); return Result::Unknown; }
+    if (writes == D::Pending) return Result::Pending;
+    stopped = true;
+    return Result::BackendsStopped;
 }
 bool ProcessCohortStop::CancelNoEffects() {
     if (Poll() != Result::BackendsStopped) return false;
@@ -71,7 +85,8 @@ bool ProcessCohortStop::CancelNoEffects() {
     auto reservation = creation.TryReserveCancel(std::addressof(*owners));
     if (!reservation) { Quarantine(); return false; }
     Common::ProducerDrain::ResumeBatch batch;
-    if (!execution->AppendCancellation(batch) || !batch.Add(publication) || !batch.Commit()) {
+    if (!execution->AppendCancellation(batch) || !batch.Add(publication) ||
+        !managed_writes || !batch.Add(*managed_writes) || !batch.Commit()) {
         Quarantine(); return false;
     }
     execution->released = true;
@@ -82,6 +97,7 @@ bool ProcessCohortStop::CancelNoEffects() {
 void ProcessCohortStop::Quarantine() {
     unknown = true;
     if (execution) execution->Quarantine();
+    if (managed_writes) managed_writes->Quarantine();
     initialization.Quarantine(); publication.Quarantine(); creation.Quarantine();
 }
 } // namespace Kernel

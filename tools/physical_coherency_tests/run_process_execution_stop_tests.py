@@ -5,13 +5,17 @@
 Native Dynarmic store-loop proof is a separate CTest. NCE remains unsupported.
 """
 import hashlib
+import argparse
 import json
 import os
 from pathlib import Path
 import subprocess
 
 root = Path(__file__).resolve().parents[2]
-out = root / '.diagnostics/m4-process-execution-stop'
+p = argparse.ArgumentParser(description=__doc__)
+p.add_argument('--output-dir', type=Path)
+a = p.parse_args()
+out = (a.output_dir or root / '.diagnostics/m4-process-execution-stop').resolve()
 stubs = out / 'stubs'
 (stubs / 'core/arm').mkdir(parents=True, exist_ok=True)
 (stubs / 'core/hle/kernel').mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,17 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: M4 P2 shared managed-write closure and cohort composition
+
+21 ordinary/prepared Memory facade write methods now enter a shared Kernel domain
+before Impl effects. Non-NCE closed calls explicitly refuse; normal contention
+does not drop stores. Cohort closes the domain after backend stop, waits for
+admitted calls, and resumes it in the same atomic ResumeBatch. Late Seal and
+Unknown remain fail-closed. HAS_NCE seals this unsupported domain and preserves
+existing signal-interpreter stores without adding signal waits/exceptions.
+See [P2 coverage, protocol and acceptance](M4_P2_PRODUCER_CLOSURE.md).
+P2 is NOT complete: real NCE/fastmem/service worker drains, escaped aliases and
+durable complete backing/native ownership remain blockers. Guest admission Unknown.
+
 ## 2026-10-23: checked write host-pending owners block idle retirement
 
 The actual retirement body could release checked write holders while their host

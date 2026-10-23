@@ -809,6 +809,8 @@ struct KernelCore::Impl {
     ProcessOwnerRoster process_owners;
     std::shared_ptr<Common::ProducerDrain> process_publications =
         std::make_shared<Common::ProducerDrain>();
+    std::shared_ptr<Common::ProducerDrain> managed_guest_writes =
+        std::make_shared<Common::ProducerDrain>();
 
     // OS wrapper publication list, not an exhaustive KProcess/backing owner census.
     std::mutex process_list_lock;
@@ -1332,6 +1334,9 @@ std::optional<ProcessOwnerRoster::CreationClosure> KernelCore::TryCloseProcessCr
 }
 const std::shared_ptr<Common::ProducerDrain>& KernelCore::ProcessPublicationDomain() const {
     return impl->process_publications;
+}
+const std::shared_ptr<Common::ProducerDrain>& KernelCore::ManagedGuestWriteDomain() const {
+    return impl->managed_guest_writes;
 }
 
 void KernelCore::ShutdownCores() {

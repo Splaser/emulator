@@ -968,7 +968,8 @@ struct Memory::Impl {
 };
 
 Memory::Memory(Core::System& system_, MappingPublicationMode mappings)
-    : system{system_}, mapping_publications{mappings == MappingPublicationMode::Controlled,
+    : system{system_}, managed_writes{system_.Kernel().ManagedGuestWriteDomain()},
+      mapping_publications{mappings == MappingPublicationMode::Controlled,
                                           system_.Kernel().ProcessPublicationDomain()} {
     impl = std::make_unique<Impl>(system);
 }
@@ -984,7 +985,7 @@ Memory::~Memory() {
     SealControlledMappings();
 }
 
-Memory::Memory(Memory&& other) : system{other.system} {
+Memory::Memory(Memory&& other) : system{other.system}, managed_writes{other.managed_writes} {
     auto process_publication = other.mapping_publications.BeginProcessOnly();
     other.SealControlledCpuWrites(); // queued requests never migrate their execution identity
     other.SealControlledMappings();
@@ -1162,38 +1163,58 @@ u64 Memory::Read64(const Common::ProcessAddress addr) {
 }
 
 void Memory::Write8(Common::ProcessAddress addr, u8 data) {
+    auto producer = managed_writes.Enter();
     impl->Write<u8>(addr, data);
 }
 
 void Memory::Write16(Common::ProcessAddress addr, u16 data) {
+    auto producer = managed_writes.Enter();
     impl->Write<u16_le>(addr, data);
 }
 
 void Memory::Write32(Common::ProcessAddress addr, u32 data) {
+    auto producer = managed_writes.Enter();
     impl->Write<u32_le>(addr, data);
 }
 
 void Memory::Write64(Common::ProcessAddress addr, u64 data) {
+    auto producer = managed_writes.Enter();
     impl->Write<u64_le>(addr, data);
 }
 
 PreparedCpuWriteResult Memory::WritePrepared8(const PreparedCpuPage& page,
                                              Common::ProcessAddress addr, u8 data) {
+    auto producer = managed_writes.TryEnter();
+    if constexpr (ManagedGuestWrites::TrackingSupported()) {
+        if (!producer) return PreparedCpuWriteResult::Busy;
+    }
     return impl->Write<u8>(page, addr, data);
 }
 
 PreparedCpuWriteResult Memory::WritePrepared16(const PreparedCpuPage& page,
                                               Common::ProcessAddress addr, u16 data) {
+    auto producer = managed_writes.TryEnter();
+    if constexpr (ManagedGuestWrites::TrackingSupported()) {
+        if (!producer) return PreparedCpuWriteResult::Busy;
+    }
     return impl->Write<u16_le>(page, addr, data);
 }
 
 PreparedCpuWriteResult Memory::WritePrepared32(const PreparedCpuPage& page,
                                               Common::ProcessAddress addr, u32 data) {
+    auto producer = managed_writes.TryEnter();
+    if constexpr (ManagedGuestWrites::TrackingSupported()) {
+        if (!producer) return PreparedCpuWriteResult::Busy;
+    }
     return impl->Write<u32_le>(page, addr, data);
 }
 
 PreparedCpuWriteResult Memory::WritePrepared64(const PreparedCpuPage& page,
                                               Common::ProcessAddress addr, u64 data) {
+    auto producer = managed_writes.TryEnter();
+    if constexpr (ManagedGuestWrites::TrackingSupported()) {
+        if (!producer) return PreparedCpuWriteResult::Busy;
+    }
     return impl->Write<u64_le>(page, addr, data);
 }
 
@@ -1201,6 +1222,10 @@ PreparedCpuWriteResult
 Memory::WritePreparedCached8(const PreparedCpuPage& page,
                              Common::PhysicalRegistrationBundle::CachedWrite& write,
                              Common::ProcessAddress addr, u8 data) {
+    auto producer = managed_writes.TryEnter();
+    if constexpr (ManagedGuestWrites::TrackingSupported()) {
+        if (!producer) return PreparedCpuWriteResult::Busy;
+    }
     return impl->WriteCached<u8>(page, write, addr, data);
 }
 
@@ -1208,6 +1233,10 @@ PreparedCpuWriteResult
 Memory::WritePreparedCached16(const PreparedCpuPage& page,
                               Common::PhysicalRegistrationBundle::CachedWrite& write,
                               Common::ProcessAddress addr, u16 data) {
+    auto producer = managed_writes.TryEnter();
+    if constexpr (ManagedGuestWrites::TrackingSupported()) {
+        if (!producer) return PreparedCpuWriteResult::Busy;
+    }
     return impl->WriteCached<u16_le>(page, write, addr, data);
 }
 
@@ -1215,6 +1244,10 @@ PreparedCpuWriteResult
 Memory::WritePreparedCached32(const PreparedCpuPage& page,
                               Common::PhysicalRegistrationBundle::CachedWrite& write,
                               Common::ProcessAddress addr, u32 data) {
+    auto producer = managed_writes.TryEnter();
+    if constexpr (ManagedGuestWrites::TrackingSupported()) {
+        if (!producer) return PreparedCpuWriteResult::Busy;
+    }
     return impl->WriteCached<u32_le>(page, write, addr, data);
 }
 
@@ -1222,6 +1255,10 @@ PreparedCpuWriteResult
 Memory::WritePreparedCached64(const PreparedCpuPage& page,
                               Common::PhysicalRegistrationBundle::CachedWrite& write,
                               Common::ProcessAddress addr, u64 data) {
+    auto producer = managed_writes.TryEnter();
+    if constexpr (ManagedGuestWrites::TrackingSupported()) {
+        if (!producer) return PreparedCpuWriteResult::Busy;
+    }
     return impl->WriteCached<u64_le>(page, write, addr, data);
 }
 
@@ -1258,22 +1295,27 @@ PreparedCpuWriteResult Memory::WriteOrdinaryControlled64(
 }
 
 bool Memory::WriteExclusive8(Common::ProcessAddress addr, u8 data, u8 expected) {
+    auto producer = managed_writes.Enter();
     return impl->WriteExclusive8(addr, data, expected);
 }
 
 bool Memory::WriteExclusive16(Common::ProcessAddress addr, u16 data, u16 expected) {
+    auto producer = managed_writes.Enter();
     return impl->WriteExclusive16(addr, data, expected);
 }
 
 bool Memory::WriteExclusive32(Common::ProcessAddress addr, u32 data, u32 expected) {
+    auto producer = managed_writes.Enter();
     return impl->WriteExclusive32(addr, data, expected);
 }
 
 bool Memory::WriteExclusive64(Common::ProcessAddress addr, u64 data, u64 expected) {
+    auto producer = managed_writes.Enter();
     return impl->WriteExclusive64(addr, data, expected);
 }
 
 bool Memory::WriteExclusive128(Common::ProcessAddress addr, u128 data, u128 expected) {
+    auto producer = managed_writes.Enter();
     return impl->WriteExclusive128(addr, data, expected);
 }
 
@@ -1301,20 +1343,24 @@ u8* Memory::GetSpan(const VAddr src_addr, const std::size_t size) {
 
 bool Memory::WriteBlock(const Common::ProcessAddress dest_addr, const void* src_buffer,
                         const std::size_t size) {
+    auto producer = managed_writes.Enter();
     return impl->WriteBlock(dest_addr, src_buffer, size);
 }
 
 bool Memory::WriteBlockUnsafe(const Common::ProcessAddress dest_addr, const void* src_buffer,
                               const std::size_t size) {
+    auto producer = managed_writes.Enter();
     return impl->WriteBlockUnsafe(dest_addr, src_buffer, size);
 }
 
 bool Memory::CopyBlock(Common::ProcessAddress dest_addr, Common::ProcessAddress src_addr,
                        const std::size_t size) {
+    auto producer = managed_writes.Enter();
     return impl->CopyBlock(dest_addr, src_addr, size);
 }
 
 bool Memory::ZeroBlock(Common::ProcessAddress dest_addr, const std::size_t size) {
+    auto producer = managed_writes.Enter();
     return impl->ZeroBlock(dest_addr, size);
 }
 

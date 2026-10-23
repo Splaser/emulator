@@ -1213,6 +1213,7 @@ add_library(core STATIC
     memory.cpp
     controlled_cpu_page.h
     controlled_mapping_publication.h
+    managed_guest_writes.h
     memory.h
     memory/cheat_engine.cpp
     memory/cheat_engine.h

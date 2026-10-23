@@ -69,7 +69,7 @@ flags = [a.cxx, '-std=c++23', '-O1', '-DNDEBUG', '-DARCHITECTURE_x86_64',
 # Include real pinned renderer dependencies; no generated fixture headers.
 for name in ('Vulkan-Headers/include', 'VulkanMemoryAllocator/include',
              'Vulkan-Utility-Libraries/include', 'SPIRV-Headers/include',
-             'sirit/include', 'unordered_dense/include'):
+             'sirit/include', 'unordered_dense/include', 'dynarmic/src'):
     path = root / 'externals' / name
     if path.is_dir():
         flags += ['-isystem', str(path)]

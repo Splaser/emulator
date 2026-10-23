@@ -2,15 +2,20 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Production cohort/roster/core bodies; injected kernel/backend/Memory collaborators."""
 import hashlib
+import argparse
 import json
 import os
 from pathlib import Path
 import subprocess
 
 root=Path(__file__).resolve().parents[2]
-out=root/'.diagnostics/m4-process-cohort-stop'
+p=argparse.ArgumentParser(description=__doc__)
+p.add_argument('--output-dir',type=Path)
+p.add_argument('--prerequisite-dir',type=Path)
+a=p.parse_args()
+out=(a.output_dir or root/'.diagnostics/m4-process-cohort-stop').resolve()
 out.mkdir(parents=True,exist_ok=True)
-prerequisite=root/'.diagnostics/m4-process-execution-stop/production.cpp'
+prerequisite=(a.prerequisite_dir or root/'.diagnostics/m4-process-execution-stop')/'production.cpp'
 assert prerequisite.exists(), 'Run run_process_execution_stop_tests.py first'
 head=prerequisite.read_text().split('int main() {',1)[0]
 head='#include "core/hle/kernel/process_cohort_stop.h"\n#include "core/controlled_mapping_publication.h"\n'+head
@@ -39,6 +44,8 @@ variants=[('production',source,None),
         'entire owner cohort must be retained before halt request'),
     ('omit-publication-drain',source.replace('    const auto published = publication.Poll();',
         '    const auto published = D::DrainedSubset;'),None)]
+variants += [('omit-managed-write-drain',source.replace('    const auto writes = managed_writes->Poll();',
+    '    const auto writes = D::DrainedSubset;'),'cohort must join active managed writes')]
 # The publication mutant must reach an early halt assertion, before producer exit.
 variants[2]=(variants[2][0],variants[2][1], 'writer.backend.requests==0')
 variants += [
@@ -52,7 +59,8 @@ variants += [
 reservation=('    auto reservation = creation.TryReserveCancel(std::addressof(*owners));\n'
              '    if (!reservation) { Quarantine(); return false; }\n')
 release=('    Common::ProducerDrain::ResumeBatch batch;\n'
-         '    if (!execution->AppendCancellation(batch) || !batch.Add(publication) || !batch.Commit()) {\n'
+             '    if (!execution->AppendCancellation(batch) || !batch.Add(publication) ||\n'
+             '        !managed_writes || !batch.Add(*managed_writes) || !batch.Commit()) {\n'
          '        Quarantine(); return false;\n    }\n')
 assert source.count(reservation)==1 and source.count(release)==1
 variants += [('reserve-roster-after-reopening', source.replace(reservation,'').replace(
@@ -64,7 +72,10 @@ variants += [('omit-reserved-cohort-revision',source.replace(revision,'    (void
               'a changed cohort must refuse cancellation before reopening')]
 variants += [('omit-publication-from-batch', source.replace('!batch.Add(publication)', 'false'),
               'successful cohort cancellation must restore publication')]
-legacy=('    if (!execution->CancelNoEffects() || !publication.ResumeNoEffects()) {\n'
+variants += [('omit-managed-writes-from-batch', source.replace('!batch.Add(*managed_writes)', 'false'),
+              'cohort cancellation must restore managed writes')]
+legacy=('    if (!execution->CancelNoEffects() || !publication.ResumeNoEffects() ||\n'
+        '        !managed_writes->ResumeNoEffects()) {\n'
         '        Quarantine(); return false;\n    }\n')
 variants += [('sequential-cohort-release',source.replace(release,legacy),
               'failed cohort release must keep every CPU closed')]
