@@ -1,5 +1,22 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: checked Vulkan recreation idle after final present publication
+
+From `73a0461d43`, backing/cache/native audit found BlitScreen::WaitIdle waited
+presentation before publishing final recording closures and ignored native idle
+results. Two actual-body baseline witnesses reproduced before repair. Recreation
+now Finish/WaitWorker/WaitPresent, then checks device idle under submit_mutex;
+failures/exceptions fail-stop before resource disposal. Four healthy/eleven
+failure paths and six exact controls pass three times; GPU normal synchronous
+request/cancellation, whole-owner disposal and abandoned-slot regressions pass.
+Six Windows production objects compile without diagnostics. See
+[audit and ownership limits](M4_P2_BLIT_NATIVE_IDLE.md) and
+[results](M4_P2_BLIT_IDLE_RESULTS.json). Current-run binaries/objects are cleaned,
+evidence retained, main unchanged. This is a recreation boundary, not native
+completion for every VI buffer. Next: per-frame ownership across deferred guest
+fences and actual source access, then native resource use/reuse. All M4 phases
+remain open; F2/F3 open and GuestBackingAdmission Unknown.
+
 ## 2026-10-23: escaped producer cannot resurrect abandoned warm slots
 
 From `1c1348d777`, actual warm layer/consumer teardown plus producer bodies

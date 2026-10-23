@@ -1,5 +1,9 @@
 # GPU lifecycle correctness: F4/F5
 
+Vulkan resource recreation uses `run_blit_idle_tests.py` for final recording/
+presentation publication and checked native idle, including exact failure
+diagnostics. See [scope and remaining guest-buffer ownership](../../docs/M4_P2_BLIT_NATIVE_IDLE.md).
+
 Warm slot/backing/cache ownership and escaped producer publication use
 `../physical_coherency_tests/run_abandoned_slot_tests.py`. See
 [local queue boundary and remaining native retirement](../../docs/M4_P2_ABANDONED_SLOT_PUBLICATION.md).

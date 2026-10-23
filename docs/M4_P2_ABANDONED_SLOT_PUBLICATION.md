@@ -5,6 +5,10 @@ local, fork and PR375 heads agreed before work. Branch `codex/issue-372-fixes`;
 main remains `b6a2ce9488d78efdbbeb0efe14c2ec5c0a263e76`. This closes one
 abandoned-queue publication hole. Native retirement and all M4 phases remain open.
 
+Follow-up: [backing/cache/native audit and checked recreation idle](M4_P2_BLIT_NATIVE_IDLE.md)
+repairs a separate Vulkan presentation completion boundary. It grants no blanket
+native retirement permission to this queue's buffers.
+
 ## Ownership and ordering audit
 
 The preceding [Conductor repair](M4_P2_VI_CONDUCTOR_DRAIN.md) stops timing/VSync

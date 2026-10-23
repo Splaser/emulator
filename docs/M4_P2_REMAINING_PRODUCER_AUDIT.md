@@ -3,6 +3,11 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [backing/cache/native completion audit](M4_P2_BLIT_NATIVE_IDLE.md) repairs
+BlitScreen recreation's late-present/unchecked-native-idle boundary. It does not
+authorize every VI final unpin/free. Deferred guest-fence payloads still require
+an owner handoff spanning source reads/mappings and relevant native uses.
+
 The [warm slot/escaped-producer follow-up](M4_P2_ABANDONED_SLOT_PUBLICATION.md)
 prevents SetPreallocatedBuffer from resurrecting an abandoned queue, including
 when Disconnect wins during backing preparation. Candidate retirement preserves
