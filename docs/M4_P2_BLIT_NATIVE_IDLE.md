@@ -6,6 +6,10 @@ main `b6a2ce9488d78efdbbeb0efe14c2ec5c0a263e76` is unchanged. This repairs
 one Vulkan resource-recreation completion boundary. It does not certify guest
 backing retirement or complete M4 P2.
 
+Follow-up: [deferred frame/action-owner retirement](M4_P2_SYNCPOINT_OWNER_RETIREMENT.md)
+establishes lock-safe capture release before connecting a source-owner packet.
+It preserves the native/source lifetime limits described here.
+
 ## From guest buffer owners to native presentation
 
 | Boundary | Actual source fact | Remaining distinction |

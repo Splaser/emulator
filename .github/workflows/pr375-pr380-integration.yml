@@ -141,6 +141,7 @@ jobs:
             python tools/physical_coherency_tests/run_vi_conductor_drain_tests.py --repeat 3
             python tools/physical_coherency_tests/run_abandoned_slot_tests.py --repeat 3
             python tools/gpu_lifecycle_tests/run_blit_idle_tests.py --repeat 3
+            python tools/gpu_lifecycle_tests/run_syncpoint_retirement_tests.py --repeat 3
           python tools/physical_coherency_tests/run_owned_retirement_tests.py --repeat 3
           python tools/physical_coherency_tests/run_nvdrv_retirement_tests.py --repeat 3
           python tools/gpu_lifecycle_tests/run_unmap_ownership_tests.py --repeat 3
@@ -336,6 +337,8 @@ jobs:
               .diagnostics/m4-abandoned-slot/*.log
               .diagnostics/m4-blit-idle/*.json
               .diagnostics/m4-blit-idle/*.log
+              .diagnostics/m4-syncpoint-retirement/*.json
+              .diagnostics/m4-syncpoint-retirement/*.log
             .diagnostics/gpu-lifecycle/linux/thread-extraction.json
             .diagnostics/gpu-lifecycle/linux/thread-*.log
             .diagnostics/gpu-lifecycle/linux/direct-*.log

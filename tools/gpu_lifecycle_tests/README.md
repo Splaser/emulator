@@ -1,5 +1,9 @@
 # GPU lifecycle correctness: F4/F5
 
+Deferred frame-owner prerequisites use `run_syncpoint_retirement_tests.py` for
+actual syncpoint completion/cancellation capture release and destructor reentry.
+See [scope, failures and the remaining frame packet](../../docs/M4_P2_SYNCPOINT_OWNER_RETIREMENT.md).
+
 Vulkan resource recreation uses `run_blit_idle_tests.py` for final recording/
 presentation publication and checked native idle, including exact failure
 diagnostics. See [scope and remaining guest-buffer ownership](../../docs/M4_P2_BLIT_NATIVE_IDLE.md).

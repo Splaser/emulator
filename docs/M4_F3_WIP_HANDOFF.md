@@ -1,5 +1,23 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: release deferred action captures outside the syncpoint guard
+
+From `f029ee7bd3`, the per-frame audit confirmed HwcLayer/FramebufferConfig still
+lose the source GraphicBuffer owner. Directly attaching it would also retire its
+last captured reference under SyncpointManager guard. Two execution/cancellation
+baseline witnesses reproduced before repair. Completed/cancelled function owners
+now move into locals destroyed after unlocking; callback execution/order stays
+under guard. Ready-prefix capacity is reserved before callbacks, with explicit
+counter-advanced/actions-intact allocation-failure and throwing-prefix tests.
+Eight paths/seven precise controls pass three times; GPU request, owned retirement
+and blit idle regressions pass; four Windows production objects compile without
+diagnostics. See [scope and next packet protocol](M4_P2_SYNCPOINT_OWNER_RETIREMENT.md)
+and [results](M4_P2_SYNCPOINT_RETIREMENT_RESULTS.json). Current-run binaries/objects
+are cleaned and main untouched. Next remains the immutable source-owner packet
+across deferred fences/read, with partial registration and active-shutdown cases;
+it is not connected by this prerequisite fix. No native/mapping/guest authority;
+all M4 phases incomplete, F2/F3 open, GuestBackingAdmission Unknown.
+
 ## 2026-10-23: checked Vulkan recreation idle after final present publication
 
 From `73a0461d43`, backing/cache/native audit found BlitScreen::WaitIdle waited

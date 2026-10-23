@@ -3,6 +3,11 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [deferred-frame action-owner follow-up](M4_P2_SYNCPOINT_OWNER_RETIREMENT.md)
+fixes captured-owner destruction under SyncpointManager guard, for completion
+and cancellation, without moving callback execution. Per-frame source ownership
+is still absent from the HwcLayer/FramebufferConfig handoff and remains next.
+
 The [backing/cache/native completion audit](M4_P2_BLIT_NATIVE_IDLE.md) repairs
 BlitScreen recreation's late-present/unchecked-native-idle boundary. It does not
 authorize every VI final unpin/free. Deferred guest-fence payloads still require
