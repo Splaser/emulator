@@ -38,7 +38,7 @@ namespace Service::VI {
 
 class SharedBufferManager;
 
-class Container {
+class Container : public std::enable_shared_from_this<Container> {
 public:
     explicit Container(Core::System& system);
     ~Container();

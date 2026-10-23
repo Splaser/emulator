@@ -145,6 +145,15 @@ std::optional<Module::SessionRetirement> Module::PrepareSessionRetirement(
     return SessionRetirement{std::move(published), std::move(record)};
 }
 
+std::shared_ptr<NvCore::Container::SessionLifetime> Module::RetainProcessLifetime(
+    Kernel::KProcess* process, const Common::ProducerDrain::Entry&) {
+    auto retained = Kernel::KScopedAutoObject<Kernel::KProcess>::TryOpen(process);
+    auto backing = system.DeviceMemory().buffer.RetainBackingStorage();
+    if (!retained || !backing || !backing->OwnerAlive()) return {};
+    return std::make_shared<NvCore::Container::SessionLifetime>(
+        std::move(*backing), std::move(*retained), dispatch_domain);
+}
+
 Common::OwnedRetirementQueue::Owner Module::PrepareGraphicBufferRetirement(
     u32 id, const Common::ProducerDrain::Entry&) {
     if (!retirements->Drain()) return {};

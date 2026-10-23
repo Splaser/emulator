@@ -6,6 +6,12 @@ The local issue branch, fork and PR375 agreed before work. Main stays
 capture producer repair following an audit of creation/raw write/destruction.
 It is not a complete SharedBufferManager ownership transaction or M4 acceptance.
 
+Follow-up: [VI session owner protocol](M4_P2_VI_SESSION_OWNERSHIP.md) now counts
+creation/raw initialization and handles partial create/Close refusal with prepared
+retained owners and explicit Unknown records. It supersedes the create/destroy
+open-transition descriptions below, while preserving this report's content/native
+limits and historical capture evidence. M4 P2 is still incomplete.
+
 ## Source ownership audit
 
 Live call sites are IManagerDisplayService::Create/DestroySharedLayerSession and

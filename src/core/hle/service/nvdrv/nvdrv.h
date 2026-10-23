@@ -101,6 +101,8 @@ public:
     // An admitted direct device operation may already have changed its prefix.
     // Seal before its entry exits; ordinary returned errors need not quarantine.
     void QuarantineDispatch() const noexcept { dispatch_domain->Seal(); }
+    std::shared_ptr<NvCore::Container::SessionLifetime> RetainProcessLifetime(
+        Kernel::KProcess* process, const Common::ProducerDrain::Entry&);
     std::optional<SessionRetirement> PrepareSessionRetirement(Kernel::KProcess* process,
                                                const Common::ProducerDrain::Entry&);
     Common::OwnedRetirementQueue::Owner PrepareGraphicBufferRetirement(

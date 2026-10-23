@@ -3,6 +3,13 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [VI partial-session owner protocol](M4_P2_VI_SESSION_OWNERSHIP.md) follows the
+capture audit: creation/raw initialization is counted; failed prefixes are hidden
+Unknown records with prepared Process/backing/Module/VI/slot-provider retention.
+Destroy checks Close and never erases/releases session ownership on refusal.
+Nested admission can still lead conservatively to Unknown; no continuable success,
+native completion or ordinary Guest-backed admission follows from this repair.
+
 The [VI SharedBufferManager owner/capture follow-up](M4_P2_VI_CAPTURE_CLOSURE.md)
 audits creation, physical pool ownership and destruction. Its raw capture entry
 now joins the existing NVDRV producer domain, pairs pool publication with the

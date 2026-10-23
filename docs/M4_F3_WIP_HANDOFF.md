@@ -1,5 +1,24 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: VI partial-create and refused-Close owner retention
+
+From `0a22468339`, actual-body negative witnesses reproduced visible failed-create
+records and session owner release after refused Close. Create/destroy now retain
+the existing outer entry and prepare a retaining record before effects, with
+Module/Process/backing/VI anchors and pool/slot owners acquired before their use.
+Only complete creation becomes Ready; failed prefixes and
+refused/partial destruction become hidden Unknown tombstones, with the prepared
+record moved to existing quarantine before entry exit. No uncertain cleanup replay.
+Normal slot/free/session order is preserved; final owner release is unlocked but
+counted, and healthy sessions have no VI self-cycle. 29 cases/ten exact controls
+pass three times, plus capture/queue regressions and six real Windows production
+objects. See [protocol and remaining boundaries](M4_P2_VI_SESSION_OWNERSHIP.md) and
+[results](M4_P2_VI_SESSION_RESULTS.json). Nested admission still resolves uncertain
+prefixes conservatively, not via a new continuation. Next: explicit VI OnTerminate
+and Container publication/lifetime composition. No whole-System/native/alias lease,
+F2 content completion or ordinary Guest admission; all M4 phases remain open.
+Main unchanged; current-run binaries/objects are cleaned after preserving evidence.
+
 ## 2026-10-23: VI raw capture and create/destroy owner audit
 
 From `cbf9c25990`, audited SharedBufferManager pool allocation/publication, Process

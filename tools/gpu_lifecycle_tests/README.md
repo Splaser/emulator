@@ -1,5 +1,10 @@
 # GPU lifecycle correctness: F4/F5
 
+VI create/destroy failure ownership uses
+`../physical_coherency_tests/run_vi_session_owner_tests.py`: actual entry/getter,
+pool-allocation and Close bodies, with prepared retention and precise partial-prefix
+controls. See [protocol](../../docs/M4_P2_VI_SESSION_OWNERSHIP.md).
+
 VI raw capture uses `../physical_coherency_tests/run_vi_capture_drain_tests.py` for
 closed/active writes, publication, cancellation and partial effects. Its bounded
 scope and remaining creation/retirement ownership are documented in
