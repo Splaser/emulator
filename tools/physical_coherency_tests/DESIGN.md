@@ -547,6 +547,10 @@ demonstrated obstacle. Neither option promises a universal fallback today.
 
 ## 13. Independently testable roadmap
 
+For the current implementation/acceptance comparison, see the
+[2026-10-23 status snapshot](../../docs/M4_ROADMAP_STATUS_2026_10_23.md).
+The milestone gates below remain unchanged.
+
 All new operational modes default off. Turning a flag off is not a rollback while
 the new mode owns pending writes: seal, drain/transfer authoritative versions,
 wait completion, then detach. If that cannot be proven, stop the guest and retain

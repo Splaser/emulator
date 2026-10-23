@@ -1,5 +1,17 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: roadmap comparison and fence pool retirement failure
+
+The [roadmap snapshot](M4_ROADMAP_STATUS_2026_10_23.md) maps M0–M7 and the three
+unfinished M4 phases to actual evidence and remaining gates. Recent fence/NV
+repairs are phase-two prerequisites, not completed Guest admission.
+An actual-body witness reproduced free_queue allocation failure escaping the
+completion worker. Pool insertion now shares Reset's failure boundary; bad_alloc
+retains the local fence/suffix, latches host-memory failure and wakes waiters
+without publishing a completion tick. Three repeats, seven exact controls and
+two Windows production objects pass; see
+[validation](M4_F3_FENCE_RETIREMENT_ALLOCATION.md). Guest admission remains Unknown.
+
 ## 2026-10-23: fence submission ownership reserved before acceptance
 
 SubmitQueueFence now reserves its tick/fence record before native Submit while

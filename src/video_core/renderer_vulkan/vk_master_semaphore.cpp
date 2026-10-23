@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <new>
 #include <thread>
 
 #include <ranges>
@@ -243,11 +244,18 @@ void MasterSemaphore::WaitThread(std::stop_token token) {
         if (result == VK_SUCCESS) {
             try {
                 fence.Reset();
+                std::scoped_lock lock{free_mutex};
+                // Fence has a noexcept move. If deque allocation fails, it
+                // remains locally owned for the terminal retention path.
+                free_queue.push_front(std::move(fence));
+                gpu_tick.store(host_tick);
             } catch (const vk::Exception& error) {
                 // Native completion does not certify successful fence reuse.
                 // Keep the handle and wake waiters rather than terminating
                 // the helper thread with their targets permanently pending.
                 result = error.GetResult();
+            } catch (const std::bad_alloc&) {
+                result = VK_ERROR_OUT_OF_HOST_MEMORY;
             }
         }
         if (result != VK_SUCCESS) {
@@ -261,11 +269,6 @@ void MasterSemaphore::WaitThread(std::stop_token token) {
             }
             free_cv.notify_all();
             return;
-        }
-        {
-            std::scoped_lock lock{free_mutex};
-            free_queue.push_front(std::move(fence));
-            gpu_tick.store(host_tick);
         }
         // Waiters can have different target ticks. Waking only one can leave another waiter
         // asleep indefinitely even though gpu_tick already satisfies its predicate.

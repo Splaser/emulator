@@ -51,7 +51,7 @@ source = r'''
 using u64=unsigned long long;
 using VkResult=int;
 using u32=unsigned;using VkSemaphore=int;
-constexpr int VK_SUCCESS=0,VK_TIMEOUT=2,VK_ERROR_DEVICE_LOST=-4,VK_ERROR_UNKNOWN=-13;
+constexpr int VK_SUCCESS=0,VK_TIMEOUT=2,VK_ERROR_DEVICE_LOST=-4,VK_ERROR_UNKNOWN=-13,VK_ERROR_OUT_OF_HOST_MEMORY=-1;
 constexpr int VK_STRUCTURE_TYPE_SUBMIT_INFO=4;
 constexpr std::array<int,2> master_wait_stage_masks{1,2};
 struct VkSubmitInfo {
@@ -101,21 +101,30 @@ template<class T> struct ReservationQueue:std::queue<T> {
         std::queue<T>::emplace(std::forward<Args>(args)...);
     }
 };
+struct ReusableQueue:std::deque<vk::Fence> {
+    bool fail_return=false;
+    void push_front(vk::Fence&& fence) {
+        if(fail_return)throw std::bad_alloc();
+        std::deque<vk::Fence>::push_front(std::move(fence));
+    }
+};
 struct Master {
     using Waitable=std::pair<u64,vk::Fence>;
     FakeTimeline semaphore;std::atomic<u64> gpu_tick{0};
     std::atomic<VkResult> completion_failure{VK_SUCCESS};std::optional<Waitable> failed_wait;
     std::mutex wait_mutex,free_mutex;std::condition_variable free_cv;
     std::condition_variable_any wait_cv;
-    ReservationQueue<Waitable> wait_queue;std::deque<vk::Fence> free_queue;
+    ReservationQueue<Waitable> wait_queue;ReusableQueue free_queue;
     FakeDevice device;int acquired_fences=0;
     vk::Fence GetFreeFence() {++acquired_fences;return vk::Fence{17,VK_SUCCESS};}
     bool IsFree(u64 tick) {return gpu_tick.load()>=tick;}void Refresh() {}
 ''' + wait + '\n' + worker + '\n' + submit + r'''
 };
-void Check(int result,int reset_error=VK_SUCCESS) {
+void Check(int result,int reset_error=VK_SUCCESS,bool fail_return=false) {
     Master master;vk::Fence::resets=0;vk::Fence::reset_result=reset_error;
-    const int outcome=result!=VK_SUCCESS?result:reset_error;
+    master.free_queue.fail_return=fail_return;
+    const int outcome=result!=VK_SUCCESS?result:(reset_error!=VK_SUCCESS?reset_error:
+                      (fail_return?VK_ERROR_OUT_OF_HOST_MEMORY:VK_SUCCESS));
     master.wait_queue.emplace(7,vk::Fence{17,result});
     // Later submissions must not leap over an unknown earlier completion.
     if(outcome!=VK_SUCCESS)master.wait_queue.emplace(8,vk::Fence{18,VK_SUCCESS});
@@ -127,7 +136,9 @@ void Check(int result,int reset_error=VK_SUCCESS) {
     });
     std::jthread worker([&](std::stop_token token) {
         try {master.WaitThread(token);}catch(...) {
-            Require(false,"native fence reset exception escaped completion worker");
+            Require(false,vk::Fence::reset_result!=VK_SUCCESS?
+                    "native fence reset exception escaped completion worker":
+                    "native fence recycling allocation escaped completion worker");
         }
     });
     Require(first.wait_for(3s)==std::future_status::ready && second.wait_for(3s)==std::future_status::ready,
@@ -139,7 +150,7 @@ void Check(int result,int reset_error=VK_SUCCESS) {
                 vk::Fence::resets==1 && master.free_queue.size()==1,"successful native fence failed to retire");
     } else {
         Require(first_result==outcome && second_result==outcome,"failed native fence reported completion");
-        Require(master.gpu_tick==0 && vk::Fence::resets==(reset_error!=VK_SUCCESS?1:0) && master.free_queue.empty(),
+        Require(master.gpu_tick==0 && vk::Fence::resets==(result==VK_SUCCESS?1:0) && master.free_queue.empty(),
                 "failed native fence advanced tick or recycled resource");
         Require(master.failed_wait && master.failed_wait->second.id==17 && master.wait_queue.size()==1,
                 "unknown native fence or queued suffix lost ownership");
@@ -218,6 +229,7 @@ void OlderCompletion(bool succeeds) {
 }
 int main() {
     Check(VK_SUCCESS);Check(VK_ERROR_DEVICE_LOST);Check(VK_TIMEOUT);Check(VK_SUCCESS,VK_ERROR_DEVICE_LOST);
+    Check(VK_SUCCESS,VK_SUCCESS,true);
     Submission(VK_SUCCESS);Submission(VK_ERROR_DEVICE_LOST);Submission(VK_TIMEOUT);
     Submission(VK_ERROR_UNKNOWN);ReservationFailure();PendingReservation();
     OlderCompletion(false);OlderCompletion(true);
@@ -241,7 +253,7 @@ for i in range(a.repeat):
     result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=12)
     log = result.stdout + result.stderr
     (out / f'positive-{i}.log').write_text(log)
-    assert result.returncode == 0 and log.count('PASS native fence failure') == 3 and 'PASS durable submission' in log, log
+    assert result.returncode == 0 and log.count('PASS native fence failure') == 4 and 'PASS durable submission' in log, log
 print(f'PASS actual native fence completion bodies ({a.repeat} repetitions)', flush=True)
 controls = [
     ('ignore-wait-result', source.replace(worker,worker.replace('if (result != VK_SUCCESS) {', 'if (false) {')),
@@ -264,6 +276,9 @@ controls = [
         'completion_failure.compare_exchange_strong(expected, result, std::memory_order_release);',
         'completion_failure.store(result, std::memory_order_release);static_cast<void>(expected);')),
      'older completion changed new submission isolation'),
+    ('recycle-allocation-escapes', source.replace(worker,worker.replace(
+        'result = VK_ERROR_OUT_OF_HOST_MEMORY;', 'throw;')),
+     'native fence recycling allocation escaped completion worker'),
 ]
 for name, changed, expected in controls:
     assert changed != source
