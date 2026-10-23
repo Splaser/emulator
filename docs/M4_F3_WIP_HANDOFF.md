@@ -1,5 +1,20 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: direct SurfaceFlinger composition and raw-alias census
+
+From `b791777696`, actual caller audit found ComposeDisplay borrowing nvdisp and
+running synchronous effects outside the Kernel NVDRV closure. Test-first closed
+and borrowed-device witnesses both reproduced false drain. The entry now counts
+before display/device borrows through synchronous composer return/output, checks
+missing device, and seals exceptions before entry exit. Six cases/five exact
+controls pass three times, as do ten existing GPU lifecycle cases and their
+cancelled-read control; three real Windows production objects compile cleanly.
+See [scope, raw producer table and next step](M4_P2_SURFACE_COMPOSITION_CLOSURE.md)
+and [results](M4_P2_SURFACE_COMPOSITION_RESULTS.json). Guest-fence delayed callbacks
+and native GPU work are explicitly outside this synchronous closure. Next isolate
+VI SharedBufferManager create/raw-write/map/retire ownership; HID/time/IRS/raw views
+remain open. Main unchanged; all M4 phases incomplete, Guest admission Unknown.
+
 ## 2026-10-23: afternoon sync and desktop Turbo pending dispatch
 
 Fast-forwarded 16 afternoon commits to `664136bb76`, matching PR375. A test-first

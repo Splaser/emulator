@@ -98,6 +98,9 @@ public:
         Common::OwnedRetirementQueue::Owner record;
     };
     auto TryEnterDispatch() const { return dispatch_domain->EnterCold(); }
+    // An admitted direct device operation may already have changed its prefix.
+    // Seal before its entry exits; ordinary returned errors need not quarantine.
+    void QuarantineDispatch() const noexcept { dispatch_domain->Seal(); }
     std::optional<SessionRetirement> PrepareSessionRetirement(Kernel::KProcess* process,
                                                const Common::ProducerDrain::Entry&);
     Common::OwnedRetirementQueue::Owner PrepareGraphicBufferRetirement(

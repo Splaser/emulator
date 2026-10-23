@@ -1,5 +1,9 @@
 # GPU lifecycle correctness: F4/F5
 
+The direct SurfaceFlinger/nvdisp synchronous entry has a separate actual-body
+closure regression: `../physical_coherency_tests/run_surface_composition_drain_tests.py`.
+See [scope and remaining deferred/raw producers](../../docs/M4_P2_SURFACE_COMPOSITION_CLOSURE.md).
+
 Desktop Turbo native dispatch ownership: `run_turbo_dispatch_tests.py` extracts
 the complete production Run/destructor bodies. It checks exact Vulkan results,
 timeout retention, pending-work stop/idle disposal, and five mutation controls.

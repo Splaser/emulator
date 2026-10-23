@@ -3,6 +3,13 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+Follow-up: the [direct SurfaceFlinger composition audit and repair](M4_P2_SURFACE_COMPOSITION_CLOSURE.md)
+counts its synchronous entry in the existing Kernel NVDRV domain. The fresh
+caller/raw-alias table there distinguishes real callers from dormant public
+routes and explicitly leaves deferred guest-fence callbacks, VI raw physical
+stores, HID/IRS/time shared views and native GPU work open. GetDevice itself
+continues to return an unqualified borrow; no accessor-wide capability is claimed.
+
 Follow-up: [GraphicBuffer/session retirement](M4_P2_GRAPHIC_SESSION_RETIREMENT.md)
 now supplies the prepared local owner and deferred-retirement protocol below.
 
