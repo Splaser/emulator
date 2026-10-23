@@ -1,5 +1,17 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: Audio render cycle closure before managed writes
+
+SystemManager counts the complete command-generation/Signal/checked-response cycle.
+Closed cycles pause before list locks/guest pointer use; stop cancels that wait.
+AudioRenderer Wait rejects wrong responses without clearing command metadata and
+the manager quarantines its domain. Cohort drains Audio cycles after backend stop
+and BEFORE closing managed Memory writes, then composes all domains in one
+ResumeBatch. Actual cycle/Stop/ack and cohort tests plus five Windows production
+objects pass; see [protocol, evidence and limits](M4_P2_AUDIO_RENDER_CLOSURE.md).
+This does not stop all Audio/input/output/Opus/HLE/VIC/raw/native producers or
+provide complete owner retention. P2 remains incomplete; guest admission Unknown.
+
 ## 2026-10-23: M4 P2 shared managed-write closure and cohort composition
 
 21 ordinary/prepared Memory facade write methods now enter a shared Kernel domain

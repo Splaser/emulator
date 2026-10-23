@@ -46,6 +46,8 @@ variants=[('production',source,None),
         '    const auto published = D::DrainedSubset;'),None)]
 variants += [('omit-managed-write-drain',source.replace('    const auto writes = managed_writes->Poll();',
     '    const auto writes = D::DrainedSubset;'),'cohort must join active managed writes')]
+variants += [('omit-audio-render-drain',source.replace('    const auto audio = audio_render->Poll();',
+    '    const auto audio = D::DrainedSubset;'),'cohort must join admitted audio render cycles')]
 # The publication mutant must reach an early halt assertion, before producer exit.
 variants[2]=(variants[2][0],variants[2][1], 'writer.backend.requests==0')
 variants += [
@@ -60,6 +62,7 @@ reservation=('    auto reservation = creation.TryReserveCancel(std::addressof(*o
              '    if (!reservation) { Quarantine(); return false; }\n')
 release=('    Common::ProducerDrain::ResumeBatch batch;\n'
              '    if (!execution->AppendCancellation(batch) || !batch.Add(publication) ||\n'
+             '        !audio_render || !batch.Add(*audio_render) ||\n'
              '        !managed_writes || !batch.Add(*managed_writes) || !batch.Commit()) {\n'
          '        Quarantine(); return false;\n    }\n')
 assert source.count(reservation)==1 and source.count(release)==1
@@ -74,8 +77,10 @@ variants += [('omit-publication-from-batch', source.replace('!batch.Add(publicat
               'successful cohort cancellation must restore publication')]
 variants += [('omit-managed-writes-from-batch', source.replace('!batch.Add(*managed_writes)', 'false'),
               'cohort cancellation must restore managed writes')]
+variants += [('omit-audio-render-from-batch', source.replace('!batch.Add(*audio_render)', 'false'),
+              'cohort cancellation must restore audio rendering')]
 legacy=('    if (!execution->CancelNoEffects() || !publication.ResumeNoEffects() ||\n'
-        '        !managed_writes->ResumeNoEffects()) {\n'
+        '        !audio_render->ResumeNoEffects() || !managed_writes->ResumeNoEffects()) {\n'
         '        Quarantine(); return false;\n    }\n')
 variants += [('sequential-cohort-release',source.replace(release,legacy),
               'failed cohort release must keep every CPU closed')]

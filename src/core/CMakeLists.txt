@@ -1214,6 +1214,7 @@ add_library(core STATIC
     controlled_cpu_page.h
     controlled_mapping_publication.h
     managed_guest_writes.h
+    managed_host_producer.h
     memory.h
     memory/cheat_engine.cpp
     memory/cheat_engine.h

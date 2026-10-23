@@ -89,6 +89,8 @@ public:
             std::make_shared<Common::ProducerDrain>();
         std::shared_ptr<Common::ProducerDrain> managed_guest_writes=
             std::make_shared<Common::ProducerDrain>();
+        std::shared_ptr<Common::ProducerDrain> audio_render=
+            std::make_shared<Common::ProducerDrain>();
     };
     Core::System system;
     std::unique_ptr<Impl> impl=std::make_unique<Impl>();
@@ -103,6 +105,7 @@ public:
     std::optional<ProcessOwnerRoster::CreationClosure> TryCloseProcessCreation() @CREATION@
     const std::shared_ptr<Common::ProducerDrain>& ProcessPublicationDomain() const @PUBLICATIONS@
     const std::shared_ptr<Common::ProducerDrain>& ManagedGuestWriteDomain() const {return impl->managed_guest_writes;}
+    const std::shared_ptr<Common::ProducerDrain>& AudioRenderDomain() const {return impl->audio_render;}
 };
 struct PageTable {
     Common::PageTable table;

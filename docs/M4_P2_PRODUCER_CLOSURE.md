@@ -4,6 +4,10 @@ Date: 2026-10-23 (Asia/Singapore). Baseline: `1157bf0d04`.
 
 ## Phase status and ownership boundary
 
+Follow-up: [Audio render-cycle closure](M4_P2_AUDIO_RENDER_CLOSURE.md) now pauses
+and drains the SystemManager-owned generation/DSP-response cycle before this
+managed Memory domain closes. Other Audio/Opus/HLE/service producers remain open.
+
 P2 is not complete. This change addresses the large ordinary Memory facade gap
 instead of counting another fence repair as phase completion. The table below
 is the remaining acceptance inventory, not a list of capabilities all granted by

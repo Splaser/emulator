@@ -282,6 +282,7 @@ public:
     // All Memory facades share this domain, including untracked/service views.
     // Closing it proves only managed API stores; raw/NCE/GPU producers remain.
     const std::shared_ptr<Common::ProducerDrain>& ManagedGuestWriteDomain() const;
+    const std::shared_ptr<Common::ProducerDrain>& AudioRenderDomain() const;
 
     /// Exceptional exit application process.
     void ExceptionalExitApplication();

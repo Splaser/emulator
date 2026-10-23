@@ -56,6 +56,7 @@ int main() {
         assert(kernel.ProcessPublicationDomain()->TryEnter() &&
                "successful cohort cancellation must restore publication");
         assert(kernel.ManagedGuestWriteDomain()->TryEnter() && "cohort cancellation must restore managed writes");
+        assert(kernel.AudioRenderDomain()->TryEnter() && "cohort cancellation must restore audio rendering");
         auto next=caller.TryStopProcessCohort(64);assert(next);
         assert(!moved->CancelNoEffects());
         assert(next->Poll()==R::BackendsStopped && next->CancelNoEffects());
@@ -160,6 +161,24 @@ int main() {
         auto stop=caller.TryStopProcessCohort(64);assert(stop && stop->Poll()==R::BackendsStopped);
         kernel.ManagedGuestWriteDomain()->Seal();
         assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
+    }
+    { // A render cycle must finish before managed Memory writes close.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto render=kernel.AudioRenderDomain()->EnterCold();assert(render);
+        auto stop=caller.TryStopProcessCohort(64);assert(stop);
+        assert(stop->Poll()==R::Pending && "cohort must join admitted audio render cycles");
+        assert(kernel.ManagedGuestWriteDomain()->TryEnter() && "audio drain must precede managed write closure");
+        assert(!kernel.AudioRenderDomain()->TryEnter());
+        render.reset();assert(stop->Poll()==R::BackendsStopped);
+        assert(!kernel.ManagedGuestWriteDomain()->TryEnter());
+        assert(stop->CancelNoEffects() && kernel.AudioRenderDomain()->TryEnter());
+    }
+    { // A late Audio Seal cannot leave a stale stopped receipt or reopen writes.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto stop=caller.TryStopProcessCohort(64);assert(stop && stop->Poll()==R::BackendsStopped);
+        kernel.AudioRenderDomain()->Seal();
+        assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
+        assert(!kernel.ManagedGuestWriteDomain()->TryEnter());
     }
     std::cout<<"PASS sustained process cohort: creation/init/cold publication held, real owner retention "
                  "before backend halt, Unknown and stale-cancel isolation; independent cache/service/GPU routes remain open\n";
