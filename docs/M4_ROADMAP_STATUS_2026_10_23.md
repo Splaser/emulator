@@ -46,6 +46,11 @@ to release backing.
 
 ## Recent concrete progress
 
+- [GraphicBuffer/session retirement](M4_P2_GRAPHIC_SESSION_RETIREMENT.md) now
+  retains Module/handle/Process/backing across closed or uncertain destruction,
+  preserves slots on refused publication, and counts final local owner release.
+  Native device completion and trusted terminal quarantine disposal remain open.
+
 - [Ordinary NVDRV dispatch closure](M4_P2_NVDRV_DISPATCH_CLOSURE.md) now drains
   all six Module dispatch/lifecycle entry bodies before inner host1x closure.
   NVDRV Initialize shares the domain through session publication and local reply.

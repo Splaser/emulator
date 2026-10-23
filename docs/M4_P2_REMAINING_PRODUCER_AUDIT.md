@@ -3,13 +3,16 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+Follow-up: [GraphicBuffer/session retirement](M4_P2_GRAPHIC_SESSION_RETIREMENT.md)
+now supplies the prepared local owner and deferred-retirement protocol below.
+
 | Actual route | Current fact | Required next capability |
 | --- | --- | --- |
 | NVDRV Module Open/Ioctl1/2/3/Close/QueryEvent | Shared sustained synchronous dispatch closure, with outer-before-inner cohort ordering | Real runtime and complete caller/owner lifetime; native work remains separate |
 | NVDRV::Initialize -> Container::OpenSession | Ordinary Initialize now shares dispatch admission through local success reply; exceptions seal without fabricated Success | Direct Container use and full Process/session/backing lifetime still require continuous ownership; the raw accessor is not a capability |
-| NVDRV::~NVDRV -> Container::CloseSession | Shutdown path mutates session refs/activity outside Module dispatch | Explicit teardown entry coordinated with closures; destructor cannot simply Busy/skip owner release |
-| SurfaceFlinger::CreateBufferQueue -> BufferQueueProducer -> android::GraphicBuffer | Escaped GetContainer/NvMap reference; GraphicBuffer constructor DuplicateHandle + PinHandle | Retained container/module/backing owner and publication transaction spanning actual buffer lifetime transitions |
-| android::GraphicBuffer destructor | Direct UnpinHandle + FreeHandle, including final owner/eviction effects | Close-and-join actual retirement producer, or defer with a durable owner bundle; never silently skip a destructor on closure |
+| NVDRV::~NVDRV -> Container::CloseSession | Prepared session record now closes under admission or defers with Module/Process/backing retained; unknown id/failure never retried | Trusted terminal disposal and complete System/Host1x/native ownership; no Busy/skip cleanup shortcut |
+| SurfaceFlinger::CreateBufferQueue -> BufferQueueProducer -> android::GraphicBuffer | Shared Module provider, counted slot publication and prepared handle/Process/backing record before duplicate/pin | Complete alias/native coverage beyond this buffer publication transaction |
+| android::GraphicBuffer destructor | Counted or deferred unpin/free; uncertain owners retained and no partial-effect replay | Native completion/visibility and final allocator/device retirement, separate from CPU callback return |
 | Direct Module GetDevice, Host1x::PushEntries, GPU::PushCommandBuffer and CDmaPusher::ProcessEntries | Public borrowed/direct routes are not automatically covered by Module dispatch | Inventory actual callers and require lifetime-bearing access/admission instead of an escaped raw/shared facade |
 | Memory::GetPointer/GetPointerSilent/GetSpan and direct prepared/HostMemory access | Managed facade store counting does not revoke previously escaped borrows | Census plus borrow retirement/revocation or a proven whole-guest stop spanning every user |
 | Native NCE and unchecked fastmem | HAS_NCE managed-write closure explicitly unsupported; no native/store signal parking proof | Actual backend halt/ack, retained running owners and validated absence of outstanding stores; do not add blocking signal-handler bookkeeping |
@@ -48,7 +51,8 @@ allocation, while CircularBuffer/Aux commands make actual managed guest stores.
 
 ## Completion gate
 
-P2 cannot be completed by adding counters to the remaining destructors. A
+The new local retirement protocol addresses the two destructor routes above.
+P2 still cannot be completed merely by adding counters to other destructors. A
 closed destructor must either run under a legal owned teardown protocol or
 transfer every still-needed owner to durable deferred retirement. Counting
 ordinary ioctl return cannot supply native GPU visibility, and one-time owner

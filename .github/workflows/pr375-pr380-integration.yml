@@ -132,6 +132,8 @@ jobs:
           python tools/physical_coherency_tests/run_audio_callback_drain_tests.py --repeat 3
           python tools/physical_coherency_tests/run_host1x_submit_drain_tests.py --repeat 3
           python tools/physical_coherency_tests/run_nvdrv_dispatch_drain_tests.py --repeat 3
+          python tools/physical_coherency_tests/run_owned_retirement_tests.py --repeat 3
+          python tools/physical_coherency_tests/run_nvdrv_retirement_tests.py --repeat 3
           python tools/gpu_lifecycle_tests/run_unmap_ownership_tests.py --repeat 3
       - name: Verify process unmap reference cleanup on refusal and uncertainty
         run: python tools/physical_coherency_tests/run_process_unmap_tests.py

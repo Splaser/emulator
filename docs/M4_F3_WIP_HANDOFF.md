@@ -1,5 +1,20 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: GraphicBuffer and session retained retirement
+
+GraphicBuffer uses a shared Module provider and a preallocated unique retirement
+record holding handle/Process/physical backing. NVDRV initialization prepares a
+session record before OpenSession; destruction retires under admission or defers
+without allocating. Unknown partial effects are retained and never replayed.
+Provider final release is counted through an independently owned queue. Session
+owner ordering/reuse avoids releasing Process/backing before mapper or under
+session_guard; final Close failure/stale epoch preserves preallocated backing
+quarantine without retrying zero-reference objects.
+Three suites, 50 exact controls and eight Windows production objects pass; see
+[protocol, evidence and limits](M4_P2_GRAPHIC_SESSION_RETIREMENT.md).
+Global System/Host1x/native/allocator retirement and trusted quarantine disposal
+remain separate. P2/M4 are not complete; GuestBackingAdmission stays Unknown.
+
 ## 2026-10-23: ordinary NVDRV dispatch and remaining producer audit
 
 Six actual Module methods now retain one Kernel-shared dispatch entry: Open,

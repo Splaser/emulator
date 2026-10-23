@@ -95,6 +95,11 @@ includes the new runner; no workflow is dispatched here.
 
 ## Limits
 
+Follow-up: [GraphicBuffer/session retirement](M4_P2_GRAPHIC_SESSION_RETIREMENT.md)
+now replaces the specific direct-destructor paths described below with retained
+records and counted/deferred cleanup. Other escaped access and native/terminal
+ownership gaps remain.
+
 Module GetContainer/GetDevice return escaped access and are not lifetime-bound
 by a dispatch entry. Direct Container session methods and the NVDRV destructor
 remain outside normal dispatch. SurfaceFlinger/GraphicBuffer directly pin,

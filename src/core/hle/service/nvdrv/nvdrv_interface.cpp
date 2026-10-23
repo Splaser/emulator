@@ -177,7 +177,14 @@ void NVDRV::Initialize(HLERequestContext& ctx) {
 
         auto& container = nvdrv->GetContainer();
         auto process = ctx.GetObjectFromHandle<Kernel::KProcess>(process_handle);
+        auto prepared = nvdrv->PrepareSessionRetirement(process.GetPointerUnsafe(), *initialization);
+        if (!prepared) {
+            ServiceError(ctx, NvResult::Busy);
+            return;
+        }
+        session_retirement = std::move(prepared);
         session_id = container.OpenSession(process.GetPointerUnsafe());
+        *session_retirement->published = session_id;
 
         is_initialized = true;
     }
@@ -271,9 +278,12 @@ NVDRV::NVDRV(Core::System& system_, std::shared_ptr<Module> nvdrv_, const char* 
 }
 
 NVDRV::~NVDRV() {
-    if (is_initialized) {
-        auto& container = nvdrv->GetContainer();
-        container.CloseSession(session_id, true);
+    if (session_retirement) {
+        auto queue = nvdrv->RetirementQueue();
+        // The record carries Module/Process/backing. Drop this facade's extra
+        // Module reference before counted final release; queue survives Module.
+        nvdrv.reset();
+        queue->Retire(std::move(session_retirement->record));
     }
 }
 

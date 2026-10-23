@@ -15,6 +15,7 @@
 
 #include "common/common_types.h"
 #include "common/producer_drain.h"
+#include "common/owned_retirement.h"
 #include "common/terminal_ingress.h"
 #include "core/hle/service/kernel_helpers.h"
 #include "core/hle/service/nvdrv/core/container.h"
@@ -27,6 +28,7 @@ class System;
 
 namespace Kernel {
 class KEvent;
+class KProcess;
 }
 
 namespace Service::Nvidia {
@@ -58,7 +60,7 @@ private:
     std::list<Devices::nvhost_ctrl*> on_signal;
 };
 
-class Module final {
+class Module final : public std::enable_shared_from_this<Module> {
 public:
     explicit Module(Core::System& system_);
     ~Module();
@@ -91,6 +93,17 @@ public:
 
     NvResult QueryEvent(DeviceFD fd, u32 event_id, Kernel::KEvent*& event);
 
+    struct SessionRetirement {
+        std::shared_ptr<std::optional<NvCore::SessionId>> published;
+        Common::OwnedRetirementQueue::Owner record;
+    };
+    auto TryEnterDispatch() const { return dispatch_domain->EnterCold(); }
+    std::optional<SessionRetirement> PrepareSessionRetirement(Kernel::KProcess* process,
+                                               const Common::ProducerDrain::Entry&);
+    Common::OwnedRetirementQueue::Owner PrepareGraphicBufferRetirement(
+        u32 handle, const Common::ProducerDrain::Entry&);
+    std::shared_ptr<Common::OwnedRetirementQueue> RetirementQueue() const { return retirements; }
+
     NvCore::Container& GetContainer() {
         return container;
     }
@@ -99,6 +112,8 @@ private:
     friend class EventInterface;
 
     const std::shared_ptr<Common::ProducerDrain> dispatch_domain;
+    std::shared_ptr<Common::OwnedRetirementQueue> retirements;
+    Core::System& system;
 
     /// Manages syncpoints on the host
     NvCore::Container container;

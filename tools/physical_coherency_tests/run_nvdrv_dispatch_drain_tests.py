@@ -63,6 +63,7 @@ source = r'''
 #include <string>
 #include <unordered_map>
 #include "common/producer_drain.h"
+#include "common/owned_retirement.h"
 #include "common/scope_exit.h"
 using namespace std::chrono_literals;
 using u8=unsigned char;using u32=unsigned;using DeviceFD=int;constexpr DeviceFD INVALID_NVDRV_FD=-1;
@@ -84,6 +85,12 @@ struct Device {
 };
 struct Module {
     const std::shared_ptr<Common::ProducerDrain> dispatch_domain;
+    std::shared_ptr<Common::OwnedRetirementQueue> retirements;
+    struct SessionRetirement {std::shared_ptr<std::optional<NvCore::SessionId>> published;Common::OwnedRetirementQueue::Owner record;};
+    std::optional<SessionRetirement> PrepareSessionRetirement(Kernel::KProcess*,const Common::ProducerDrain::Entry&) {
+        auto published=std::make_shared<std::optional<NvCore::SessionId>>();
+        return SessionRetirement{published,Common::OwnedRetirementQueue::Prepare([]{return true;})};
+    }
     using FilesContainerType=std::unordered_map<DeviceFD,std::shared_ptr<Device>>;
     FilesContainerType open_files;DeviceFD next_fd=2;
     struct OpenResult {FilesContainerType::iterator file;};
@@ -93,7 +100,7 @@ struct Module {
         NvCore::SessionId OpenSession(Kernel::KProcess*) {++opens;if(on_open)on_open();return 5;}
     } container;
     Container& GetContainer() {return container;}
-    explicit Module(std::shared_ptr<Common::ProducerDrain> domain):dispatch_domain{std::move(domain)} {}
+    explicit Module(std::shared_ptr<Common::ProducerDrain> domain):dispatch_domain{std::move(domain)},retirements{std::make_shared<Common::OwnedRetirementQueue>(dispatch_domain)} {}
 ''' + '\n'.join(methods.values()) + r'''
 };
 struct Harness {
@@ -202,6 +209,7 @@ struct FakeKernel {
 struct System {FakeKernel kernel;FakeKernel& Kernel() {return kernel;}};
 struct NVDRV {
     System& system;std::shared_ptr<Module> nvdrv;bool is_initialized=false;NvCore::SessionId session_id=0;
+    std::optional<Module::SessionRetirement> session_retirement;
     NVDRV(System& system_):system{system_},nvdrv{std::make_shared<Module>(system.kernel.domain)} {}
 ''' + initialize + '\n' + service_error + r'''
 };
@@ -275,7 +283,8 @@ for name, body in methods.items():
                      'nvdrv callback exception granted drain authority'))
 refused = '    if (!initialization) {\n        ServiceError(ctx, NvResult::Busy);\n        return;\n    }'
 controls += [
-    ('Initialize-omit-admission', source.replace(initialize, initialize.replace(refused, '')),
+    ('Initialize-omit-admission', source.replace(initialize, initialize.replace(
+        'auto initialization = domain->EnterCold();', 'static Common::ProducerDrain unrelated;auto initialization = unrelated.EnterCold();')),
      'closed nvdrv initialization published a session'),
     ('Initialize-early-release', source.replace(initialize, initialize.replace(
         '        session_id = container.OpenSession(', '        initialization.reset();\n        session_id = container.OpenSession(')),

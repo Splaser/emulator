@@ -129,9 +129,8 @@ void SurfaceFlinger::SetLayerIsOverlay(s32 consumer_binder_id, bool is_overlay) 
 }
 
 void SurfaceFlinger::CreateBufferQueue(s32* out_consumer_binder_id, s32* out_producer_binder_id) {
-    auto& nvmap = nvdrv->GetContainer().GetNvMapFile();
     auto core = std::make_shared<android::BufferQueueCore>();
-    auto producer = std::make_shared<android::BufferQueueProducer>(m_context, core, nvmap);
+    auto producer = std::make_shared<android::BufferQueueProducer>(m_context, core, nvdrv);
     auto consumer = std::make_shared<android::BufferQueueConsumer>(core);
 
     *out_consumer_binder_id = m_server.RegisterBinder(std::move(consumer));

@@ -4,6 +4,11 @@ Date: 2026-10-23 (Asia/Singapore). Baseline: `1157bf0d04`.
 
 ## Phase status and ownership boundary
 
+The [GraphicBuffer/session retirement update](M4_P2_GRAPHIC_SESSION_RETIREMENT.md)
+replaces raw-provider destructor cleanup with prepared retained owners, counted
+or deferred retirement and non-replayed Unknown records. Global native device/
+allocator lifetime and trusted terminal quarantine disposal remain open.
+
 The [ordinary NVDRV dispatch closure](M4_P2_NVDRV_DISPATCH_CLOSURE.md) now spans
 Open, Ioctl1/2/3, Close and QueryEvent, including ordinary nvhost-as-gpu/nvmap
 calls. NVDRV session Initialize shares that domain through its local reply.
