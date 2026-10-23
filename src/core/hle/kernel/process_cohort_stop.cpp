@@ -37,6 +37,7 @@ ProcessCohortStop::Result ProcessCohortStop::Poll() {
     }
     if (stopped) {
         if (!audio_render || audio_render->Poll() != D::DrainedSubset ||
+            !audio_callbacks || audio_callbacks->Poll() != D::DrainedSubset ||
             !managed_writes || managed_writes->Poll() != D::DrainedSubset) {
             Quarantine(); return Result::Unknown;
         }
@@ -75,6 +76,14 @@ ProcessCohortStop::Result ProcessCohortStop::Poll() {
     const auto audio = audio_render->Poll();
     if (audio == D::Unknown) { Quarantine(); return Result::Unknown; }
     if (audio == D::Pending) return Result::Pending;
+    if (!audio_callbacks) {
+        auto closure = kernel.AudioCallbackDomain()->TryClose(remaining + 1);
+        if (!closure) { Quarantine(); return Result::Unknown; }
+        audio_callbacks.emplace(std::move(*closure));
+    }
+    const auto callbacks = audio_callbacks->Poll();
+    if (callbacks == D::Unknown) { Quarantine(); return Result::Unknown; }
+    if (callbacks == D::Pending) return Result::Pending;
     // Admitted render cycles must finish their Memory writes before that
     // domain closes. New cycles pause outside all service/list locks.
     if (!managed_writes) {
@@ -98,6 +107,7 @@ bool ProcessCohortStop::CancelNoEffects() {
     Common::ProducerDrain::ResumeBatch batch;
     if (!execution->AppendCancellation(batch) || !batch.Add(publication) ||
         !audio_render || !batch.Add(*audio_render) ||
+        !audio_callbacks || !batch.Add(*audio_callbacks) ||
         !managed_writes || !batch.Add(*managed_writes) || !batch.Commit()) {
         Quarantine(); return false;
     }
@@ -110,6 +120,7 @@ void ProcessCohortStop::Quarantine() {
     unknown = true;
     if (execution) execution->Quarantine();
     if (audio_render) audio_render->Quarantine();
+    if (audio_callbacks) audio_callbacks->Quarantine();
     if (managed_writes) managed_writes->Quarantine();
     initialization.Quarantine(); publication.Quarantine(); creation.Quarantine();
 }

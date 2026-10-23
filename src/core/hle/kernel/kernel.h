@@ -283,6 +283,7 @@ public:
     // Closing it proves only managed API stores; raw/NCE/GPU producers remain.
     const std::shared_ptr<Common::ProducerDrain>& ManagedGuestWriteDomain() const;
     const std::shared_ptr<Common::ProducerDrain>& AudioRenderDomain() const;
+    const std::shared_ptr<Common::ProducerDrain>& AudioCallbackDomain() const;
 
     /// Exceptional exit application process.
     void ExceptionalExitApplication();

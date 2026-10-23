@@ -1,5 +1,17 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: AudioManager input/output callback closure
+
+AudioManager callback sweeps now enter a Kernel-shared domain outside the event
+mutex. Closed admission preserves pending events; stop-token shutdown wakes and
+joins a paused worker. Callback exceptions seal before counted-entry exit.
+Cohort drains these callbacks before managed Memory writes and includes the
+domain in its atomic ResumeBatch. Three focused suites, 24 exact controls and
+five Windows production objects pass; see [evidence](M4_P2_AUDIO_CALLBACK_CLOSURE.md).
+This covers that worker only: sink/backend callbacks, direct service operations,
+Opus/VIC/NCE/raw/GPU producers and complete owner retention remain independent.
+P2 remains incomplete and ordinary Guest admission stays Unknown.
+
 ## 2026-10-23: Audio render cycle closure before managed writes
 
 SystemManager counts the complete command-generation/Signal/checked-response cycle.

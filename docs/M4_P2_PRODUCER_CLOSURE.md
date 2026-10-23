@@ -4,6 +4,10 @@ Date: 2026-10-23 (Asia/Singapore). Baseline: `1157bf0d04`.
 
 ## Phase status and ownership boundary
 
+Further follow-up: [AudioManager callback closure](M4_P2_AUDIO_CALLBACK_CLOSURE.md)
+also drains its input/output callback sweeps before managed writes close. Direct
+service calls, sink/backend callbacks and other independent producers remain open.
+
 Follow-up: [Audio render-cycle closure](M4_P2_AUDIO_RENDER_CLOSURE.md) now pauses
 and drains the SystemManager-owned generation/DSP-response cycle before this
 managed Memory domain closes. Other Audio/Opus/HLE/service producers remain open.
@@ -18,7 +22,7 @@ one counter.
 | Non-NCE Memory facade scalar, exclusive, bulk/unsafe, zero/copy, prepared/cached writes | 21 actual entry methods now use one Kernel-owned managed write domain shared across Memory views | Full real-process runtime validation and hot-path overhead; direct PreparedCpuPage/HostMemory APIs are not automatically covered |
 | PhysicalCore / checked Dynarmic execution | Existing real-backend stop prerequisite, retained Process roster and continuous cold publication gates; managed write closure acquired only afterward | Complete integration with all fastmem stores and outstanding host continuations; local fixture is not native acceptance |
 | NCE native stores / signal interpreter | Explicitly unsupported for this managed domain in HAS_NCE builds; domain sealed and closure unavailable | Safe native halt and signal-store protocol; no new signal waiting/exception/parking is added |
-| Audio/services using ordinary Memory WriteBlockUnsafe etc. | Their individual Memory calls now count on non-NCE builds | Actual worker/service admission close-and-join and queued operations remain independent; per-call counting does not stop whole services |
+| Audio/services using ordinary Memory WriteBlockUnsafe etc. | Individual Memory calls count on non-NCE builds; SystemManager render cycles and AudioManager callback sweeps now have sustained pause/drain domains | Direct service calls, sink/backend callbacks, Opus and other worker/queued routes remain independent; these subsets do not stop whole services |
 | VIC/host1x/device mappings | Separate device memory interfaces remain independent | Whole producer stop and mapping/alias ownership |
 | Raw GetPointer/GetSpan, external maps, direct prepared-page stores | Explicitly outside this facade domain | Inventory and revoke/retain every escaped borrow; closure must span its actual use |
 | GPU queued/recorded transfer and shader/image writers | Existing terminal ingress, checked callback/submission and fence failure repairs | A sustained reversible GPU stop and visibility proof across every writer |

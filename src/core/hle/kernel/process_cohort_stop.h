@@ -23,6 +23,7 @@ class ProcessCohortStop {
     Common::ProducerDrain::Closure initialization;
     std::optional<ProcessExecutionStop> execution;
     std::optional<Common::ProducerDrain::Closure> audio_render;
+    std::optional<Common::ProducerDrain::Closure> audio_callbacks;
     std::optional<Common::ProducerDrain::Closure> managed_writes;
     u32 remaining;
     std::thread::id owner_thread{std::this_thread::get_id()};

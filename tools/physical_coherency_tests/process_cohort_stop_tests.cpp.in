@@ -57,6 +57,7 @@ int main() {
                "successful cohort cancellation must restore publication");
         assert(kernel.ManagedGuestWriteDomain()->TryEnter() && "cohort cancellation must restore managed writes");
         assert(kernel.AudioRenderDomain()->TryEnter() && "cohort cancellation must restore audio rendering");
+        assert(kernel.AudioCallbackDomain()->TryEnter() && "cohort cancellation must restore audio callbacks");
         auto next=caller.TryStopProcessCohort(64);assert(next);
         assert(!moved->CancelNoEffects());
         assert(next->Poll()==R::BackendsStopped && next->CancelNoEffects());
@@ -179,6 +180,35 @@ int main() {
         kernel.AudioRenderDomain()->Seal();
         assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
         assert(!kernel.ManagedGuestWriteDomain()->TryEnter());
+    }
+    for (bool late : {false,true}) { // Callback Seal may race a shared ResumeBatch commit.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto stop=caller.TryStopProcessCohort(64);assert(stop&&stop->Poll()==R::BackendsStopped);
+        if (late) ResumeBatchTest::before_commit=[&] {kernel.AudioCallbackDomain()->Seal();};
+        else ResumeBatchTest::after_resume=[&](size_t i) {if(i==0)kernel.AudioCallbackDomain()->Seal();};
+        assert(!stop->CancelNoEffects());
+        ResumeBatchTest::before_commit={};ResumeBatchTest::after_resume={};
+        assert(!kernel.PhysicalCore(0).TryCloseGuestExecution(8));
+        assert(!kernel.AudioRenderDomain()->TryEnter() && !kernel.ManagedGuestWriteDomain()->TryEnter());
+        assert(!kernel.AudioCallbackDomain()->TryEnter() && !kernel.ProcessPublicationDomain()->TryEnter());
+    }
+    { // Callback-owned input writes must finish before their Memory domain closes.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto callback=kernel.AudioCallbackDomain()->EnterCold();assert(callback);
+        auto stop=caller.TryStopProcessCohort(64);assert(stop);
+        assert(stop->Poll()==R::Pending && "cohort must join admitted audio callbacks");
+        assert(kernel.ManagedGuestWriteDomain()->TryEnter() && "callback drain must precede managed write closure");
+        assert(!kernel.AudioCallbackDomain()->TryEnter());
+        callback.reset();assert(stop->Poll()==R::BackendsStopped);
+        assert(stop->CancelNoEffects());
+        assert(kernel.AudioCallbackDomain()->TryEnter() && "cohort cancellation must restore audio callbacks");
+    }
+    { // A late callback failure invalidates the receipt and keeps all domains closed.
+        Kernel::KernelCore kernel;Kernel::KProcess caller{kernel};
+        auto stop=caller.TryStopProcessCohort(64);assert(stop && stop->Poll()==R::BackendsStopped);
+        kernel.AudioCallbackDomain()->Seal();
+        assert(stop->Poll()==R::Unknown && !stop->CancelNoEffects());
+        assert(!kernel.ManagedGuestWriteDomain()->TryEnter() && !kernel.AudioRenderDomain()->TryEnter());
     }
     std::cout<<"PASS sustained process cohort: creation/init/cold publication held, real owner retention "
                  "before backend halt, Unknown and stale-cancel isolation; independent cache/service/GPU routes remain open\n";

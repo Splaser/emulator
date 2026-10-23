@@ -46,6 +46,11 @@ to release backing.
 
 ## Recent concrete progress
 
+- [AudioManager callback closure](M4_P2_AUDIO_CALLBACK_CLOSURE.md) now pauses
+  callback sweeps outside the event mutex, drains them before managed writes,
+  and composes atomic resume and failure quarantine. Device/sink callbacks,
+  direct service calls and the remaining native/raw producers are still open.
+
 - [Audio render-cycle closure](M4_P2_AUDIO_RENDER_CLOSURE.md) now drains the
   SystemManager-owned DSP cycle before managed Memory closes and composes its
   atomic resume. Other service/Audio/raw/native producer families remain open.
