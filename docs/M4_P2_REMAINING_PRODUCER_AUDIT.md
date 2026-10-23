@@ -3,6 +3,14 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [VI SharedBufferManager owner/capture follow-up](M4_P2_VI_CAPTURE_CLOSURE.md)
+audits creation, physical pool ownership and destruction. Its raw capture entry
+now joins the existing NVDRV producer domain, pairs pool publication with the
+manager mutex and refuses empty/cancelled capture before stores. CreateSession's
+partial records/nested admission and DestroySession's unchecked Close result
+remain separate unresolved transitions. The pool descriptor is not a complete
+Process/backing/alias/native lifetime bundle; Guest admission remains Unknown.
+
 Follow-up: the [direct SurfaceFlinger composition audit and repair](M4_P2_SURFACE_COMPOSITION_CLOSURE.md)
 counts its synchronous entry in the existing Kernel NVDRV domain. The fresh
 caller/raw-alias table there distinguishes real callers from dormant public

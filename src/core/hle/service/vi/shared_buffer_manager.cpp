@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <exception>
 #include <random>
 
+#include "common/scope_exit.h"
 #include "core/core.h"
 #include "core/hle/kernel/k_process.h"
 #include "core/hle/kernel/k_system_resource.h"
@@ -400,12 +402,34 @@ Result SharedBufferManager::GetSharedFrameBufferAcquirableEvent(Kernel::KReadabl
 }
 
 Result SharedBufferManager::WriteAppletCaptureBuffer(bool* out_was_written, s32* out_layer_index) {
+    // This raw physical writer does not pass through managed Memory stores or
+    // Module::Ioctl. Keep its synchronous capture/store/projection body counted.
+    auto dispatch = m_nvdrv->TryEnterDispatch();
+    R_UNLESS(dispatch, VI::ResultOperationFailed);
+    const auto exception_depth = std::uncaught_exceptions();
+    SCOPE_EXIT {
+        if (std::uncaught_exceptions() > exception_depth) m_nvdrv->QuarantineDispatch();
+    };
+
+    Kernel::KPageGroup* page_group{};
+    {
+        std::scoped_lock lk{m_guard};
+        R_UNLESS(m_buffer_page_group && m_buffer_id != 0, VI::ResultOperationFailed);
+        // Pool publication is serialized with CreateSession. Once published,
+        // this descriptor is not replaced or reset until manager destruction;
+        // callers must retain the existing manager/System facade lifetime.
+        page_group = m_buffer_page_group.get();
+    }
+    // Never hold the manager publication lock across a synchronous GPU wait.
     std::vector<u8> capture_buffer(m_system.GPU().GetAppletCaptureBuffer());
+    // Includes shutdown cancellation. Do not clear a valid pool or fabricate a
+    // successful capture when the GPU supplied no image.
+    R_UNLESS(!capture_buffer.empty(), VI::ResultOperationFailed);
     Common::ScratchBuffer<u32> scratch;
 
     // TODO: this could be optimized
     s64 e = -1280 * 768 * 4;
-    for (auto& block : *m_buffer_page_group) {
+    for (auto& block : *page_group) {
         u8* start = m_system.DeviceMemory().GetPointer<u8>(block.GetAddress(), block.GetSize());
         u8* end = start + block.GetSize();
 

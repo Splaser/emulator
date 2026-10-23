@@ -1,5 +1,10 @@
 # GPU lifecycle correctness: F4/F5
 
+VI raw capture uses `../physical_coherency_tests/run_vi_capture_drain_tests.py` for
+closed/active writes, publication, cancellation and partial effects. Its bounded
+scope and remaining creation/retirement ownership are documented in
+[VI owner audit](../../docs/M4_P2_VI_CAPTURE_CLOSURE.md).
+
 The direct SurfaceFlinger/nvdisp synchronous entry has a separate actual-body
 closure regression: `../physical_coherency_tests/run_surface_composition_drain_tests.py`.
 See [scope and remaining deferred/raw producers](../../docs/M4_P2_SURFACE_COMPOSITION_CLOSURE.md).

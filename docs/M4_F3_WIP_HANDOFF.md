@@ -1,5 +1,22 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: VI raw capture and create/destroy owner audit
+
+From `cbf9c25990`, audited SharedBufferManager pool allocation/publication, Process
+mapping, partial session records, raw capture and destruction. Test-first capture
+witnesses reproduced uncounted closed/active writes and empty-result false success.
+Capture now retains the existing NVDRV entry through the synchronous operation,
+pairs pool publication with m_guard without holding it over GPU wait, refuses empty
+capture before stores, and seals partial exceptions. Eight cases/eight controls
+pass three times; ten GPU lifecycle cases/control and three Windows production
+objects pass. See [owner audit, boundaries and next tests](M4_P2_VI_CAPTURE_CLOSURE.md)
+and [results](M4_P2_VI_CAPTURE_RESULTS.json). Next: actual CreateSession failure
+prefixes and DestroySession ignoring refused Module::Close, with prepared owner
+retirement and nested-admission progress. Those methods, raw initialization and
+the zero-length invalidation concern remain unchanged. Main unchanged, all M4
+phases incomplete, Guest admission Unknown. Current-run binaries/objects are
+cleaned after preserving evidence; no full app/native/Android acceptance claimed.
+
 ## 2026-10-23: direct SurfaceFlinger composition and raw-alias census
 
 From `b791777696`, actual caller audit found ComposeDisplay borrowing nvdisp and
