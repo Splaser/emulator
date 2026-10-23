@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <queue>
 
@@ -88,6 +89,10 @@ private:
     vk::Semaphore semaphore;          ///< Timeline semaphore.
     std::atomic<u64> gpu_tick{0};     ///< Current known GPU tick.
     std::atomic<u64> current_tick{1}; ///< Current logical tick.
+    std::atomic<VkResult> completion_failure{VK_SUCCESS};
+    // An unsuccessful wait is Unknown, never a reusable fence. Retain it and
+    // queued fences until externally coordinated idle/device teardown.
+    std::optional<Waitable> failed_wait;
     std::mutex wait_mutex;
     std::mutex free_mutex;
     std::condition_variable free_cv;

@@ -125,6 +125,7 @@ jobs:
           python tools/gpu_lifecycle_tests/run_address_space_mapping_tests.py --repeat 3
           python tools/gpu_lifecycle_tests/run_checked_unmap_tests.py --repeat 3
           python tools/gpu_lifecycle_tests/run_dispatch_exception_tests.py --repeat 3
+          python tools/gpu_lifecycle_tests/run_native_fence_failure_tests.py --repeat 3
           python tools/gpu_lifecycle_tests/run_unmap_ownership_tests.py --repeat 3
       - name: Verify process unmap reference cleanup on refusal and uncertainty
         run: python tools/physical_coherency_tests/run_process_unmap_tests.py

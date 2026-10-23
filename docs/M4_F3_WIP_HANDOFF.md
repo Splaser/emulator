@@ -1,5 +1,19 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: native fence fallback failure cannot retire resources
+
+The fence fallback ignored vkWaitForFences results before Reset/recycle and
+gpu_tick publication. It now latches failure, retains the unknown fence and
+queued suffix, stops the completion worker, wakes waiters with failure and
+refuses later observed fallback submissions. Confirmed older ticks remain valid.
+Actual Wait/WaitThread bodies pass three repetitions with success/device-loss/
+timeout and two concurrent waiters; two exact controls reject false completion
+and Unknown recycling. MasterSemaphore and Scheduler production units compile
+to Windows AMD64 objects. See [native failure ownership](M4_F3_NATIVE_FENCE_FAILURE.md).
+This owns fences only, not a global Unknown backing/resource registry. External
+idle/device teardown remains required; all THREE M4 phases remain unfinished,
+ordinary admission Unknown. No Android/device/workflow run or main merge.
+
 ## 2026-10-23: FreeSpace missing-owner refusal
 
 An actual-body witness reproduced default owner insertion from FreeSpace's

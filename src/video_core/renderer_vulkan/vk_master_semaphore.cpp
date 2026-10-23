@@ -91,7 +91,13 @@ void MasterSemaphore::Wait(u64 tick) {
     if (!semaphore) {
         // If we don't support timeline semaphores, wait for the value normally
         std::unique_lock lk{free_mutex};
-        free_cv.wait(lk, [&] { return gpu_tick.load(std::memory_order_relaxed) >= tick; });
+        free_cv.wait(lk, [&] {
+            return gpu_tick.load(std::memory_order_relaxed) >= tick ||
+                   completion_failure.load(std::memory_order_acquire) != VK_SUCCESS;
+        });
+        if (gpu_tick.load(std::memory_order_relaxed) < tick) {
+            throw vk::Exception(completion_failure.load(std::memory_order_acquire));
+        }
         return;
     }
 
@@ -170,6 +176,8 @@ VkResult MasterSemaphore::SubmitQueueFence(vk::CommandBuffer& cmdbuf,
                                            vk::CommandBuffer& upload_cmdbuf,
                                            VkSemaphore signal_semaphore, VkSemaphore wait_semaphore,
                                            u64 host_tick) {
+    const auto failure = completion_failure.load(std::memory_order_acquire);
+    if (failure != VK_SUCCESS) return failure;
     const u32 num_signal_semaphores = signal_semaphore ? 1 : 0;
     const u32 num_wait_semaphores = wait_semaphore ? 1 : 0;
 
@@ -213,7 +221,18 @@ void MasterSemaphore::WaitThread(std::stop_token token) {
             wait_queue.pop();
         }
 
-        fence.Wait();
+        const auto result = fence.Wait();
+        if (result != VK_SUCCESS) {
+            failed_wait.emplace(host_tick, std::move(fence));
+            {
+                // Pair with Wait's predicate lock so failure cannot be lost
+                // between its predicate check and condition-variable sleep.
+                std::scoped_lock lock{free_mutex};
+                completion_failure.store(result, std::memory_order_release);
+            }
+            free_cv.notify_all();
+            return;
+        }
         fence.Reset();
 
         {
