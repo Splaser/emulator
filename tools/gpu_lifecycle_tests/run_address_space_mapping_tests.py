@@ -225,6 +225,17 @@ void Healthy() {
     for(int v=0;v<10;++v)Require(Invoke(as,v)==NvResult::BadValue,"healthy invalid VM result changed");
     std::cout<<"PASS healthy sparse, ordinary, fixed, dynamic and remap operations retain results/effects\n";
 }
+void MissingFreeSpace() {
+    Host host;VideoCore::Rasterizer raster;Impl gpu{host};PublicGpu facade{&gpu,{}};System system{facade};
+    AddressSpace as{system,raster};Prepare(as,1);const auto before=Snapshot(as);
+    for(const auto& [pages,page_size]:{std::pair{1u,65536u},std::pair{0u,0u}}) {
+        AddressSpace::IoctlFreeSpace params{Address+65536,pages,page_size};
+        Require(as.FreeSpace(params)==NvResult::BadValue,"missing FreeSpace allocation reported success");
+        Require(Snapshot(as)==before,"missing FreeSpace allocation changed owner inventory");
+    }
+    Require(Invoke(as,1)==NvResult::Success,"invalid FreeSpace request poisoned valid owner");
+    std::cout<<"PASS missing FreeSpace allocation refuses without inventory or allocator effects\n";
+}
 void Retain(int variant,int stage) {
     Host host;VideoCore::Rasterizer raster;auto gpu=std::make_unique<Impl>(host);
     gpu->renderer->rasterizer=&raster;PublicGpu facade{gpu.get(),{}};System system{facade};
@@ -287,7 +298,7 @@ void ExceptionsAndBatch() {
 int main(int argc,char** argv) {
     try {
         Closed();if(argc>1 && std::string{argv[1]}=="closed")return 0;
-        Healthy();for(int v=0;v<10;++v) {Retain(v,0);Retain(v,3);}
+        Healthy();MissingFreeSpace();for(int v=0;v<10;++v) {Retain(v,0);Retain(v,3);}
         for(int v:{0,1,2,3,4,5,6,7,8})Retain(v,1);
         for(int v:{1,2,4,5,7,8})Retain(v,2);
         LockWait();ExceptionsAndBatch();std::cout<<"PASS retained NV mapping through entry, locks, backend callbacks, pins and acknowledgement\n";
@@ -332,6 +343,9 @@ if a.case == 'all':
                          'teardown escaped admitted NV mapping'))
     remap = bodies['Remap']
     controls += [
+        ('FreeSpace-inserting-lookup', source.replace(bodies['FreeSpace'], bodies['FreeSpace'].replace(
+            'allocation_map.at(params.offset)', 'allocation_map[params.offset]')),
+         'missing FreeSpace allocation changed owner inventory'),
         ('Remap-missing-lock', source.replace(remap, remap.replace('    std::scoped_lock lock(mutex);', '')),
          'Remap bypassed AS serialization'),
         ('missing-owner-join', source.replace('        owner_publications.Join();', ''),

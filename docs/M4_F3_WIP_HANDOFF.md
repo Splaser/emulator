@@ -1,5 +1,15 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: FreeSpace missing-owner refusal
+
+An actual-body witness reproduced default owner insertion from FreeSpace's
+allocation_map subscript on an unknown offset. FreeSpace now uses at(), allowing
+the existing pre-unmap out_of_range path to return BadValue without metadata or
+allocator effects. Ordinary and zero-sized invalid requests retain an unchanged
+inventory; a subsequent valid free still succeeds. See
+[refusal validation](M4_F3_FREE_SPACE_LOOKUP.md). This narrow production fix does
+not complete mapping transactions or any M4 phase. Guest admission remains Unknown.
+
 ## 2026-10-23: synchronized morning commits and duplicate callback proof
 
 Fast-forwarded seven remote morning commits to b6d1f03b65 without conflicts.

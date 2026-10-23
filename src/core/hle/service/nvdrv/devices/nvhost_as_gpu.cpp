@@ -264,7 +264,7 @@ NvResult nvhost_as_gpu::FreeSpace(IoctlFreeSpace& params) {
 
     bool unmap_started = false;
     try {
-        auto allocation{allocation_map[params.offset]};
+        auto allocation{allocation_map.at(params.offset)};
 
         if (allocation.page_size != params.page_size ||
             allocation.size != (static_cast<u64>(params.pages) * params.page_size)) {
