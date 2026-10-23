@@ -5,6 +5,11 @@ The fork/PR375 head agreed before edits. Main remains
 `b6a2ce9488d78efdbbeb0efe14c2ec5c0a263e76`. This closes the two previously
 identified local failure transitions conservatively; M4 P2/F2/F3 remain open.
 
+Follow-up: [VI terminal publication](M4_P2_VI_TERMINAL_PUBLICATION.md) now stops
+retained Containers and interrupted lazy initialization from publishing/lending
+new entries after OnTerminate. It preserves the owner records here; existing
+layer teardown, escaped managers and complete GPU drain remain separate gates.
+
 ## Defects and test-first witnesses
 
 The original CreateSession inserted an unqualified numeric record before

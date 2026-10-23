@@ -81,7 +81,7 @@ private:
     Result DestroyLayerLocked(u64 layer_id);
     Result OpenLayerLocked(s32* out_producer_binder_id, u64 layer_id, u64 aruid);
     Result CloseLayerLocked(u64 layer_id);
-    void EnsureInitialized();
+    bool EnsureInitialized();
 
 public:
     bool ComposeOnDisplay(s32* out_swap_interval, f32* out_compose_speed_scale, u64 display_id);

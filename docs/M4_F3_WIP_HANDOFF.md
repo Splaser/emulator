@@ -1,5 +1,21 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: VI terminal publication after OnTerminate
+
+From `dc5d532840`, actual stop/owner/GPU-order audit found cold and paused VI lazy
+initialization could publish after OnTerminate, including after GPU-drain sequence;
+retained terminated facades could lend the manager again. Three original witnesses
+reproduced before repair. Bool EnsureInitialized now checks terminal state under
+the same mutex before lookup and publication, with under-lock caller rechecks and
+all eight nullable VI/AM manager callers adapted. Existing owner records are not
+discarded. Nine cases/nine exact controls pass three times, plus the session-owner
+and whole-owner terminal suites; six Windows production objects compile cleanly.
+See [protocol and limits](M4_P2_VI_TERMINAL_PUBLICATION.md) and
+[results](M4_P2_VI_TERMINAL_RESULTS.json). Next: warm OnTerminate layer/slot effects,
+Conductor and active-operation drain order. This terminal gate does not drain old
+borrowers/native work or complete any M4 phase. Guest admission Unknown, main
+unchanged; current-run binaries/objects cleaned after preserving evidence.
+
 ## 2026-10-23: VI partial-create and refused-Close owner retention
 
 From `0a22468339`, actual-body negative witnesses reproduced visible failed-create

@@ -137,6 +137,7 @@ jobs:
           python tools/physical_coherency_tests/run_surface_composition_drain_tests.py --repeat 3
           python tools/physical_coherency_tests/run_vi_capture_drain_tests.py --repeat 3
           python tools/physical_coherency_tests/run_vi_session_owner_tests.py --repeat 3
+          python tools/physical_coherency_tests/run_vi_termination_tests.py --repeat 3
           python tools/physical_coherency_tests/run_owned_retirement_tests.py --repeat 3
           python tools/physical_coherency_tests/run_nvdrv_retirement_tests.py --repeat 3
           python tools/gpu_lifecycle_tests/run_unmap_ownership_tests.py --repeat 3
@@ -324,6 +325,8 @@ jobs:
             .diagnostics/m4-vi-capture/*.log
             .diagnostics/m4-vi-session-owner/*.json
             .diagnostics/m4-vi-session-owner/*.log
+            .diagnostics/m4-vi-termination/*.json
+            .diagnostics/m4-vi-termination/*.log
             .diagnostics/gpu-lifecycle/linux/thread-extraction.json
             .diagnostics/gpu-lifecycle/linux/thread-*.log
             .diagnostics/gpu-lifecycle/linux/direct-*.log

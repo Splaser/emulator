@@ -3,6 +3,11 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [VI terminal-publication follow-up](M4_P2_VI_TERMINAL_PUBLICATION.md) prevents
+cold/paused lazy initialization and retained-facade access from reopening VI after
+OnTerminate. Its same-mutex gate and nullable caller checks are terminal refusal,
+not drainage of existing layers, Conductor, escaped managers or native work.
+
 The [VI partial-session owner protocol](M4_P2_VI_SESSION_OWNERSHIP.md) follows the
 capture audit: creation/raw initialization is counted; failed prefixes are hidden
 Unknown records with prepared Process/backing/Module/VI/slot-provider retention.

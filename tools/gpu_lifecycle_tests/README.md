@@ -1,5 +1,9 @@
 # GPU lifecycle correctness: F4/F5
 
+VI stop/lazy-publication races and all eight nullable VI/AM caller bodies are
+covered by `../physical_coherency_tests/run_vi_termination_tests.py`. See
+[terminal-publication scope](../../docs/M4_P2_VI_TERMINAL_PUBLICATION.md).
+
 VI create/destroy failure ownership uses
 `../physical_coherency_tests/run_vi_session_owner_tests.py`: actual entry/getter,
 pool-allocation and Close bodies, with prepared retention and precise partial-prefix
