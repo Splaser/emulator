@@ -33,8 +33,10 @@ def method(marker):
 
 wait = method('void MasterSemaphore::Wait(u64 tick)')
 worker = method('void MasterSemaphore::WaitThread(')
+submit = method('VkResult MasterSemaphore::SubmitQueueFence(')
 source = r'''
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -44,23 +46,36 @@ source = r'''
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <functional>
 #include <thread>
 using u64=unsigned long long;
 using VkResult=int;
-constexpr int VK_SUCCESS=0,VK_TIMEOUT=2,VK_ERROR_DEVICE_LOST=-4;
+using u32=unsigned;using VkSemaphore=int;
+constexpr int VK_SUCCESS=0,VK_TIMEOUT=2,VK_ERROR_DEVICE_LOST=-4,VK_ERROR_UNKNOWN=-13;
+constexpr int VK_STRUCTURE_TYPE_SUBMIT_INFO=4;
+constexpr std::array<int,2> master_wait_stage_masks{1,2};
+struct VkSubmitInfo {
+    int sType;const void* pNext;u32 waitSemaphoreCount;const int* pWaitSemaphores;
+    const int* pWaitDstStageMask;u32 commandBufferCount;const int* pCommandBuffers;
+    u32 signalSemaphoreCount;const int* pSignalSemaphores;
+};
 using namespace std::chrono_literals;
 void Require(bool value,const char* reason) {
     if(!value) {std::cerr<<"FAIL "<<reason<<"\n";std::cerr.flush();std::_Exit(91);}
 }
 namespace vk {
+struct CommandBuffer {int handle=1;int operator*() const {return handle;}};
 struct Exception {int result;explicit Exception(int r):result{r} {} int GetResult() const {return result;}};
 struct Fence {
     int id=0,result=0;inline static std::atomic<int> resets=0;
     inline static int reset_result=VK_SUCCESS;
+    inline static std::atomic<int> waits=0;
+    inline static std::function<void()> wait_hook;
     Fence()=default;Fence(int i,int r):id{i},result{r} {}
     Fence(Fence&& other) noexcept:id{std::exchange(other.id,0)},result{other.result} {}
     Fence& operator=(Fence&& other) noexcept {id=std::exchange(other.id,0);result=other.result;return *this;}
-    int Wait() {return result;}void Reset() {++resets;if(reset_result!=VK_SUCCESS)throw Exception(reset_result);}
+    int operator*() const {return id;}
+    int Wait() {++waits;if(wait_hook)wait_hook();return result;}void Reset() {++resets;if(reset_result!=VK_SUCCESS)throw Exception(reset_result);}
 };
 }
 namespace Common {
@@ -71,15 +86,32 @@ struct FakeTimeline {
     explicit operator bool() const {return false;}
     bool Wait(u64) {throw vk::Exception(-9);}
 };
+struct FakeQueue {
+    int calls=0,result=VK_SUCCESS;std::function<void()> hook;
+    int Submit(const VkSubmitInfo&,int) {
+        ++calls;if(hook)hook();
+        return result;
+    }
+};
+struct FakeDevice {FakeQueue queue;FakeQueue& GetGraphicsQueue() {return queue;}};
+template<class T> struct ReservationQueue:std::queue<T> {
+    bool fail_reservation=false;
+    template<class... Args> void emplace(Args&&... args) {
+        if(fail_reservation)throw std::bad_alloc();
+        std::queue<T>::emplace(std::forward<Args>(args)...);
+    }
+};
 struct Master {
     using Waitable=std::pair<u64,vk::Fence>;
     FakeTimeline semaphore;std::atomic<u64> gpu_tick{0};
     std::atomic<VkResult> completion_failure{VK_SUCCESS};std::optional<Waitable> failed_wait;
     std::mutex wait_mutex,free_mutex;std::condition_variable free_cv;
     std::condition_variable_any wait_cv;
-    std::queue<Waitable> wait_queue;std::deque<vk::Fence> free_queue;
+    ReservationQueue<Waitable> wait_queue;std::deque<vk::Fence> free_queue;
+    FakeDevice device;int acquired_fences=0;
+    vk::Fence GetFreeFence() {++acquired_fences;return vk::Fence{17,VK_SUCCESS};}
     bool IsFree(u64 tick) {return gpu_tick.load()>=tick;}void Refresh() {}
-''' + wait + '\n' + worker + r'''
+''' + wait + '\n' + worker + '\n' + submit + r'''
 };
 void Check(int result,int reset_error=VK_SUCCESS) {
     Master master;vk::Fence::resets=0;vk::Fence::reset_result=reset_error;
@@ -115,7 +147,82 @@ void Check(int result,int reset_error=VK_SUCCESS) {
         std::cout<<"PASS native fence failure wakes waiters and retains unknown prefix/suffix\n";
     }
 }
-int main() {Check(VK_SUCCESS);Check(VK_ERROR_DEVICE_LOST);Check(VK_TIMEOUT);Check(VK_SUCCESS,VK_ERROR_DEVICE_LOST);}
+void Submission(int result) {
+    Master master;vk::Fence::reset_result=VK_SUCCESS;vk::Fence::waits=0;
+    master.device.queue.result=result;
+    master.device.queue.hook=[&] {
+        Require(master.wait_queue.size()==1 && master.wait_queue.front().second.id==17,
+                "native submission preceded durable fence record");
+    };
+    vk::CommandBuffer commands;
+    const auto outcome=master.SubmitQueueFence(commands,commands,0,0,7);
+    const auto expected=result;
+    Require(outcome==expected,"native submit failure lost original result");
+    if(expected!=VK_SUCCESS) {
+        Require(master.wait_queue.size()==1 && master.wait_queue.front().second.id==17,
+                "uncertain submission lost its fence record");
+        Require(master.completion_failure==expected,"uncertain submission did not fail completion wait");
+        master.WaitThread(std::stop_token{});
+        Require(vk::Fence::waits==0 && master.gpu_tick==0 && master.free_queue.empty(),
+                "rejected submission entered completion or recycle path");
+        bool failed=false;try {master.Wait(7);}catch(const vk::Exception& e) {failed=e.result==expected;}
+        Require(failed,"uncertain submission did not fail completion wait");
+        Require(master.SubmitQueueFence(commands,commands,0,0,8)==expected &&
+                master.device.queue.calls==1 && master.acquired_fences==1 && master.wait_queue.size()==1,
+                "terminal submit failure allowed new native work");
+    } else {
+        std::jthread worker([&](std::stop_token token) {master.WaitThread(token);});
+        master.Wait(7);worker.request_stop();master.wait_cv.notify_all();worker.join();
+        Require(master.gpu_tick==7 && master.wait_queue.empty() && master.free_queue.size()==1,
+                "reserved successful submission did not retire");
+    }
+}
+void ReservationFailure() {
+    Master master;vk::CommandBuffer commands;master.wait_queue.fail_reservation=true;
+    bool threw=false;try {master.SubmitQueueFence(commands,commands,0,0,7);}catch(const std::bad_alloc&) {threw=true;}
+    Require(threw && master.device.queue.calls==0 && master.wait_queue.empty() && master.completion_failure==VK_SUCCESS,
+            "fence record allocation failed after native acceptance");
+    master.wait_queue.fail_reservation=false;
+    Require(master.SubmitQueueFence(commands,commands,0,0,8)==VK_SUCCESS,"pre-submit failure poisoned later submission");
+}
+void PendingReservation() {
+    Master master;vk::CommandBuffer commands;
+    std::promise<void> entered,release;auto entered_future=entered.get_future();
+    auto release_future=release.get_future().share();
+    master.device.queue.hook=[&] {entered.set_value();release_future.wait();};
+    auto submitted=std::async(std::launch::async,[&] {return master.SubmitQueueFence(commands,commands,0,0,7);});
+    Require(entered_future.wait_for(3s)==std::future_status::ready,"native submit rendezvous timeout");
+    const bool exposed=master.wait_mutex.try_lock();
+    if(exposed)master.wait_mutex.unlock();
+    release.set_value();
+    Require(submitted.get()==VK_SUCCESS,"pending reservation lost acceptance");
+    Require(!exposed,"completion worker could observe unsent fence record");
+}
+void OlderCompletion(bool succeeds) {
+    Master master;vk::Fence::reset_result=VK_SUCCESS;vk::CommandBuffer commands;
+    master.wait_queue.emplace(5,vk::Fence{27,succeeds?VK_SUCCESS:VK_TIMEOUT});
+    std::promise<void> entered,release;auto entered_future=entered.get_future();
+    auto released=release.get_future().share();
+    vk::Fence::wait_hook=[&] {entered.set_value();released.wait();};
+    std::jthread worker([&](std::stop_token token) {master.WaitThread(token);});
+    Require(entered_future.wait_for(3s)==std::future_status::ready,"older fence rendezvous timeout");
+    master.device.queue.result=VK_ERROR_UNKNOWN;
+    Require(master.SubmitQueueFence(commands,commands,0,0,7)==VK_ERROR_UNKNOWN,"new submit lost failure");
+    release.set_value();worker.join();vk::Fence::wait_hook={};
+    Require(master.completion_failure==VK_ERROR_UNKNOWN && master.wait_queue.size()==1 &&
+            master.wait_queue.front().first==7,"older completion changed new submission isolation");
+    Require(master.gpu_tick==(succeeds?5u:0u),"older completion certified new failed tick");
+    if(!succeeds)Require(master.failed_wait && master.failed_wait->second.id==27,"older failed fence lost ownership");
+    bool failed=false;try {master.Wait(7);}catch(const vk::Exception& error) {failed=error.GetResult()==VK_ERROR_UNKNOWN;}
+    Require(failed,"new submission failure overwritten by older completion");
+}
+int main() {
+    Check(VK_SUCCESS);Check(VK_ERROR_DEVICE_LOST);Check(VK_TIMEOUT);Check(VK_SUCCESS,VK_ERROR_DEVICE_LOST);
+    Submission(VK_SUCCESS);Submission(VK_ERROR_DEVICE_LOST);Submission(VK_TIMEOUT);
+    Submission(VK_ERROR_UNKNOWN);ReservationFailure();PendingReservation();
+    OlderCompletion(false);OlderCompletion(true);
+    std::cout<<"PASS durable submission reservation and retained failure transaction\n";
+}
 '''
 source = '#include <utility>\n' + source
 flags = [a.cxx, '-std=c++23', '-O1', '-pthread', '-Wall', '-Wextra', '-Werror']
@@ -134,10 +241,10 @@ for i in range(a.repeat):
     result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=12)
     log = result.stdout + result.stderr
     (out / f'positive-{i}.log').write_text(log)
-    assert result.returncode == 0 and log.count('PASS native fence failure') == 3, log
+    assert result.returncode == 0 and log.count('PASS native fence failure') == 3 and 'PASS durable submission' in log, log
 print(f'PASS actual native fence completion bodies ({a.repeat} repetitions)', flush=True)
 controls = [
-    ('ignore-wait-result', source.replace('if (result != VK_SUCCESS) {', 'if (false) {'),
+    ('ignore-wait-result', source.replace(worker,worker.replace('if (result != VK_SUCCESS) {', 'if (false) {')),
      'failed native fence reported completion'),
     ('recycle-unknown-fence', source.replace('failed_wait.emplace(host_tick, std::move(fence));',
         'fence.Reset();free_queue.push_back(std::move(fence));'),
@@ -145,6 +252,18 @@ controls = [
     ('reset-exception-escapes', source.replace(
         'result = error.GetResult();', 'throw;'),
      'native fence reset exception escaped completion worker'),
+    ('submit-record-too-late', source.replace(submit,submit.replace(
+        '    wait_queue.emplace(host_tick, std::move(fence));','    static_cast<void>(host_tick);').replace(
+        '*wait_queue.back().second', '*fence')),
+     'native submission preceded durable fence record'),
+    ('submit-forgets-failure', source.replace(submit,submit.replace(
+        'completion_failure.compare_exchange_strong(expected, result, std::memory_order_release);',
+        'static_cast<void>(expected);')),
+     'uncertain submission did not fail completion wait'),
+    ('older-failure-overwrites-isolation', source.replace(worker,worker.replace(
+        'completion_failure.compare_exchange_strong(expected, result, std::memory_order_release);',
+        'completion_failure.store(result, std::memory_order_release);static_cast<void>(expected);')),
+     'older completion changed new submission isolation'),
 ]
 for name, changed, expected in controls:
     assert changed != source
@@ -159,7 +278,7 @@ paths = [path, 'src/video_core/renderer_vulkan/vk_master_semaphore.h',
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in paths},
     'positive_repeats': a.repeat, 'controls': [c[0] for c in controls],
-    'actual': ['MasterSemaphore Wait and WaitThread'],
+    'actual': ['MasterSemaphore Wait, WaitThread and SubmitQueueFence'],
     'fixtures': ['Vulkan fence results, timeline-disabled facade and resource queues'],
     'boundary': 'No native device run, visibility, backing ownership or Guest admission proof.'
 }, indent=2))

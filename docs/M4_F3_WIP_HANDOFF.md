@@ -1,5 +1,18 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: fence submission ownership reserved before acceptance
+
+SubmitQueueFence now reserves its tick/fence record before native Submit while
+holding the worker's wait_mutex. No allocating insertion follows acceptance.
+Non-success keeps the record/suffix and latches failure; the worker refuses to
+consume possibly unsignalled rejected fences. First-error CAS preserves newer
+isolation against delayed older completions/failures. Actual Submit/Wait/worker
+bodies cover allocation refusal/retry, accepted/failed submits, mutex visibility
+and both older-completion races. See
+[transaction and validation](M4_F3_NATIVE_SUBMISSION_RESERVATION.md).
+This retains fences, not all native/backing resources. Higher-level Unknown
+ownership, independent producers and visibility remain open; guest admission Unknown.
+
 ## 2026-10-23: native fence Reset exception is acknowledged failure
 
 A successful native wait followed by a Reset exception escaped the completion
