@@ -1,5 +1,27 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: morning checkpoint — exceptional dispatch return
+
+Continued from the clean, remotely matching 0bb6abcc71. Two new deterministic
+actual-header witnesses compiled and showed that dispatch throwing after retention
+left a runnable action, and throwing after action entry returned before completion.
+RunAcknowledgedCallback now cancels Pending or waits for Running on exceptional
+dispatch too, then returns Failed. Ordinary completion/cancellation is unchanged;
+no scheduling or shutdown order changes. Completed actions/partial effects are
+not rolled back or reclassified as no-effects cancellation.
+
+Windows: both suites passed three repetitions, with three new dispatch controls
+and five checked-unmap controls. Nine actual production units compiled to x64
+COFF with no diagnostics; 32 recorded input hashes (26 unique), object hashes
+and machine signatures matched. Evidence is `.diagnostics/m4-dispatch-results/`
+and the committed JSON summary. All twelve exe files, nine objects and other
+temporary files from this turn were removed (71 files total).
+
+See [dispatch exception evidence and continuation boundary](M4_F3_DISPATCH_EXCEPTION.md).
+All THREE M4 phases remain unfinished; guest admission stays Unknown. No main
+merge, new remote/Android/device run or full app link is claimed.
+
+
 ## 2026-10-22: checked UnmapMemory execution and retained failure ownership
 
 UnmapMemory now consumes acknowledged callback completion. Queued rejection or

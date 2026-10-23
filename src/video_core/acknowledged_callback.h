@@ -24,30 +24,38 @@ CallbackOutcome RunAcknowledgedCallback(Dispatch&& dispatch, std::function<void(
     };
     auto request = std::make_shared<Request>();
     auto completion = request->completion.get_future();
-    dispatch([request, callback_action = std::move(action)] {
-        auto expected = Request::Admission::Pending;
-        if (!request->admission.compare_exchange_strong(expected, Request::Admission::Running)) {
-            return; // cancellation won; never touch the callback's receiver
-        }
-        try {
-            callback_action();
-            request->completion.set_value();
-        } catch (...) {
-            request->completion.set_exception(std::current_exception());
-            throw; // preserve the GPU worker's existing failure handling
-        }
-    });
+    bool dispatch_failed = false;
+    try {
+        dispatch([request, callback_action = std::move(action)] {
+            auto expected = Request::Admission::Pending;
+            if (!request->admission.compare_exchange_strong(expected, Request::Admission::Running)) {
+                return; // cancellation won; never touch the callback's receiver
+            }
+            try {
+                callback_action();
+                request->completion.set_value();
+            } catch (...) {
+                request->completion.set_exception(std::current_exception());
+                throw; // preserve the GPU worker's existing failure handling
+            }
+        });
+    } catch (...) {
+        // Dispatch may throw after retaining or starting the action. Use the
+        // same admission race below: cancel Pending, or join Running before
+        // reporting failure. Never leave a runnable action behind the caller.
+        dispatch_failed = true;
+    }
     auto expected = Request::Admission::Pending;
     if (request->admission.compare_exchange_strong(expected, Request::Admission::Cancelled)) {
         // Includes rejected admission and failed-mode queue acknowledgement.
         // A retained queued closure cannot subsequently start the action.
-        return CallbackOutcome::Cancelled;
+        return dispatch_failed ? CallbackOutcome::Failed : CallbackOutcome::Cancelled;
     }
     // A shutdown wakeup may precede an active callback's return. Wait for the
     // actual callback here, without holding cache/PTE or queue locks.
     try {
         completion.get();
-        return CallbackOutcome::Completed;
+        return dispatch_failed ? CallbackOutcome::Failed : CallbackOutcome::Completed;
     } catch (...) {
         return CallbackOutcome::Failed;
     }

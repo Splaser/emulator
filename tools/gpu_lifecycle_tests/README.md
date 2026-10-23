@@ -371,3 +371,11 @@ The Windows object compiler now defaults to nine units, including the Vulkan
 rasterizer, GPU thread and NvMap. Initialize the repository's pinned Vulkan-Headers,
 VulkanMemoryAllocator, Vulkan-Utility-Libraries, SPIRV-Headers, sirit and
 unordered_dense submodules before this check. Existing Boost/fmt requirements remain.
+
+Run `run_dispatch_exception_tests.py --repeat 3` to check exceptional dispatch
+return against the real acknowledged-callback helper. Retained Pending closures
+must never start later; Running actions must finish before Failed is returned.
+The fixture also checks inline failure, exception after completion and unchanged
+normal outcomes, with three precise controls. This is host callback lifetime
+and result evidence, not a native completion or guest-admission certificate.
+See [the morning checkpoint](../../docs/M4_F3_DISPATCH_EXCEPTION.md).
