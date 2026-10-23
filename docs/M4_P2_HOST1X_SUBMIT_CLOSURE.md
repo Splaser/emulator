@@ -4,6 +4,10 @@ Date: 2026-10-23 (Asia/Singapore). Baseline: `11a92e5a09`.
 
 ## Transaction disposition (defined before implementation)
 
+Follow-up: [shared mapping ioctl closure](M4_P2_HOST1X_MAPPING_CLOSURE.md) now
+also counts MapBuffer and UnmapBuffer on this same domain. Direct nvmap/device
+operations and complete alias freeze remain independent.
+
 The actual VIC/NVDEC ioctl shares nvhost_nvdec_common::Submit. It reads guest
 command buffers, advances syncpoint maxima and invokes GPU::PushCommandBuffer,
 which currently calls CDmaPusher::ProcessEntries synchronously. The commented

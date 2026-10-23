@@ -1,5 +1,17 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: host1x MapBuffer/UnmapBuffer share the Submit closure
+
+Both common VIC/NVDEC mapping ioctls now enter the same domain as Submit, before
+pin/unpin or local output mutation. Partial pin/unpin failures seal before count
+exit; even a zero first Pin is Unknown because the callee can already have
+changed reservations/mappings. The expanded actual-body suite passes three
+repetitions and sixteen exact controls; four Windows production units compile.
+See [disposition and validation](M4_P2_HOST1X_MAPPING_CLOSURE.md).
+Existing cohort/ResumeBatch code is unchanged. Direct nvmap/free/eviction paths,
+complete alias freeze and durable Unknown native/backing ownership remain open.
+P2 remains incomplete and GuestBackingAdmission stays Unknown.
+
 ## 2026-10-23: synchronous VIC/NVDEC Submit closure
 
 The shared nvhost_nvdec_common Submit body now retains a Kernel-owned producer

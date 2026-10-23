@@ -155,8 +155,18 @@ NvResult nvhost_nvdec_common::GetWaitbase(IoctlGetWaitbase& params) {
 
 NvResult nvhost_nvdec_common::MapBuffer(IoctlMapBuffer& params, std::span<MapBufferEntry> entries,
                                         DeviceFD fd) {
+    const auto domain = system.Kernel().Host1xSubmitDomain();
+    auto mapping = domain->EnterCold();
+    if (!mapping) return NvResult::Busy;
+    bool effects_started = false;
+    bool completed = false;
+    SCOPE_EXIT {
+        if (effects_started && !completed) domain->Seal();
+    };
     const size_t num_entries = std::min(params.num_entries, static_cast<u32>(entries.size()));
     for (size_t i = 0; i < num_entries; i++) {
+        // Even a zero result may follow mapping/reservation changes in PinHandle.
+        effects_started = true;
         DAddr pin_address = nvmap.PinHandle(entries[i].map_handle, true);
         if (!pin_address) {
             LOG_ERROR(Service_NVDRV, "Failed to pin handle {}: SMMU address space exhausted",
@@ -166,18 +176,29 @@ NvResult nvhost_nvdec_common::MapBuffer(IoctlMapBuffer& params, std::span<MapBuf
         entries[i].map_address = static_cast<u32>(pin_address);
     }
 
+    completed = true;
     return NvResult::Success;
 }
 
 NvResult nvhost_nvdec_common::UnmapBuffer(IoctlMapBuffer& params,
                                           std::span<MapBufferEntry> entries) {
+    const auto domain = system.Kernel().Host1xSubmitDomain();
+    auto mapping = domain->EnterCold();
+    if (!mapping) return NvResult::Busy;
+    bool effects_started = false;
+    bool completed = false;
+    SCOPE_EXIT {
+        if (effects_started && !completed) domain->Seal();
+    };
     const size_t num_entries = std::min(params.num_entries, static_cast<u32>(entries.size()));
     for (size_t i = 0; i < num_entries; i++) {
+        effects_started = true;
         nvmap.UnpinHandle(entries[i].map_handle);
         entries[i] = {};
     }
 
     params = {};
+    completed = true;
     return NvResult::Success;
 }
 

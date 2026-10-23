@@ -46,6 +46,10 @@ to release backing.
 
 ## Recent concrete progress
 
+- [Host1x mapping ioctl closure](M4_P2_HOST1X_MAPPING_CLOSURE.md) now shares the
+  Submit domain with MapBuffer/UnmapBuffer; partial pin/unpin failure cannot
+  become a drained receipt. Other direct nvmap/mapping/alias routes remain open.
+
 - [Synchronous host1x Submit closure](M4_P2_HOST1X_SUBMIT_CLOSURE.md) now refuses
   closed common VIC/NVDEC submissions before effects, drains admitted bodies
   before managed writes and quarantines partial failure. Other device, alias,
