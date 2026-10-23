@@ -1,5 +1,20 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-23: whole-owner terminal disposal and no-unwind failure
+
+The owning System shutdown now drains GPU before service/Process/PageTable
+retirement; System destructor has the same fallback before Impl's reverse member
+destruction. GPU's existing terminal close/join becomes idempotent explicit
+Shutdown. Renderer requires successful native idle and checked disposal; Turbo
+checks its separate device too. Detected uncertainty records stage/reason/Vulkan
+result and directly `_Exit(86)` before parent/member destruction. No queue or
+global quarantine manager is added. Independent child-process tests verify five
+success paths, 23 failure paths (three repetitions), five precise mutation controls,
+and no destructor/atexit/static-handler escape. Windows production compilation
+uses real headers and a real generated Turbo shader. See
+[protocol and evidence](M4_P2_WHOLE_OWNER_TERMINAL_DISPOSAL.md).
+This is a terminal Fail-Stop slice; P2 and ordinary Guest admission remain open.
+
 ## 2026-10-23: native terminal drain witness and disposal ordering
 
 Prioritize native drain and whole-owner terminal disposal; do not grow retirement

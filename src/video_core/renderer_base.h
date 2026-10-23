@@ -38,7 +38,8 @@ public:
     virtual ~RendererBase();
 
     /// Owner-thread teardown after GPU emulation and external composite callbacks stop.
-    /// Return only when backend workers can no longer access renderer/GPU owners.
+    /// Return only when backend workers/native work can no longer access owners.
+    /// An uncertain terminal failure must fail-stop, never permit member teardown.
     virtual void Shutdown();
 
     /// Finalize rendering the guest frame and draw into the presentation texture

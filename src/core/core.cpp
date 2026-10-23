@@ -38,6 +38,7 @@
 #include "common/fs/fs.h"
 #include "common/logging.h"
 #include "common/settings.h"
+#include "common/terminal_fail_stop.h"
 #include "common/settings_enums.h"
 #include "common/string_util.h"
 #include "core/arm/exclusive_monitor.h"
@@ -515,15 +516,25 @@ struct System::Impl {
         exit_locked = false;
         exit_requested = false;
 
-        if (gpu_core) {
-            gpu_core->NotifyShutdown();
+        const char* stage = "system.producer_close";
+        try {
+            if (gpu_core) {
+                gpu_core->NotifyShutdown();
+            }
+            stop_event.request_stop();
+            core_timing.SyncPause(false);
+            Network::CancelPendingSocketOperations();
+
+            stage = "system.execution_stop";
+            kernel.SuspendEmulation(true);
+            // Before service/Process owners or GPU/Host1x/backing can retire.
+            stage = "system.gpu_drain";
+            if (gpu_core) {
+                gpu_core->Shutdown();
+            }
+        } catch (...) {
+            Common::TerminalFailStop(stage, "host_exception");
         }
-
-        stop_event.request_stop();
-        core_timing.SyncPause(false);
-        Network::CancelPendingSocketOperations();
-
-        kernel.SuspendEmulation(true);
         kernel.CloseServices();
         kernel.ShutdownCores();
 
@@ -728,7 +739,13 @@ struct System::Impl {
 
 System::System() : impl{std::make_unique<Impl>(*this)} {}
 
-System::~System() = default;
+System::~System() {
+    // Fallback for callers that did not explicitly stop a live emulation session.
+    // Impl's reverse member order would otherwise destroy backing before GPU.
+    if (impl && impl->gpu_core) {
+        impl->ShutdownMainProcess();
+    }
+}
 
 CpuManager& System::GetCpuManager() {
     return impl->cpu_manager;

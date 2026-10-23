@@ -40,6 +40,8 @@ markers = ['~Impl()', 'u64 RequestSyncOperation(', 'u64 CurrentSyncRequestFence(
            'WaitForSyncOperation(const u64 fence)', 'void TickWork()', 'void NotifyShutdown()',
            'VideoCore::RasterizerDownloadArea OnCPURead(', 'void RequestComposite(',
            'std::vector<u8> GetAppletCaptureBuffer()']
+if '    void Shutdown()' in source:
+    markers.append('void Shutdown()')
 methods = []
 for marker in markers:
     method = extract(source, marker)
@@ -78,6 +80,7 @@ head = r'''
 #include <vector>
 #include "common/common_types.h"
 #include "common/terminal_ingress.h"
+#include "common/terminal_fail_stop.h"
 #include "video_core/rasterizer_binding_state.h"
 using namespace std::chrono_literals;
 void Require(bool ok,const char* reason) { if(!ok) throw std::runtime_error(reason); }
@@ -164,6 +167,7 @@ struct Impl {
     std::shared_ptr<VideoCore::Renderer> renderer=std::make_shared<VideoCore::Renderer>();
     Host& host1x;
     std::atomic<bool> shutting_down=false;
+    bool is_shut_down=false,terminal_shutdown_started=false;
     Common::TerminalIngress owner_publications;
     std::shared_ptr<Tegra::RasterizerBindingState> rasterizer_binding=std::make_shared<Tegra::RasterizerBindingState>();
     std::mutex sync_mutex; std::condition_variable sync_cv;
@@ -334,6 +338,7 @@ cpp = out / 'gpu_requests.cpp'
 cpp.write_text(head + extra + '\n'.join(methods) + tail)
 exe = out / ('gpu_requests.exe' if os.name == 'nt' else 'gpu_requests')
 flags = [args.cxx, '-std=c++23', '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-pthread', '-I', str(root/'src')]
+flags += [str(root/'src/common/terminal_fail_stop.cpp')]
 if args.sanitize:
     flags += ['-fsanitize='+('address,undefined' if args.sanitize=='address' else 'thread'), '-fno-omit-frame-pointer']
 subprocess.run(flags + [str(cpp), '-o', str(exe)], check=True)

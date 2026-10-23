@@ -10,6 +10,7 @@
 #include "common/logging.h"
 #include "common/polyfill_thread.h"
 #include "common/thread.h"
+#include "common/terminal_fail_stop.h"
 #include "video_core/host_shaders/vulkan_turbo_mode_comp_spv.h"
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -40,19 +41,31 @@ TurboMode::TurboMode(const vk::Instance& instance, const vk::InstanceDispatch& d
 }
 
 TurboMode::~TurboMode() {
-    // The desktop worker dereferences resources while Android resets driver state
-    // when it leaves Run. Both must finish before member/resource destruction.
-    m_thread.request_stop();
-    m_submission_cv.notify_all();
-    if (m_thread.joinable()) {
-        m_thread.join();
-    }
+    const char* stage = "turbo.worker_join";
+    try {
+        // The desktop worker dereferences resources while Android resets driver state
+        // when it leaves Run. Both must finish before member/resource destruction.
+        m_thread.request_stop();
+        m_submission_cv.notify_all();
+        if (m_thread.joinable()) {
+            m_thread.join();
+        }
 #ifndef ANDROID
-    // Its adaptive fence wait can time out before Run observes stop. Joining the
-    // host thread alone does not retire that separate device's last dispatch.
-    void(m_device.GetLogical().WaitIdle());
-    CleanupResources();
+        // Its adaptive fence wait can time out before Run observes stop. Joining the
+        // host thread alone does not retire that separate device's last dispatch.
+        stage = "turbo.native_idle";
+        const auto idle = m_device.GetLogical().WaitIdle();
+        if (idle != VK_SUCCESS) {
+            Common::TerminalFailStop(stage, "vulkan_result", static_cast<int>(idle));
+        }
+        stage = "turbo.disposal";
+        CleanupResources();
 #endif
+    } catch (const vk::Exception& error) {
+        Common::TerminalFailStop(stage, "vulkan_exception", static_cast<int>(error.GetResult()));
+    } catch (...) {
+        Common::TerminalFailStop(stage, "host_exception");
+    }
 }
 
 void TurboMode::QueueSubmitted() {

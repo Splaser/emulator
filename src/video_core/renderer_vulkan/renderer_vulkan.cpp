@@ -17,6 +17,7 @@
 #include <ranges>
 #include "common/scope_exit.h"
 #include "common/settings.h"
+#include "common/terminal_fail_stop.h"
 #include "core/core_timing.h"
 #include "core/frontend/graphics_context.h"
 #include "video_core/capture.h"
@@ -158,31 +159,48 @@ void RendererVulkan::Shutdown() {
     if (is_shut_down) {
         return;
     }
-    // GPU emulation and CompositeState callbacks have already stopped. Keep every
-    // referenced cache, GPU owner and Vulkan object alive through these boundaries.
-    rasterizer.Shutdown(); // includes joining the fencing callback thread
-    scheduler.WaitWorker(); // publish even a final recorded Present callback
-    present_manager.Shutdown(); // drain presentation and stop its queue submissions
-    scheduler.Shutdown(); // no recording/submission callbacks can run after this
-    scheduler.RegisterOnSubmit({}); // safe only after the recording worker joined
-    turbo_mode.reset(); // stop its separate device/worker before renderer resources
-    {
-        // All producers are joined before taking the submission lock. Never hold it
-        // across worker drains, which may submit their final command buffers.
-        std::scoped_lock lock{scheduler.submit_mutex};
-        const auto idle = device.GetLogical().WaitIdle();
-        if (idle == VK_SUCCESS) {
-            if (!rasterizer.RetireControlledTransfersAfterDeviceIdle()) {
-                LOG_ERROR(Render_Vulkan,
-                          "Terminal transfer disposal refused: host submission ownership unsettled");
-            }
-        } else {
-            LOG_ERROR(Render_Vulkan, "Terminal GPU drain failed: device idle result {}",
-                      static_cast<int>(idle));
-        }
+    if (terminal_shutdown_started) {
+        Common::TerminalFailStop("renderer.entry", "reentrant_shutdown");
     }
-    scheduler.GetMasterSemaphore().Shutdown(); // no remaining completion-helper access
-    is_shut_down = true;
+    terminal_shutdown_started = true;
+    const char* stage = "renderer.rasterizer_shutdown";
+    try {
+        // GPU emulation and CompositeState callbacks have already stopped. Keep every
+        // referenced cache, GPU owner and Vulkan object alive through these boundaries.
+        rasterizer.Shutdown(); // includes joining the fencing callback thread
+        stage = "renderer.recording_drain";
+        scheduler.WaitWorker(); // publish even a final recorded Present callback
+        stage = "renderer.presentation_join";
+        present_manager.Shutdown(); // drain presentation and stop its queue submissions
+        stage = "renderer.scheduler_join";
+        scheduler.Shutdown(); // no recording/submission callbacks can run after this
+        stage = "renderer.detach_submit";
+        scheduler.RegisterOnSubmit({}); // safe only after the recording worker joined
+        stage = "renderer.turbo_disposal";
+        turbo_mode.reset(); // stop its separate device/worker before renderer resources
+        stage = "renderer.native_idle";
+        {
+            // All producers are joined before taking the submission lock. Never hold it
+            // across worker drains, which may submit their final command buffers.
+            std::scoped_lock lock{scheduler.submit_mutex};
+            const auto idle = device.GetLogical().WaitIdle();
+            if (idle == VK_SUCCESS) {
+                stage = "renderer.checked_disposal";
+                if (!rasterizer.RetireControlledTransfersAfterDeviceIdle()) {
+                    Common::TerminalFailStop(stage, "unsettled_host_ownership", static_cast<int>(idle));
+                }
+            } else {
+                Common::TerminalFailStop(stage, "vulkan_result", static_cast<int>(idle));
+            }
+        }
+        stage = "renderer.completion_join";
+        scheduler.GetMasterSemaphore().Shutdown(); // no remaining completion-helper access
+        is_shut_down = true;
+    } catch (const vk::Exception& error) {
+        Common::TerminalFailStop(stage, "vulkan_exception", static_cast<int>(error.GetResult()));
+    } catch (...) {
+        Common::TerminalFailStop(stage, "host_exception");
+    }
 }
 
 void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebuffers) {

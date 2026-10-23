@@ -1,5 +1,10 @@
 # M4 P2: native drain and terminal disposal
 
+Follow-up: the [whole-owner terminal protocol](M4_P2_WHOLE_OWNER_TERMINAL_DISPOSAL.md)
+addresses the owning shutdown/failure gap below with an early System drain and
+process-level Fail-Stop. This document records the earlier baseline and native
+primitive evidence; it does not certify full P2 or Guest admission.
+
 2026-10-23; baseline `8fb32cf53d`. P2 is incomplete. Ordinary
 GuestBackingAdmission remains Unknown. No retirement queue or retained-record
 type is added by this change.

@@ -35,7 +35,7 @@ def method(text, marker):
 
 gpu = read('src/video_core/gpu.cpp')
 fixture = out / 'gpu/gpu_requests.cpp'
-required = [method(gpu, '~Impl()'), method(gpu, 'void NotifyShutdown()')]
+required = [method(gpu, '~Impl()'), method(gpu, 'void Shutdown()'), method(gpu, 'void NotifyShutdown()')]
 if not fixture.exists() or not all(m in fixture.read_text() for m in required):
     subprocess.run([sys.executable, str(root / 'tools/gpu_lifecycle_tests/run_tests.py'),
                     '--cxx', a.cxx, '--repeat', str(a.repeat), '--output-dir', str(out / 'gpu')], check=True)
@@ -273,6 +273,9 @@ struct nvhost_gpu: nvdevice {
 }
 struct Module {
     FixtureSystem& system;CreationContainer container;DeviceFD next_fd=1;
+    std::shared_ptr<Common::ProducerDrain> dispatch_domain=std::make_shared<Common::ProducerDrain>();
+    std::shared_ptr<Common::OwnedRetirementQueue> retirements=
+        std::make_shared<Common::OwnedRetirementQueue>(dispatch_domain);
     using FilesContainerType=std::unordered_map<DeviceFD,std::shared_ptr<Devices::nvdevice>>;
     FilesContainerType open_files;CreationEvents events_interface;
 ''' + open_result + r'''
@@ -669,9 +672,10 @@ tests = tests.replace(final_check,
 for form in ('gpu.', 'gpu->'):
     tests = tests.replace(form + 'rasterizer=&raster;', form + 'rasterizer=&raster;' +
                           form + 'rasterizer_binding->SetTarget(&raster);')
-source = '#include <algorithm>\n#include <cstdlib>\n#include <unordered_map>\n#include "common/bit_util.h"\n#define ASSERT(x) Require(bool(x),"missing channel binding")\n' + base + caller + tests
+source = '#include <algorithm>\n#include <cstdlib>\n#include <unordered_map>\n#include "common/bit_util.h"\n#include "common/owned_retirement.h"\n#include "common/scope_exit.h"\n#define ASSERT(x) Require(bool(x),"missing channel binding")\n' + base + caller + tests
 flags = [a.cxx, '-std=c++23', '-O1', '-g', '-pthread', '-Wall', '-Wextra', '-Werror',
          '-I', str(root / 'src')]
+flags += [str(root/'src/common/terminal_fail_stop.cpp')]
 
 def compile_source(name, text):
     cpp = out / (name + '.cpp');cpp.write_text(text)

@@ -13,6 +13,7 @@
 
 #include "common/assert.h"
 #include "common/settings.h"
+#include "common/terminal_fail_stop.h"
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/frontend/emu_window.h"
@@ -48,15 +49,33 @@ struct GPU::Impl {
     }
 
     ~Impl() {
-        NotifyShutdown();
-        // Join while every object referenced by RunThread is still alive. Member
-        // destruction order alone cannot drain work or close callback admission.
-        gpu_thread.Stop();
-        owner_publications.Join();
-        rasterizer_binding->Join();
-        CloseCompositeRequests();
-        if (renderer) {
-            renderer->Shutdown();
+        Shutdown();
+    }
+
+    void Shutdown() {
+        if (is_shut_down) return;
+        if (terminal_shutdown_started) {
+            Common::TerminalFailStop("gpu.entry", "reentrant_shutdown");
+        }
+        terminal_shutdown_started = true;
+        const char* stage = "gpu.ingress_close";
+        try {
+            NotifyShutdown();
+            // Join while every object referenced by RunThread is still alive. Member
+            // destruction order alone cannot drain work or close callback admission.
+            stage = "gpu.worker_join";
+            gpu_thread.Stop();
+            stage = "gpu.owner_join";
+            owner_publications.Join();
+            rasterizer_binding->Join();
+            CloseCompositeRequests();
+            stage = "gpu.renderer_shutdown";
+            if (renderer) {
+                renderer->Shutdown();
+            }
+            is_shut_down = true;
+        } catch (...) {
+            Common::TerminalFailStop(stage, "host_exception");
         }
     }
 
@@ -490,6 +509,8 @@ struct GPU::Impl {
     std::unique_ptr<VideoCore::ShaderNotify> shader_notify;
     /// When true, we are about to shut down emulation session, so terminate outstanding tasks
     std::atomic_bool shutting_down{};
+    bool is_shut_down{}; // terminal owner thread only; no restart
+    bool terminal_shutdown_started{};
     // Cold publications may precede GPU Start. Closed by NotifyShutdown, joined
     // before renderer teardown, including the caller's final owner publication.
     Common::TerminalIngress owner_publications;
@@ -697,6 +718,10 @@ void GPU::Start() {
 
 void GPU::NotifyShutdown() {
     impl->NotifyShutdown();
+}
+
+void GPU::Shutdown() {
+    impl->Shutdown();
 }
 
 void GPU::NotifyControlledProducerConflict() {

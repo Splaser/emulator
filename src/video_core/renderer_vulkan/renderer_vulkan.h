@@ -101,6 +101,7 @@ private:
     Common::GuestChunkLease diagnostic_chunk; // one candidate per backing generation, GPU thread only
     std::chrono::steady_clock::time_point next_chunk_diagnostic{};
     bool is_shut_down{}; // owning teardown thread only
+    bool terminal_shutdown_started{};
 };
 
 } // namespace Vulkan

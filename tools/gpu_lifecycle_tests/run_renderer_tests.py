@@ -71,6 +71,7 @@ head=r'''
 #include <utility>
 #include <vector>
 #include "common/polyfill_thread.h"
+#include "common/terminal_fail_stop.h"
 #include "video_core/buffer_cache/controlled_conflict.h"
 using VideoCommon::ControlledProducerConflict;
 #define CITRON_PROFILE_SCOPE(...) ((void)0)
@@ -79,6 +80,7 @@ template<class... T> void Log(const T&...) {}
 #define LOG_ERROR(category, format, ...) Log(__VA_ARGS__)
 using namespace std::chrono_literals;
 constexpr int VK_SUCCESS=0;
+namespace vk {struct Exception : std::exception {int GetResult() const {return -4;}};}
 void Require(bool b,const char* m) { if(!b) throw std::runtime_error(m); }
 struct Event {
     std::mutex mutex; std::condition_variable cv; bool set=false;
@@ -214,6 +216,7 @@ struct MasterSemaphore {
 };
 struct RendererVulkan {
     bool is_shut_down=false;
+    bool terminal_shutdown_started=false;
     RasterizerVulkan rasterizer;
     struct SchedulerSpy {
         std::mutex submit_mutex;
@@ -354,6 +357,7 @@ cpp.write_text(head+fence_shutdown+'\n};\n'+fence_worker+'\n'+scheduler_destruct
                rasterizer_shutdown+'\n'+turbo_destructor+'\n'+master_shutdown+'\n'+renderer_shutdown+'\n'+renderer_destructor+tail)
 exe=out/('renderer_workers.exe' if os.name=='nt' else 'renderer_workers')
 flags=[args.cxx,'-std=c++23','-O1','-g','-Wall','-Wextra','-Werror','-Wno-unused-variable','-pthread','-I',str(root/'src')]
+flags += [str(root/'src/common/terminal_fail_stop.cpp')]
 if args.sanitize:
     flags+=['-fsanitize='+('address,undefined' if args.sanitize=='address' else 'thread'),'-fno-omit-frame-pointer']
 subprocess.run(flags+[str(cpp),'-o',str(exe)],check=True)
@@ -368,7 +372,11 @@ for case in args.case or ['renderer_order','renderer_failed_idle','renderer_pend
     for i in range(args.repeat):
         result=subprocess.run([str(exe),case],capture_output=True,text=True,timeout=20)
         (out/f'renderer-{case}-{i}.log').write_text(result.stdout+result.stderr)
-        if result.returncode:
+        expected_failure = {'renderer_failed_idle': 'stage=renderer.native_idle reason=vulkan_result vk_result=-4',
+                            'renderer_pending_disposal': 'stage=renderer.checked_disposal reason=unsettled_host_ownership vk_result=0'}.get(case)
+        valid = ((result.returncode == 86 and expected_failure in result.stderr) if expected_failure
+                 else result.returncode == 0)
+        if not valid:
             print(result.stdout+result.stderr,end=''); failed=True; break
     else: print(f'PASS {case} ({args.repeat} repetitions)')
 raise SystemExit(1 if failed else 0)

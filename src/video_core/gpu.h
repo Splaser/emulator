@@ -249,6 +249,9 @@ public:
 
     /// Performs any additional necessary steps to shutdown GPU emulation.
     void NotifyShutdown();
+    /// Owner-thread terminal drain while System/Host1x/Kernel/backing still live.
+    /// Returns only on safe backend disposal; uncertain failure stops the process.
+    void Shutdown();
     /// Fencing-worker failure publication without waiting for the command owner to run.
     void NotifyControlledProducerConflict();
     [[nodiscard]] bool HasControlledProducerConflict() const;

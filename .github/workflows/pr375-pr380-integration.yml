@@ -127,6 +127,7 @@ jobs:
           python tools/gpu_lifecycle_tests/run_dispatch_exception_tests.py --repeat 3
           python tools/gpu_lifecycle_tests/run_native_fence_failure_tests.py --repeat 3
           python tools/gpu_lifecycle_tests/run_checked_retirement_tests.py --repeat 3
+          python tools/gpu_lifecycle_tests/run_terminal_disposal_tests.py --repeat 3
           python tools/physical_coherency_tests/run_managed_guest_write_tests.py --repeat 3
           python tools/physical_coherency_tests/run_audio_render_drain_tests.py --repeat 3
           python tools/physical_coherency_tests/run_audio_callback_drain_tests.py --repeat 3

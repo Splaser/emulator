@@ -307,6 +307,7 @@ int main(int argc,char** argv) {
 '''
 source = '#include \"video_core/unmap_failure.h\"\n#include <array>\n#include <bit>\n#include <map>\n#include <span>\n#include <tuple>\n#include <cstdlib>\n#include "common/alignment.h"\n#include "common/swap.h"\n' + base + fixture + tests
 flags = [a.cxx, '-std=c++23', '-O1', '-g', '-pthread', '-Wall', '-Wextra', '-Werror', '-I', str(root / 'src')]
+flags += [str(root/'src/common/terminal_fail_stop.cpp')]
 
 
 def compile_source(name, text):

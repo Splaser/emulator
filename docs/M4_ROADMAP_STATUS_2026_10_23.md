@@ -10,11 +10,17 @@ Windows production units. No fresh whole-project/device acceptance is implied.
 
 ## Overall position
 
-Latest native-drain follow-up: [terminal disposal evidence](M4_P2_NATIVE_TERMINAL_DRAIN.md)
+The [whole-owner terminal follow-up](M4_P2_WHOLE_OWNER_TERMINAL_DISPOSAL.md)
+now enforces safe drain/disposal before System service/Process teardown, or
+no-unwind process Fail-Stop on detected uncertainty. It closes that terminal
+lifetime transition without adding queues or in-process recovery. Ordinary
+producer exclusion and Guest-backed admission still keep P2/M4 incomplete.
+
+Earlier native-drain follow-up: [terminal disposal evidence](M4_P2_NATIVE_TERMINAL_DRAIN.md)
 repairs cross-layer preflight ordering and records a real Windows RTX 4060
-idle/visibility/disposal witness. It does not cover ordinary Guest backing or
-protect the full owner graph from later C++ destruction after drain refusal.
-Global teardown outcome/ownership is the next priority; P2 stays incomplete.
+idle/visibility/disposal witness. Its ordinary Guest backing and whole-owner
+failure gaps were kept explicit; the subsequent terminal protocol above handles
+the latter with process Fail-Stop. P2 stays incomplete.
 
 | Roadmap item | Current position | Still required |
 | --- | --- | --- |
