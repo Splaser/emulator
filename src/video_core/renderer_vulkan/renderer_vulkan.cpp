@@ -7,6 +7,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <fmt/format.h>
@@ -447,12 +449,17 @@ void RendererVulkan::RenderAppletCaptureLayer(
     }
 
     if (!applet_frame.image) {
-        applet_frame.width = VideoCore::Capture::Layout.width;
-        applet_frame.height = VideoCore::Capture::Layout.height;
-        applet_frame.image = CreateWrappedImage(memory_allocator, CaptureImageSize, CaptureFormat);
-        applet_frame.image_view = CreateWrappedImageView(device, applet_frame.image, CaptureFormat);
-        applet_frame.framebuffer = blit_applet.CreateFramebuffer(
-            VideoCore::Capture::Layout, *applet_frame.image_view, CaptureFormat);
+        Frame candidate{};
+        candidate.width = VideoCore::Capture::Layout.width;
+        candidate.height = VideoCore::Capture::Layout.height;
+        candidate.image = CreateWrappedImage(memory_allocator, CaptureImageSize, CaptureFormat);
+        candidate.image_view = CreateWrappedImageView(device, candidate.image, CaptureFormat);
+        candidate.framebuffer = blit_applet.CreateFramebuffer(
+            VideoCore::Capture::Layout, *candidate.image_view, CaptureFormat);
+        // The owning GPU thread publishes only a complete tuple. Failed creation
+        // unwinds the local Frame in framebuffer/view/image order and can retry.
+        static_assert(std::is_nothrow_move_assignable_v<Frame>);
+        applet_frame = std::move(candidate);
     }
 
     blit_applet.DrawToFrame(rasterizer, &applet_frame, applet_layers, VideoCore::Capture::Layout, 1,

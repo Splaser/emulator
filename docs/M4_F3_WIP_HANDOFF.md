@@ -1,5 +1,22 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-24: applet Frame publication after complete construction
+
+From `2a3a0f4a70`, ten old partial-publication/retry/readback witnesses reproduce.
+Candidate then production pass creation failure at image/view/framebuffer, host
+faults, semaphore factory gates, child-first prefix cleanup, repeated failures,
+retry, existing complete reuse, pass side effects and post-publication Draw error.
+A local value-initialized Frame is moved into the empty member only after all
+creation succeeds; real Frame nothrow move assignment is compile-time checked.
+Two real Windows production COFF units compile without diagnostics; capture,
+checked idle, AA and renderer shutdown regressions pass. See
+[scope and next audit](M4_P2_APPLET_FRAME_PUBLICATION.md) and
+[results/commands](M4_P2_APPLET_FRAME_PUBLICATION_RESULTS.json). Current-run temporary
+artifacts cleaned; issue branch pushed; main untouched. Next: partial raw resource
+recreation and applet first-draw content readiness. Native tuple completeness is
+not pixel/content readiness. HostMemory high risk; M4 incomplete, F2/F3 open and
+admission Unknown.
+
 ## 2026-10-24: AA helper replacement waits for the complete old-use prefix
 
 From `bdd1977472`, eight old-owner retirement witnesses reproduce, including a

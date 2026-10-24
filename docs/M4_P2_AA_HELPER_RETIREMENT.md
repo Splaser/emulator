@@ -155,3 +155,7 @@ exclusion or content authority.
 
 HostMemory remap/protection remains high risk. M4 phases remain incomplete,
 F2/F3 open, GuestBackingAdmission Unknown.
+
+Follow-up: [applet Frame construction publication](M4_P2_APPLET_FRAME_PUBLICATION.md)
+now covers image/view/framebuffer construction failure and retry from an empty
+member. Partial raw recreation and first-draw content readiness remain open.

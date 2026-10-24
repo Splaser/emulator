@@ -3,6 +3,11 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [applet Frame publication follow-up](M4_P2_APPLET_FRAME_PUBLICATION.md) keeps
+creation prefixes local and commits a complete native tuple without throwing.
+Failed creation leaves empty state for retry/readback refusal. Pixel readiness,
+post-publication Draw effects and partial raw recreation remain separate.
+
 The [AA helper retirement follow-up](M4_P2_AA_HELPER_RETIREMENT.md) completes the
 already-recorded graphics prefix and host recording before warm AA/raw replacement.
 It covers later final sampling after internal Finish and failed wait retention;

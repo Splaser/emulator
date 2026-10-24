@@ -458,3 +458,12 @@ partial failed waits, checked failures and constructor retry are controlled.
 Ten exact controls must fail at their named runtime assertions. Native helpers,
 recording/native progress and constructor allocation are fixtures. See
 [scope and Windows validation](../../docs/M4_P2_AA_HELPER_RETIREMENT.md).
+
+`run_applet_frame_tests.py --repeat 3` extracts actual applet rendering/readback,
+Frame declaration and both BlitScreen framebuffer-creation overloads. Pinned
+`--baseline`/`--candidate` modes preserve construction/publication/retry witnesses.
+Image/view/framebuffer and pass failures leave member state empty; factory gates
+inspect publication before commit, failed prefixes release children first, and
+retry/reuse/readback follow the original serialized owner route. Resource/driver,
+Draw/recording/native progress and bytes are fixtures. See
+[scope and Windows results](../../docs/M4_P2_APPLET_FRAME_PUBLICATION.md).
