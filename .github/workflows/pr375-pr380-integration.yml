@@ -143,6 +143,7 @@ jobs:
             python tools/gpu_lifecycle_tests/run_blit_idle_tests.py --repeat 3
             python tools/gpu_lifecycle_tests/run_syncpoint_retirement_tests.py --repeat 3
             python tools/gpu_lifecycle_tests/run_frame_source_tests.py --repeat 3
+            python tools/gpu_lifecycle_tests/run_frame_address_tests.py --repeat 3
           python tools/physical_coherency_tests/run_owned_retirement_tests.py --repeat 3
           python tools/physical_coherency_tests/run_nvdrv_retirement_tests.py --repeat 3
           python tools/gpu_lifecycle_tests/run_unmap_ownership_tests.py --repeat 3
@@ -342,6 +343,8 @@ jobs:
               .diagnostics/m4-syncpoint-retirement/*.log
               .diagnostics/m4-frame-source/*.json
               .diagnostics/m4-frame-source/*.log
+              .diagnostics/m4-frame-address/*.json
+              .diagnostics/m4-frame-address/*.log
             .diagnostics/gpu-lifecycle/linux/thread-extraction.json
             .diagnostics/gpu-lifecycle/linux/thread-*.log
             .diagnostics/gpu-lifecycle/linux/direct-*.log

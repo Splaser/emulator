@@ -69,8 +69,12 @@ void nvdisp_disp0::Composite(std::span<const Nvnflinger::HwcLayer> sorted_layers
         // address lookup or request publication if the packet is absent/mismatched.
         if (!layer.source_owner || !layer.source_owner->owner ||
             layer.source_owner->descriptor.BufferId() != layer.buffer_handle) return;
+        const DAddr address = nvmap.GetHandleAddress(layer.buffer_handle);
+        // Guest free/session retirement may have unmapped a retained wrapper.
+        // Never publish that already-invalid source as a deferred framebuffer.
+        if (address == 0) return;
         output_layers.emplace_back(Tegra::FramebufferConfig{
-            .address = nvmap.GetHandleAddress(layer.buffer_handle),
+            .address = address,
             .offset = layer.offset,
             .width = layer.width,
             .height = layer.height,

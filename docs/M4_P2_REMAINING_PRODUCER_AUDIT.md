@@ -3,6 +3,11 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [source-address translation follow-up](M4_P2_SOURCE_ADDRESS_TRANSLATION.md)
+repairs lookup's mismatched mutex and rejects already-unmapped zero addresses.
+After-snapshot unmap/free remains an explicit counterexample to mapping continuity;
+neither object retention nor this linearized snapshot authorizes delayed reads.
+
 The [per-frame source packet follow-up](M4_P2_FRAME_SOURCE_PACKET.md) now retains
 the actual GraphicBuffer wrapper and immutable descriptor through composer,
 nvdisp, guest-fence actions and synchronous source callback. Mapping-use epochs

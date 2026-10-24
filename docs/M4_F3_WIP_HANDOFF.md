@@ -1,5 +1,21 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-24: synchronize source address snapshots and refuse retired addresses
+
+From `0412393e94`, mapping/free/session audit found GetHandleAddress read d_address
+under the table lock while writers used the handle lock. Actual-body baseline
+witnesses reproduced unsynchronized lookup and deferred publication of address
+zero. Lookup now retains a shared table snapshot, releases the table lock, then
+reads under the handle mutex; nvdisp refuses a zero translation before GPU
+publication. Eight paths/five exact controls pass three times; packet, prepared
+retirement and actual-ThreadManager checked-unmap regressions pass. Four Windows
+production objects compile without diagnostics. See [audit and remaining epoch gap](M4_P2_SOURCE_ADDRESS_TRANSLATION.md)
+and [results](M4_P2_SOURCE_ADDRESS_RESULTS.json). The explicit after-snapshot free
+witness still invalidates the saved address despite an internal duplicate. No
+sustained mapping lease is claimed. Next: actual-read epoch/physical plan with
+remap/reuse, active-read unmap and session mapper retirement. Temporary binaries/
+objects cleaned; main unchanged; M4 incomplete, F2/F3 open, admission Unknown.
+
 ## 2026-10-24: immutable per-frame source packet connected through guest fences
 
 From `4e76547588`, actual composer/nvdisp/GPU bodies reproduced lost source

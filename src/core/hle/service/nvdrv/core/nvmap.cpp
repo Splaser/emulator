@@ -175,12 +175,13 @@ std::shared_ptr<NvMap::Handle> NvMap::GetHandle(Handle::Id handle) {
 }
 
 DAddr NvMap::GetHandleAddress(Handle::Id handle) {
-    std::scoped_lock lock(handles_lock);
-    try {
-        return handles.at(handle)->d_address;
-    } catch (std::out_of_range&) {
-        return 0;
-    }
+    auto handle_description = GetHandle(handle);
+    if (!handle_description) return 0;
+    // Unmap/free/pin mutate this field under the handle lock. Retain a snapshot
+    // from the table, then release its lock before waiting: final free takes
+    // handle -> table. This is address resolution, not a sustained mapping lease.
+    std::scoped_lock lock(handle_description->mutex);
+    return handle_description->d_address;
 }
 
 DAddr NvMap::PinHandle(NvMap::Handle::Id handle, bool low_area_pin) {

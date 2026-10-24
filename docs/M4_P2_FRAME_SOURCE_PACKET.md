@@ -6,6 +6,10 @@ main remains `b6a2ce9488d78efdbbeb0efe14c2ec5c0a263e76`. This connects the
 source-object handoff requested after the syncpoint capture-retirement repair.
 It is not mapping-use exclusion, native completion, or completion of M4 P2.
 
+Follow-up: [source translation versus mapping use](M4_P2_SOURCE_ADDRESS_TRANSLATION.md)
+now synchronizes nvmap address snapshots with free/unmap and refuses zero
+translations. The sustained epoch/read boundary remains open.
+
 ## Defect and packet
 
 HardwareComposer's BufferItem owned a GraphicBuffer, but HwcLayer and the
