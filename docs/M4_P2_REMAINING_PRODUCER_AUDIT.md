@@ -3,6 +3,11 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [raw resource publication follow-up](M4_P2_RAW_RESOURCE_PUBLICATION.md) builds
+staging and every slot locally, then commits the complete tuple after old-use
+completion. Creation failures preserve old owners/metadata and stride participates
+in sizing. Later raw upload/content and helper recreation remain separate.
+
 The [applet content/readback follow-up](M4_P2_APPLET_CONTENT_READBACK.md) quarantines
 failed prefixes and closes applet ingress before terminal drain. Confirmed native
 retirement permits Layer disposal without submitting a stale current tick after

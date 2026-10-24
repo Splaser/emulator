@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "common/math_util.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
@@ -54,8 +56,14 @@ public:
 private:
     void CreateDescriptorPool();
     void CreateDescriptorSets(VkDescriptorSetLayout layout);
-    void CreateStagingBuffer(const Tegra::FramebufferConfig& framebuffer);
-    void CreateRawImages(const Tegra::FramebufferConfig& framebuffer);
+    struct RawResources {
+        vk::Buffer buffer;
+        std::vector<vk::Image> images;
+        std::vector<vk::ImageView> views;
+        std::vector<u64> ticks;
+    };
+    vk::Buffer CreateStagingBuffer(const Tegra::FramebufferConfig& framebuffer);
+    RawResources CreateRawImages(const Tegra::FramebufferConfig& framebuffer);
     void CreateFSR(VkExtent2D output_size);
     void CreateFSR2(VkExtent2D output_size);
 
@@ -89,6 +97,7 @@ private:
     std::vector<vk::ImageView> raw_image_views{};
     u32 raw_width{};
     u32 raw_height{};
+    u32 raw_stride{};
     Service::android::PixelFormat pixel_format{};
 
     Settings::AntiAliasing anti_alias_setting{};

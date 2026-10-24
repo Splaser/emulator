@@ -477,3 +477,12 @@ work stays quarantined; terminal release requires the existing joined checked-id
 boundary and never flushes a cached current tick after worker join. Native jobs,
 bytes and driver/worker collaborators are fixtures. See
 [protocol and Windows validation](../../docs/M4_P2_APPLET_CONTENT_READBACK.md).
+
+`run_raw_resources_tests.py --repeat 3` extracts Layer raw staging/image/view
+creation, complete candidate publication, size/offset and wait/release/destructor
+methods. Pinned `--baseline` and `--candidate` modes preserve failed-publication,
+retry and stride witnesses. Cold/warm allocation faults, each of three slots,
+semaphore factory gates, checked retirement and shutdown are controlled. Native
+allocation, pending users and mapped bytes are fixtures; real Windows compilation
+checks the actual no-throw commit. See
+[scope and results](../../docs/M4_P2_RAW_RESOURCE_PUBLICATION.md).

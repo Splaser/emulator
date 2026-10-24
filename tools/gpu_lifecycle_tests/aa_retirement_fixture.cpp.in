@@ -107,9 +107,10 @@ struct Filters{Settings::AntiAliasing requested=Settings::AntiAliasing::Smaa;Set
 struct TextureInfo {u32 width=32,height=32,scaled_width=32,scaled_height=32;VkImage image=1;VkImageView image_view=1;std::shared_ptr<const void> native_owner;};
 struct RasterizerVulkan {std::optional<TextureInfo> AccelerateDisplay(const Tegra::FramebufferConfig&,u64,u32){return {};}};
 struct PresentPushConstants{};
+namespace vk { using Buffer=std::unique_ptr<Resource>; }
 struct Layer {
     Device device;MemoryAllocator memory_allocator;Scheduler& scheduler;Filters filters;size_t image_count=3;
-    u32 raw_width=32,raw_height=32;Service::android::PixelFormat pixel_format=Service::android::PixelFormat::Rgba8888;
+    u32 raw_width=32,raw_height=32,raw_stride=32;Service::android::PixelFormat pixel_format=Service::android::PixelFormat::Rgba8888;
     std::vector<Resource> raw_images=std::vector<Resource>(3),raw_image_views=std::vector<Resource>(3);
     std::unique_ptr<Resource> buffer=std::make_unique<Resource>();
     std::unique_ptr<AntiAliasPass> anti_alias=std::make_unique<AntiAliasPass>();
@@ -120,8 +121,7 @@ struct Layer {
     void SetAntiAliasPass();void ReleaseRawImages();void WaitForResourceUses();void ClearRawImages();
     bool ConfigureDraw(PresentPushConstants*,VkDescriptorSet*,RasterizerVulkan&,VkSampler,size_t,const Tegra::FramebufferConfig&,const Layout::FramebufferLayout&);
     bool UpdateRawImage(const Tegra::FramebufferConfig&,size_t){return true;}
-    void CreateStagingBuffer(const Tegra::FramebufferConfig&){buffer=std::make_unique<Resource>();}
-    void CreateRawImages(const Tegra::FramebufferConfig&){raw_images=std::vector<Resource>(image_count);raw_image_views=std::vector<Resource>(image_count);resource_ticks.resize(image_count);}
+    @RAW_CREATION_STUBS@
 };
 @LAYER@
 }

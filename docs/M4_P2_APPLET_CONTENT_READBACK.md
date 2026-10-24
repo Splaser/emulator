@@ -152,3 +152,8 @@ constructor/recreation transactions, partial raw resource publication, genuine
 pixel/visibility evidence and arbitrary escaped native/guest aliases remain open.
 HostMemory remap/protection remains high risk; M4 incomplete, F2/F3 open and
 GuestBackingAdmission Unknown.
+
+Follow-up: [raw resource candidate publication](M4_P2_RAW_RESOURCE_PUBLICATION.md)
+now preserves old complete raw owners through replacement creation failure and
+retry, including stride sizing. This does not clear Failed applet quarantine or
+certify raw upload/content completion.

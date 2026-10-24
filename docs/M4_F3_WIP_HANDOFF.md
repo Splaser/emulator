@@ -1,5 +1,21 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-24: raw resource candidate publication and retry
+
+From `3ca2af23f6`, sixteen raw partial-publication/retry/stride witnesses reproduce.
+Candidate then production retain old staging/all slot image-view pairs/ticks/AA
+and metadata until the complete replacement exists and old uses finish. No-throw
+swaps publish the tuple, with stride in the sizing key and zero new ticks. Failed
+creation cleans only the unused prefix; closed entries refuse and uncertain wait/
+idle retain owners. Three real Windows production COFF units compile with zero
+diagnostics; raw, AA/content/mapping/source/shutdown regressions pass. See
+[protocol and next scope](M4_P2_RAW_RESOURCE_PUBLICATION.md) and
+[results/commands](M4_P2_RAW_RESOURCE_PUBLICATION_RESULTS.json). Current-run artifacts
+cleaned; issue branch pushed; main untouched. Next: later raw upload/content and
+helper/descriptor recreation boundaries; do not equate allocation with initialized
+content or re-enable a failed applet Draw. HostMemory high risk, M4 incomplete,
+F2/F3 open and admission Unknown.
+
 ## 2026-10-24: failed applet Draw readback quarantine and terminal release
 
 From `f892213b0a`, ten failure/export/replay/release witnesses reproduce. Applet

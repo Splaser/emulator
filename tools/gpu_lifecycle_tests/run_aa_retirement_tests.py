@@ -65,7 +65,12 @@ sched = '\n'.join(block(scheduler, marker) for marker in [
     'void Scheduler::Finish(', 'void Scheduler::RequireNativeBorrowAdmission(',
     'void Scheduler::FinishNativeBorrow('])
 source = read('tools/gpu_lifecycle_tests/aa_retirement_fixture.cpp.in')
-source = source.replace('@SCHEDULER@', sched).replace('@LAYER@', methods + '\n' + configure)
+stubs = '''void CreateStagingBuffer(const Tegra::FramebufferConfig&){buffer=std::make_unique<Resource>();}
+    void CreateRawImages(const Tegra::FramebufferConfig&){raw_images=std::vector<Resource>(image_count);raw_image_views=std::vector<Resource>(image_count);resource_ticks.resize(image_count);}'''
+if 'Layer::RawResources Layer::CreateRawImages(' in layer:
+    stubs = '''struct RawResources{vk::Buffer buffer;std::vector<Resource> images,views;std::vector<u64> ticks;};
+    RawResources CreateRawImages(const Tegra::FramebufferConfig&){RawResources r;r.buffer=std::make_unique<Resource>();r.images=std::vector<Resource>(image_count);r.views=std::vector<Resource>(image_count);r.ticks.resize(image_count);return r;}'''
+source = source.replace('@SCHEDULER@', sched).replace('@LAYER@', methods + '\n' + configure).replace('@RAW_CREATION_STUBS@', stubs)
 terminal = out / 'terminal.cpp'
 terminal.write_text(read('src/common/terminal_fail_stop.cpp'), encoding='utf-8')
 read('src/common/terminal_fail_stop.h')
@@ -123,7 +128,7 @@ else:
             run(mutant, f'{name}-{repeat}', action, case, 91, 'FAIL ' + witness)
         controls.append(name)
 
-    control('omit-refresh-drain', source.replace('    WaitForResourceUses();\n    raw_width', '    raw_width'),
+    control('omit-refresh-drain', source.replace('    WaitForResourceUses();', '', 1),
             'refresh', 'normal', 'AA retired before all uses')
     control('omit-aa-drain', source.replace('    if (anti_alias) WaitForResourceUses();', ''),
             'aa', 'normal', 'AA retired before all uses')

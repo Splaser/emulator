@@ -5,6 +5,9 @@
 #include "video_core/present.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
+#include <type_traits>
+#include <utility>
+
 #include "common/settings.h"
 #include "common/terminal_fail_stop.h"
 #include "video_core/framebuffer_config.h"
@@ -146,7 +149,7 @@ void Layer::CreateDescriptorSets(VkDescriptorSetLayout layout) {
     descriptor_sets = CreateWrappedDescriptorSets(descriptor_pool, layouts);
 }
 
-void Layer::CreateStagingBuffer(const Tegra::FramebufferConfig& framebuffer) {
+vk::Buffer Layer::CreateStagingBuffer(const Tegra::FramebufferConfig& framebuffer) {
     const VkBufferCreateInfo ci{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext = nullptr,
@@ -159,20 +162,23 @@ void Layer::CreateStagingBuffer(const Tegra::FramebufferConfig& framebuffer) {
         .pQueueFamilyIndices = nullptr,
     };
 
-    buffer = memory_allocator.CreateBuffer(ci, MemoryUsage::Upload);
+    return memory_allocator.CreateBuffer(ci, MemoryUsage::Upload);
 }
 
-void Layer::CreateRawImages(const Tegra::FramebufferConfig& framebuffer) {
+Layer::RawResources Layer::CreateRawImages(const Tegra::FramebufferConfig& framebuffer) {
+    RawResources candidate{};
+    candidate.buffer = CreateStagingBuffer(framebuffer);
+    candidate.ticks.resize(image_count);
+    candidate.images.resize(image_count);
+    candidate.views.resize(image_count);
     const auto format = GetFormat(framebuffer);
-    resource_ticks.resize(image_count);
-    raw_images.resize(image_count);
-    raw_image_views.resize(image_count);
-
     for (size_t i = 0; i < image_count; ++i) {
-        raw_images[i] =
+        candidate.images[i] =
             CreateWrappedImage(memory_allocator, {framebuffer.width, framebuffer.height}, format);
-        raw_image_views[i] = CreateWrappedImageView(device, raw_images[i], format);
+        candidate.views[i] = CreateWrappedImageView(device, candidate.images[i], format);
     }
+    static_assert(std::is_nothrow_move_constructible_v<RawResources>);
+    return candidate;
 }
 
 void Layer::CreateFSR(VkExtent2D output_size) {
@@ -184,20 +190,30 @@ void Layer::CreateFSR2(VkExtent2D output_size) {
 }
 
 void Layer::RefreshResources(const Tegra::FramebufferConfig& framebuffer) {
+    scheduler.RequireNativeBorrowAdmission();
     if (framebuffer.width == raw_width && framebuffer.height == raw_height &&
-        framebuffer.pixel_format == pixel_format && !raw_images.empty()) {
+        framebuffer.stride == raw_stride && framebuffer.pixel_format == pixel_format &&
+        !raw_images.empty()) {
         return;
     }
 
+    // Creation has no target recording effects. Keep the old publication intact
+    // until the entire new slot set exists and old uses are confirmed complete.
+    auto candidate = CreateRawImages(framebuffer);
     WaitForResourceUses();
+    anti_alias.reset();
+    static_assert(std::is_nothrow_swappable_v<vk::Buffer>);
+    static_assert(noexcept(raw_images.swap(candidate.images)));
+    static_assert(noexcept(raw_image_views.swap(candidate.views)));
+    static_assert(noexcept(resource_ticks.swap(candidate.ticks)));
+    std::swap(buffer, candidate.buffer);
+    raw_images.swap(candidate.images);
+    raw_image_views.swap(candidate.views);
+    resource_ticks.swap(candidate.ticks);
     raw_width = framebuffer.width;
     raw_height = framebuffer.height;
+    raw_stride = framebuffer.stride;
     pixel_format = framebuffer.pixel_format;
-    anti_alias.reset();
-
-    ClearRawImages();
-    CreateStagingBuffer(framebuffer);
-    CreateRawImages(framebuffer);
 }
 
 void Layer::SetAntiAliasPass() {
