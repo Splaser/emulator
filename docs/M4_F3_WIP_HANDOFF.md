@@ -1,5 +1,23 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-24: capture output and local upload exception retention
+
+From `ce2007b440`, fourteen historical local-owner unwind witnesses reproduce in
+RenderToBuffer, GetAppletCaptureBuffer and UploadImage. Candidate then production
+extraction passes queued/active worker, partial native effects, checked completion,
+closed entry and safe pre/post-effect failure cases. Error handlers run before
+local native owners unwind; uncertain work uses existing terminal fail-stop.
+Normal completion keeps one existing Finish submission, drains host recording and
+checks the saved native tick before invalidate/return or staging release. Three
+Windows production COFF units compile without diagnostics; source/fallback/shutdown
+regressions pass. See [audit and next scope](M4_P2_CAPTURE_NATIVE_BORROW.md) and
+[results/commands](M4_P2_CAPTURE_NATIVE_BORROW_RESULTS.json). Temporary artifacts
+cleaned; issue branch pushed; main untouched. Next: deterministic old helper
+replacement/use-completion witness in RefreshResources/SetAntiAliasPass, then
+partial applet frame construction. This is a selected local-owner repair, not
+whole-helper/device/game acceptance. HostMemory high risk, M4 incomplete,
+F2/F3 open and admission Unknown.
+
 ## 2026-10-24: accelerated native source owner through split submissions
 
 From `4ee7ee0fee`, baseline bare native handles outlive CPU-ring retirement and

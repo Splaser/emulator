@@ -702,6 +702,12 @@ public:
         return master_semaphore->IsFree(tick);
     }
 
+    // GPU owner thread only; these checks do not acquire an independent producer lease.
+    void RequireNativeBorrowAdmission() const;
+    // One existing Finish submission, host recording drain, then checked native lifetime.
+    // Call inside a handler which retains all stack-borrowed native resources on error.
+    void FinishNativeBorrow();
+
     /// Waits for the given tick to trigger on the GPU.
     void Wait(u64 tick) {
         if (tick >= master_semaphore->CurrentTick()) {

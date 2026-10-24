@@ -340,6 +340,7 @@ void RendererVulkan::Report() const {
 vk::Buffer RendererVulkan::RenderToBuffer(std::span<const Tegra::FramebufferConfig> framebuffers,
                                           const Layout::FramebufferLayout& layout, VkFormat format,
                                           VkDeviceSize buffer_size) {
+    scheduler.RequireNativeBorrowAdmission();
     auto frame = [&]() {
         Frame f{};
         f.image =
@@ -350,16 +351,24 @@ vk::Buffer RendererVulkan::RenderToBuffer(std::span<const Tegra::FramebufferConf
     }();
 
     auto dst_buffer = CreateWrappedBuffer(memory_allocator, buffer_size, MemoryUsage::Download);
-    blit_capture.DrawToFrame(rasterizer, &frame, framebuffers, layout, 1, format);
+    // Keep frame and destination buffer alive if recording/submission partly succeeds.
+    try {
+        blit_capture.DrawToFrame(rasterizer, &frame, framebuffers, layout, 1, format);
 
-    scheduler.RequestOutsideRenderPassOperationContext();
-    scheduler.Record([&](vk::CommandBuffer cmdbuf) {
-        DownloadColorImage(cmdbuf, *frame.image, *dst_buffer,
-                           VkExtent3D{layout.width, layout.height, 1});
-    });
+        scheduler.RequestOutsideRenderPassOperationContext();
+        scheduler.Record([&](vk::CommandBuffer cmdbuf) {
+            DownloadColorImage(cmdbuf, *frame.image, *dst_buffer,
+                               VkExtent3D{layout.width, layout.height, 1});
+        });
 
-    // Ensure the copy is fully completed before saving the capture
-    scheduler.Finish();
+        // Ensure the copy is fully completed before saving the capture
+        scheduler.FinishNativeBorrow();
+    } catch (const vk::Exception& error) {
+        Common::TerminalFailStop("capture.render", "vulkan_exception",
+                                 static_cast<int>(error.GetResult()));
+    } catch (...) {
+        Common::TerminalFailStop("capture.render", "host_exception");
+    }
 
     // Copy backing image data to the capture buffer
     dst_buffer.Invalidate();
@@ -382,6 +391,7 @@ void RendererVulkan::RenderScreenshot(std::span<const Tegra::FramebufferConfig> 
 }
 
 std::vector<u8> RendererVulkan::GetAppletCaptureBuffer() {
+    scheduler.RequireNativeBorrowAdmission();
     using namespace VideoCore::Capture;
 
     const size_t out_size = static_cast<size_t>(LinearWidth) * LinearHeight * BytesPerPixel;
@@ -394,13 +404,20 @@ std::vector<u8> RendererVulkan::GetAppletCaptureBuffer() {
     const auto dst_buffer =
         CreateWrappedBuffer(memory_allocator, out_size, MemoryUsage::Download);
 
-    scheduler.RequestOutsideRenderPassOperationContext();
-    scheduler.Record([&](vk::CommandBuffer cmdbuf) {
-        DownloadColorImage(cmdbuf, *applet_frame.image, *dst_buffer, CaptureImageExtent);
-    });
+    try {
+        scheduler.RequestOutsideRenderPassOperationContext();
+        scheduler.Record([&](vk::CommandBuffer cmdbuf) {
+            DownloadColorImage(cmdbuf, *applet_frame.image, *dst_buffer, CaptureImageExtent);
+        });
 
-    // Ensure the copy is fully completed before writing the capture
-    scheduler.Finish();
+        // Ensure the copy is fully completed before writing the capture
+        scheduler.FinishNativeBorrow();
+    } catch (const vk::Exception& error) {
+        Common::TerminalFailStop("capture.applet", "vulkan_exception",
+                                 static_cast<int>(error.GetResult()));
+    } catch (...) {
+        Common::TerminalFailStop("capture.applet", "host_exception");
+    }
 
     // Copy linear image data to the capture buffer
     dst_buffer.Invalidate();

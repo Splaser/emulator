@@ -186,3 +186,7 @@ GuestBackingAdmission Unknown.
 Resume on `codex/issue-372-fixes`; use the commands in the result manifests.
 Current-run exe/objects/generated fixtures are removed after hash verification;
 logs/JSON remain in `.diagnostics/m4-owner-results`. Main is untouched.
+
+Follow-up: [capture-output and local native upload exception retention](M4_P2_CAPTURE_NATIVE_BORROW.md)
+now covers the selected stack-owned output/staging paths. Other helper replacement
+and partial applet frame publication remain open as recorded there.

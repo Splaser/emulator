@@ -786,6 +786,24 @@ void Scheduler::Finish(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore)
     AllocateNewContext();
 }
 
+void Scheduler::RequireNativeBorrowAdmission() const {
+    if (!submission_owner->load(std::memory_order_acquire)) {
+        Common::TerminalFailStop("native_borrow.entry", "closed_admission");
+    }
+}
+
+void Scheduler::FinishNativeBorrow() {
+    RequireNativeBorrowAdmission();
+    const auto tick = CurrentTick();
+    Finish();
+    // Even a completed device tick does not end a queued host reference's lifetime.
+    WaitWorker();
+    const auto result = master_semaphore->PollNativeResourceLifetime(tick);
+    if (result != VK_SUCCESS) {
+        Common::TerminalFailStop("native_borrow.completion", "vulkan_result", static_cast<int>(result));
+    }
+}
+
 void Scheduler::WaitWorker() {
     DispatchWork();
 

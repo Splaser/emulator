@@ -3,6 +3,12 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [capture/native helper follow-up](M4_P2_CAPTURE_NATIVE_BORROW.md) repairs local
+capture/download and upload staging unwind while asynchronous users may survive.
+Normal paths retain actual completion/host drain semantics; uncertain failures
+stop without unwinding owners. Other helper replacement and partial applet frame
+publication remain explicit open items; no complete guest admission follows.
+
 The [accelerated native source follow-up](M4_P2_ACCELERATED_NATIVE_SOURCE.md)
 retains exact image/view versions across cache metadata eviction and internal
 Finish, using accepted submissions and checked timeline/fallback completion.

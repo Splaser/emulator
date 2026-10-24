@@ -148,6 +148,7 @@ jobs:
             python tools/gpu_lifecycle_tests/run_session_source_tests.py --repeat 3
             python tools/gpu_lifecycle_tests/run_present_completion_tests.py --repeat 3
             python tools/gpu_lifecycle_tests/run_native_source_tests.py --repeat 3
+            python tools/gpu_lifecycle_tests/run_capture_borrow_tests.py --repeat 3
           python tools/physical_coherency_tests/run_owned_retirement_tests.py --repeat 3
           python tools/physical_coherency_tests/run_nvdrv_retirement_tests.py --repeat 3
           python tools/gpu_lifecycle_tests/run_unmap_ownership_tests.py --repeat 3
@@ -357,6 +358,8 @@ jobs:
             .diagnostics/m4-present-completion/*.log
             .diagnostics/m4-native-source/*.json
             .diagnostics/m4-native-source/*.log
+            .diagnostics/m4-capture-borrow/*.json
+            .diagnostics/m4-capture-borrow/*.log
             .diagnostics/gpu-lifecycle/linux/thread-extraction.json
             .diagnostics/gpu-lifecycle/linux/thread-*.log
             .diagnostics/gpu-lifecycle/linux/direct-*.log

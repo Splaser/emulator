@@ -437,3 +437,14 @@ The fixture also checks inline failure, exception after completion and unchanged
 normal outcomes, with three precise controls. This is host callback lifetime
 and result evidence, not a native completion or guest-admission certificate.
 See [the morning checkpoint](../../docs/M4_F3_DISPATCH_EXCEPTION.md).
+
+Capture/readback and local helper uploads are checked by
+`python tools/gpu_lifecycle_tests/run_capture_borrow_tests.py --repeat 3`.
+`--baseline` and `--candidate` use pinned pre-fix production source plus current
+fixtures/candidate transformations. The suite extracts RenderToBuffer,
+GetAppletCaptureBuffer, UploadImage, Finish and the checked native-borrow adapter.
+It distinguishes allocation/pre-borrow failures, queued and active host borrows,
+partial native effects, checked completion and post-completion invalidation errors.
+Native driver work and Scheduler collaborators are fixtures; a semaphore-gated
+worker models an entered callback before its delayed read. See
+[scope, audit and Windows results](../../docs/M4_P2_CAPTURE_NATIVE_BORROW.md).
