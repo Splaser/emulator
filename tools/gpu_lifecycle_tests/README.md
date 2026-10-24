@@ -1,5 +1,9 @@
 # GPU lifecycle correctness: F4/F5
 
+Per-frame source handoff uses `run_frame_source_tests.py`, with actual composer,
+nvdisp and GPU request bodies linked to real guest syncpoints. See
+[packet, partial failures and ownership limits](../../docs/M4_P2_FRAME_SOURCE_PACKET.md).
+
 Deferred frame-owner prerequisites use `run_syncpoint_retirement_tests.py` for
 actual syncpoint completion/cancellation capture release and destructor reentry.
 See [scope, failures and the remaining frame packet](../../docs/M4_P2_SYNCPOINT_OWNER_RETIREMENT.md).

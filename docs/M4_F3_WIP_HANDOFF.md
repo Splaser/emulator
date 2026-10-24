@@ -1,5 +1,23 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-24: immutable per-frame source packet connected through guest fences
+
+From `4e76547588`, actual composer/nvdisp/GPU bodies reproduced lost source
+ownership after all original layer/slot/cache references dropped. GraphicBufferSource
+now freezes the descriptor and retains its wrapper through HwcLayer,
+FramebufferConfig and shared GPU Request/guest actions. Missing/mismatched packets
+refuse before nvmap lookup; partial registration/read exceptions cancel future
+access without claiming no effects or replaying reads. Active close waits the
+source callback under the existing state mutex; capture retirement stays outside
+the syncpoint guard. Fourteen cases/eight precise controls pass three times,
+including ready-registration partial effects, shared fences, live byte borrowing
+and shutdown; request/action/retirement regressions pass. Eight real Windows
+production objects compile without diagnostics. See [protocol/limits](M4_P2_FRAME_SOURCE_PACKET.md)
+and [results](M4_P2_FRAME_SOURCE_RESULTS.json). Temporary binaries/objects/generated
+sources are cleaned; main unchanged. Next: stable source translation/mapping-use
+epochs through unmap/free/session retirement and accelerated access. The packet
+is not a mapping/native lease or F2 authority; M4 incomplete, admission Unknown.
+
 ## 2026-10-23: release deferred action captures outside the syncpoint guard
 
 From `f029ee7bd3`, the per-frame audit confirmed HwcLayer/FramebufferConfig still

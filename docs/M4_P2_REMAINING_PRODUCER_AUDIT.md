@@ -3,6 +3,11 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [per-frame source packet follow-up](M4_P2_FRAME_SOURCE_PACKET.md) now retains
+the actual GraphicBuffer wrapper and immutable descriptor through composer,
+nvdisp, guest-fence actions and synchronous source callback. Mapping-use epochs
+and native completion remain separate; packet presence is not guest admission.
+
 The [deferred-frame action-owner follow-up](M4_P2_SYNCPOINT_OWNER_RETIREMENT.md)
 fixes captured-owner destruction under SyncpointManager guard, for completion
 and cancellation, without moving callback execution. Per-frame source ownership

@@ -455,6 +455,7 @@ struct GPU::Impl {
         struct Request {
             std::vector<Tegra::FramebufferConfig> layers;
             size_t remaining;
+            bool cancelled{}; // guarded by CompositeState::mutex
         };
         auto request = std::make_shared<Request>(Request{std::move(layers), fences.size()});
         auto state = composite_state;
@@ -464,19 +465,33 @@ struct GPU::Impl {
                                   &syncpoint_manager] {
                 const auto present = [state, request] {
                     std::scoped_lock lock{state->mutex};
-                    if (!state->renderer) {
+                    if (!state->renderer || request->cancelled) {
                         return;
                     }
                     if (request->remaining != 0 && --request->remaining != 0) {
                         return;
                     }
-                    state->renderer->Composite(request->layers);
+                    try {
+                        state->renderer->Composite(request->layers);
+                    } catch (...) {
+                        // A retained failing action must never replay a partial read/present.
+                        request->cancelled = true;
+                        throw;
+                    }
                 };
-                if (pending_fences.empty()) {
-                    present();
-                }
-                for (const auto& fence : pending_fences) {
-                    syncpoint_manager.RegisterGuestAction(fence.id, fence.value, present);
+                try {
+                    if (pending_fences.empty()) {
+                        present();
+                    }
+                    for (const auto& fence : pending_fences) {
+                        syncpoint_manager.RegisterGuestAction(fence.id, fence.value, present);
+                    }
+                } catch (...) {
+                    // A prefix may already own callbacks. Keep its source packet,
+                    // but forbid any later presentation of a failed registration.
+                    std::scoped_lock lock{state->mutex};
+                    request->cancelled = true;
+                    throw;
                 }
             });
         gpu_thread.TickGPU();

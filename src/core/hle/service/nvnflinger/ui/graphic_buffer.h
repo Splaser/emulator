@@ -7,6 +7,7 @@
 #pragma once
 
 #include <memory>
+#include <utility>
 
 #include "common/common_funcs.h"
 #include "common/common_types.h"
@@ -113,6 +114,17 @@ private:
                   std::shared_ptr<NvGraphicBuffer> buffer);
     std::shared_ptr<Service::Nvidia::Module> m_owner;
     Common::OwnedRetirementQueue::Owner m_retirement;
+};
+
+// CPU source lifetime through deferred composition, not a mapping/native-use
+// lease. Freeze the descriptor separately from other mutable wrapper aliases.
+struct GraphicBufferSource {
+    const std::shared_ptr<const GraphicBuffer> owner;
+    const NvGraphicBuffer descriptor;
+
+    explicit GraphicBufferSource(std::shared_ptr<const GraphicBuffer> buffer)
+        : owner{std::move(buffer)},
+          descriptor{owner ? static_cast<const NvGraphicBuffer&>(*owner) : NvGraphicBuffer{}} {}
 };
 
 } // namespace Service::android

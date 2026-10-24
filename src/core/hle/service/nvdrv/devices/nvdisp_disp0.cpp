@@ -10,6 +10,7 @@
 #include "core/hle/service/nvdrv/core/container.h"
 #include "core/hle/service/nvdrv/core/nvmap.h"
 #include "core/hle/service/nvdrv/devices/nvdisp_disp0.h"
+#include "core/hle/service/nvnflinger/ui/graphic_buffer.h"
 #include "core/perf_stats.h"
 #include "video_core/gpu.h"
 #include "video_core/renderer_base.h"
@@ -64,6 +65,10 @@ void nvdisp_disp0::Composite(std::span<const Nvnflinger::HwcLayer> sorted_layers
     output_fences.reserve(sorted_layers.size());
 
     for (auto& layer : sorted_layers) {
+        // A numeric handle is not a source-lifetime handoff. Refuse before
+        // address lookup or request publication if the packet is absent/mismatched.
+        if (!layer.source_owner || !layer.source_owner->owner ||
+            layer.source_owner->descriptor.BufferId() != layer.buffer_handle) return;
         output_layers.emplace_back(Tegra::FramebufferConfig{
             .address = nvmap.GetHandleAddress(layer.buffer_handle),
             .offset = layer.offset,
@@ -77,6 +82,7 @@ void nvdisp_disp0::Composite(std::span<const Nvnflinger::HwcLayer> sorted_layers
             .z_index = layer.z_index,
             .is_applet = layer.is_applet,
             .blending = ConvertBlending(layer.blending),
+            .source_owner = layer.source_owner,
         });
 
         for (size_t i = 0; i < layer.acquire_fence.num_fences; i++) {

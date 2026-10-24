@@ -6,6 +6,10 @@ local, fork and PR375 heads agreed before work. Work stays on
 is unchanged. This fixes a prerequisite capture-release boundary. No per-frame
 source-owner packet or native lease is connected to production by this patch.
 
+Follow-up: [per-frame source packet](M4_P2_FRAME_SOURCE_PACKET.md) now connects
+source object retention through the production composer/nvdisp/GPU chain, building
+on the capture-release boundary here. Mapping/native ownership remains separate.
+
 ## Handoff census and the blocker to adding source ownership
 
 HardwareComposer keeps a GraphicBuffer in its cached BufferItem. It constructs
