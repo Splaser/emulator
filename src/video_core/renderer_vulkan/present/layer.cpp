@@ -70,7 +70,7 @@ Layer::~Layer() {
     ReleaseRawImages();
 }
 
-void Layer::ConfigureDraw(PresentPushConstants* out_push_constants,
+bool Layer::ConfigureDraw(PresentPushConstants* out_push_constants,
                           VkDescriptorSet* out_descriptor_set, RasterizerVulkan& rasterizer,
                           VkSampler sampler, size_t image_index,
                           const Tegra::FramebufferConfig& framebuffer,
@@ -94,7 +94,7 @@ void Layer::ConfigureDraw(PresentPushConstants* out_push_constants,
     };
 
     if (!use_accelerated) {
-        UpdateRawImage(framebuffer, image_index);
+        if (!UpdateRawImage(framebuffer, image_index)) return false;
     }
 
     VkImage source_image = texture_info ? texture_info->image : *raw_images[image_index];
@@ -132,6 +132,7 @@ void Layer::ConfigureDraw(PresentPushConstants* out_push_constants,
 
     UpdateDescriptorSet(source_image_view, sampler, image_index);
     *out_descriptor_set = descriptor_sets[image_index];
+    return true;
 }
 
 void Layer::CreateDescriptorPool() {
@@ -289,13 +290,12 @@ void Layer::UpdateDescriptorSet(VkImageView image_view, VkSampler sampler, size_
     device.GetLogical().UpdateDescriptorSets(std::array{sampler_write}, {});
 }
 
-void Layer::UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t image_index) {
+bool Layer::UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t image_index) {
     const std::span<u8> mapped_span = buffer.Mapped();
 
     const u64 image_offset = GetRawImageOffset(framebuffer, image_index);
 
     const DAddr framebuffer_addr = framebuffer.address + framebuffer.offset;
-    const u8* const host_ptr = device_memory.GetPointer<u8>(framebuffer_addr);
 
     // TODO(Rodrigo): Read this from HLE
     constexpr u32 block_height_log2 = 4;
@@ -303,12 +303,19 @@ void Layer::UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t i
     const u64 linear_size{GetSizeInBytes(framebuffer)};
     const u64 tiled_size{Tegra::Texture::CalculateSize(
         true, bytes_per_pixel, framebuffer.stride, framebuffer.height, 1, block_height_log2, 0)};
-    if (host_ptr) {
-        Tegra::Texture::UnswizzleTexture(
-            mapped_span.subspan(image_offset, linear_size), std::span(host_ptr, tiled_size),
-            bytes_per_pixel, framebuffer.width, framebuffer.height, 1, block_height_log2, 0);
-        buffer.Flush(); // Ensure host writes are visible before the GPU copy.
-    }
+    if (!framebuffer.source_mapping) return false;
+    const auto& mapping = *framebuffer.source_mapping;
+    if (framebuffer_addr < mapping.address || framebuffer_addr - mapping.address > mapping.size ||
+        tiled_size > mapping.size - (framebuffer_addr - mapping.address)) return false;
+    // Allocate before the bounded mapping-use section; copy canonical physical pages
+    // into owned storage, then unswizzle without any guest pointer or mapping lock.
+    std::vector<u8> source(tiled_size);
+    if (!device_memory.CopyFrameMapping(*framebuffer.source_mapping, framebuffer_addr, source))
+        return false;
+    Tegra::Texture::UnswizzleTexture(
+        mapped_span.subspan(image_offset, linear_size), source,
+        bytes_per_pixel, framebuffer.width, framebuffer.height, 1, block_height_log2, 0);
+    buffer.Flush(); // Ensure host writes are visible before the GPU copy.
 
     const VkBufferImageCopy copy{
         .bufferOffset = image_offset,
@@ -368,6 +375,7 @@ void Layer::UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t i
                                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                0, write_barrier);
     });
+    return true;
 }
 
 } // namespace Vulkan

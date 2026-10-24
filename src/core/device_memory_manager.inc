@@ -191,6 +191,7 @@ DeviceMemoryManager<Traits>::DeviceMemoryManager(const DeviceMemory& device_memo
 
 template <typename Traits>
 DeviceMemoryManager<Traits>::~DeviceMemoryManager() {
+    frame_mapping.Close(); // no CPU source copy may overlap page-table destruction
     mapping_lifetime.Invalidate(); // before page tables are destroyed
 }
 
@@ -217,6 +218,7 @@ void DeviceMemoryManager<Traits>::Free(DAddr start, size_t size) {
 template <typename Traits>
 void DeviceMemoryManager<Traits>::Map(DAddr address, VAddr virtual_address, size_t size, Asid asid,
                                       bool track) {
+    auto frame_mutation = BeginFrameMappingMutation();
     // Direct VkBuffer views must be retired while the old DAddr translations still exist.
     if constexpr (requires { device_inter->UnmapMemory(address, size); }) {
         if (device_inter && Settings::values.use_uma_zero_copy.GetValue()) {
@@ -277,6 +279,7 @@ void DeviceMemoryManager<Traits>::Map(DAddr address, VAddr virtual_address, size
     if (track) {
         TrackContinuityImpl(address, virtual_address, size, asid);
     }
+    frame_mutation.Complete();
 }
 
 template <typename Traits>
@@ -284,6 +287,7 @@ void DeviceMemoryManager<Traits>::Unmap(DAddr address, size_t size) {
     if (address < 4096 || size == 0 || !device_inter) {
         return;
     }
+    auto frame_mutation = BeginFrameMappingMutation();
     size_t start_page_d = address >> Memory::CITRON_PAGEBITS;
     size_t num_pages = Common::AlignUp(size, Memory::CITRON_PAGESIZE) >> Memory::CITRON_PAGEBITS;
     if constexpr (requires { device_inter->UnmapMemory(address, size); }) {
@@ -315,6 +319,7 @@ void DeviceMemoryManager<Traits>::Unmap(DAddr address, size_t size) {
             compressed_device_addr[phys_addr - 1] = new_start | MULTI_FLAG;
         }
     }
+    frame_mutation.Complete();
 }
 template <typename Traits>
 void DeviceMemoryManager<Traits>::TrackContinuityImpl(DAddr address, VAddr virtual_address,
@@ -631,8 +636,10 @@ Asid DeviceMemoryManager<Traits>::RegisterProcess(Memory::Memory* memory_device_
 
 template <typename Traits>
 void DeviceMemoryManager<Traits>::UnregisterProcess(Asid asid) {
+    auto frame_mutation = BeginFrameMappingMutation();
     registered_processes[asid.id] = nullptr;
     id_pool.push_front(asid.id);
+    frame_mutation.Complete();
 }
 
 template <typename Traits>

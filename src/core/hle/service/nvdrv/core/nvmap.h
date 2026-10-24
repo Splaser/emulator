@@ -14,6 +14,7 @@
 
 #include "common/bit_field.h"
 #include "common/common_types.h"
+#include "common/frame_mapping.h"
 #include "common/profiling.h"
 #include "core/hle/service/nvdrv/core/container.h"
 #include "core/hle/service/nvdrv/nvdata.h"
@@ -126,6 +127,7 @@ public:
     std::shared_ptr<Handle> GetHandle(Handle::Id handle);
 
     DAddr GetHandleAddress(Handle::Id handle);
+    std::optional<Common::FrameMappingDomain::Stamp> GetDisplayMapping(Handle::Id handle);
 
     /**
      * @brief Maps a handle into the SMMU address space

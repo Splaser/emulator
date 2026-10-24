@@ -5,6 +5,7 @@
 
 #include <memory>
 #include "common/common_types.h"
+#include "common/frame_mapping.h"
 #include "common/math_util.h"
 #include "core/hle/service/nvnflinger/buffer_transform_flags.h"
 #include "core/hle/service/nvnflinger/pixel_format.h"
@@ -41,6 +42,7 @@ struct FramebufferConfig {
     // Retains the CPU source through guest-fence callbacks and synchronous reads.
     // This is not an acknowledgement of native completion or mapping validity.
     std::shared_ptr<const Service::android::GraphicBufferSource> source_owner{};
+    std::optional<Common::FrameMappingDomain::Stamp> source_mapping{};
 };
 
 Common::Rectangle<f32> NormalizeCrop(const FramebufferConfig& framebuffer, u32 texture_width,

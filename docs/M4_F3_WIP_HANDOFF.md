@@ -1,5 +1,24 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-24: bounded mapping use at the delayed frame-source read
+
+From `96d993457d`, an actual raw-read baseline witnesses address reuse selecting
+another physical source. Candidate protocol was tested before integration.
+Device-wide frame source stamps now revoke before Map/Unmap callbacks and final
+session/ASID retirement. A bounded guarded page copy creates owned bytes for
+unswizzle; cache view selection also checks/uses the domain. Rejected layers are
+omitted rather than drawing stale staging. No source lock spans GPU waits.
+Ten protocol paths/six controls and seventeen actual-body paths/four controls
+pass three times, including active actual copy versus Unmap. Packet, address and
+prepared session-retirement regressions pass; nine Windows production COFF units
+compile without diagnostics. See [protocol and precise limits](M4_P2_FRAME_MAPPING_USE.md)
+and [results](M4_P2_FRAME_MAPPING_RESULTS.json). This is conservative device-wide
+cancellation, not a physical content transaction or native lease. Next: permanent
+session source re-admission via escaped producers (shutdown/stale-session mappings
+can be retained), plus accelerated image ownership through native completion.
+HostMemory stays high risk. Temporary artifacts cleaned; main untouched; M4
+incomplete, F2/F3 open and admission Unknown.
+
 ## 2026-10-24: synchronize source address snapshots and refuse retired addresses
 
 From `0412393e94`, mapping/free/session audit found GetHandleAddress read d_address

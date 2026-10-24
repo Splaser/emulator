@@ -9,6 +9,7 @@
 #include <optional>
 #include <stdexcept>
 #include "common/owned_retirement.h"
+#include "common/frame_mapping.h"
 #include "core/hle/service/nvnflinger/ui/graphic_buffer.h"
 #include "core/hle/service/nvnflinger/status.h"
 using namespace std::chrono_literals;
@@ -261,9 +262,10 @@ void StaleProcessSnapshot() {
 namespace SessionReuse {
 namespace NvCore=Service::Nvidia::NvCore;using NvCore::Session;using NvCore::SessionId;
 using NvCore::ProcessReleaseFailure;
-struct Smmu {int registered=0;Core::Asid RegisterProcess(int*){++registered;return 1;}void Free(u64,size_t){}void UnregisterProcess(Core::Asid){}};
+struct Smmu {Common::FrameMappingDomain frames;auto BeginFrameMappingMutation(){return frames.BeginMutation();}
+    int registered=0;Core::Asid RegisterProcess(int*){++registered;return 1;}void Free(u64,size_t){}void UnregisterProcess(Core::Asid){}};
 struct Host1x {FakeSystem& system;Smmu smmu;FakeSystem& System(){return system;}Smmu& MemoryManager(){return smmu;}};
-struct Impl {Host1x host1x;struct File{void UnmapAllHandles(SessionId){}} file;std::deque<Session> sessions;size_t new_ids=0;std::deque<size_t> id_pool;std::mutex session_guard;explicit Impl(FakeSystem& s):host1x{s,{}} {}};
+struct Impl {Host1x host1x;struct File{std::function<void()> hook;void UnmapAllHandles(SessionId){if(hook)hook();}} file;std::deque<Session> sessions;size_t new_ids=0;std::deque<size_t> id_pool;std::mutex session_guard;explicit Impl(FakeSystem& s):host1x{s,{}} {}};
 struct Container {std::unique_ptr<Impl> impl;explicit Container(FakeSystem& s):impl{std::make_unique<Impl>(s)} {}
     using SessionLifetime=NvCore::Container::SessionLifetime;
 #define LOG_WARNING(...) ((void)0)
@@ -285,7 +287,10 @@ void Test() {
     const auto opened=container.OpenSession(&next);
     Require(mapper_unlocked && process_unlocked && previous.refs==0 && weak.expired(),"session reuse released old owners under session_guard");
     {auto lease=container.RetainSession(opened);Require(bool(lease),"live session rejected retained owner");}
+    auto stamp=container.impl->host1x.smmu.frames.Capture(4096,4096);
     container.CloseSession(opened,true);
+    Require(!container.impl->host1x.smmu.frames.WithUse(*stamp,4096,1,[]{return true;}),
+            "shutdown session retained old frame authority");
     Require(!container.RetainSession(opened),"retired session admitted a new owner borrow");
     bool duplicate=false;try{container.CloseSession(opened,true);}catch(const std::runtime_error&){duplicate=true;}
     Require(duplicate && container.impl->sessions[opened.id].ref_count==0,"duplicate session retirement changed reference accounting");
@@ -298,6 +303,16 @@ void Test() {
     system.memory.buffer.storage.reset();const auto before=container.impl->host1x.smmu.registered;
     bool refused=false;try{(void)container.OpenSession(&next);}catch(const std::runtime_error&){refused=true;}
     Require(refused && container.impl->host1x.smmu.registered==before,"session registered ASID without retained backing");
+    FakeSystem normal_system;Kernel::KProcess normal_process;Container normal{normal_system};
+    const auto normal_id=normal.OpenSession(&normal_process);
+    auto normal_stamp=normal.impl->host1x.smmu.frames.Capture(4096,4096);
+    normal.impl->file.hook=[&] {
+        Require(!normal.impl->host1x.smmu.frames.Capture(4096,4096),
+                "session unmap callback reopened frame capture");
+    };
+    normal.CloseSession(normal_id,false);
+    Require(!normal.impl->host1x.smmu.frames.WithUse(*normal_stamp,4096,1,[]{return true;}),
+            "ordinary session retained old frame authority");
 }
 }
 int main(){GraphicClosed(false);GraphicClosed(true);GraphicPreparationFailure(false);GraphicPreparationFailure(true);GraphicFreeFailure();

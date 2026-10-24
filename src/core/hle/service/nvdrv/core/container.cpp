@@ -238,8 +238,13 @@ void Container::CloseSession(SessionId session_id, bool is_shutdown) {
         return;
     }
 
+    // Close pending frame sources before mapper/process retirement, including the
+    // shutdown path. Nested per-handle unmaps must not reopen source capture.
+    auto frame_retirement = impl->host1x.MemoryManager().BeginFrameMappingMutation();
+
     if (is_shutdown) {
         session.is_active = false;
+        frame_retirement.Complete();
         return;
     }
 
@@ -255,6 +260,7 @@ void Container::CloseSession(SessionId session_id, bool is_shutdown) {
     session.is_active = false;
     smmu.UnregisterProcess(impl->sessions[session_id.id].asid);
     impl->id_pool.emplace_front(session_id.id);
+    frame_retirement.Complete();
 }
 
 Session* Container::GetSession(SessionId session_id) {

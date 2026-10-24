@@ -3,6 +3,13 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [delayed source mapping-use follow-up](M4_P2_FRAME_MAPPING_USE.md) now guards
+bounded actual CPU copies and cache selection against mapping intent/reuse and
+final session retirement. It does not close permanent session re-admission via
+escaped producers, native image ownership after cache selection, or host-alias
+mapping/protection lifetime. The domain is conservative and device-wide; F2/F3
+and guest admission remain open/Unknown.
+
 The [source-address translation follow-up](M4_P2_SOURCE_ADDRESS_TRANSLATION.md)
 repairs lookup's mismatched mutex and rejects already-unmapped zero addresses.
 After-snapshot unmap/free remains an explicit counterexample to mapping continuity;

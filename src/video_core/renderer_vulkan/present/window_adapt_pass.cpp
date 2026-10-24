@@ -47,6 +47,7 @@ void WindowAdaptPass::Draw(RasterizerVulkan& rasterizer, Scheduler& scheduler, s
     std::vector<PresentPushConstants> push_constants(layer_count);
     std::vector<VkDescriptorSet> descriptor_sets(layer_count);
     std::vector<VkPipeline> graphics_pipelines(layer_count);
+    std::vector<bool> drawable(layer_count);
 
     auto layer_it = layers.begin();
     for (size_t i = 0; i < layer_count; i++) {
@@ -63,8 +64,8 @@ void WindowAdaptPass::Draw(RasterizerVulkan& rasterizer, Scheduler& scheduler, s
             break;
         }
 
-        layer_it->ConfigureDraw(&push_constants[i], &descriptor_sets[i], rasterizer, *sampler,
-                                image_index, configs[i], layout);
+        drawable[i] = layer_it->ConfigureDraw(&push_constants[i], &descriptor_sets[i], rasterizer,
+                                               *sampler, image_index, configs[i], layout);
         layer_it++;
     }
 
@@ -99,6 +100,7 @@ void WindowAdaptPass::Draw(RasterizerVulkan& rasterizer, Scheduler& scheduler, s
             current_scaling_filter == Settings::ScalingFilter::CRTRoyale;
 
         for (size_t i = 0; i < layer_count; i++) {
+            if (!drawable[i]) continue;
             cmdbuf.BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipelines[i]);
             cmdbuf.PushConstants(graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                                  sizeof(PresentPushConstants), &push_constants[i]);

@@ -45,7 +45,7 @@ public:
                    const PresentFilters& filters);
     ~Layer();
 
-    void ConfigureDraw(PresentPushConstants* out_push_constants,
+    bool ConfigureDraw(PresentPushConstants* out_push_constants,
                        VkDescriptorSet* out_descriptor_set, RasterizerVulkan& rasterizer,
                        VkSampler sampler, size_t image_index,
                        const Tegra::FramebufferConfig& framebuffer,
@@ -70,7 +70,7 @@ private:
     void SetVertexData(PresentPushConstants& data, const Layout::FramebufferLayout& layout,
                        const Common::Rectangle<f32>& crop) const;
     void UpdateDescriptorSet(VkImageView image_view, VkSampler sampler, size_t image_index);
-    void UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t image_index);
+    bool UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t image_index);
 
 private:
     const Device& device;

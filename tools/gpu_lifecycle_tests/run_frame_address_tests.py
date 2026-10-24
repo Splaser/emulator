@@ -46,6 +46,8 @@ methods = '\n'.join(block(nvmap, m) for m in [
     'NvMap::Handle::Handle(', 'std::shared_ptr<NvMap::Handle> NvMap::GetHandle(',
     'DAddr NvMap::GetHandleAddress(', 'bool NvMap::TryRemoveHandle(',
     'std::optional<NvMap::FreeInfo> NvMap::FreeHandle(', 'void NvMap::UnmapAllHandles('])
+if 'NvMap::GetDisplayMapping(' in nvmap:
+    methods += '\n' + block(nvmap, 'std::optional<Common::FrameMappingDomain::Stamp> NvMap::GetDisplayMapping(')
 handle = block(header, '    struct Handle {').replace('std::mutex mutex;', 'ObservedMutex mutex;') + ';'
 info = block(header, '    struct FreeInfo {') + ';'
 nvdisp_path = 'src/core/hle/service/nvdrv/devices/nvdisp_disp0.cpp'
@@ -53,6 +55,7 @@ nvdisp = read(nvdisp_path)
 conversion = block(nvdisp, 'void nvdisp_disp0::Composite(')
 fixture = 'tools/gpu_lifecycle_tests/frame_address_fixture.cpp.in'
 source = (root / fixture).read_text(encoding='utf-8')
+source = source.replace('@DISPLAY_MAPPING@', str(int('NvMap::GetDisplayMapping(' in nvmap)))
 for key, value in {'HANDLE': handle, 'INFO': info, 'METHODS': methods, 'NVDISP': conversion,
                    'BLEND': block(nvdisp, 'Tegra::BlendMode ConvertBlending(')}.items():
     source = source.replace('@' + key + '@', value)
@@ -87,17 +90,18 @@ if a.baseline:
     (out / 'baseline.json').write_text(json.dumps({'revision': a.revision, 'witnesses': ['unsynchronized source address', 'zero source address published']}, indent=2), encoding='utf-8')
     raise SystemExit(0)
 cases = ['guest-free', 'session-retire', 'free-failure', 'last-free', 'snapshot-retire',
-         'normal', 'zero', 'after-snapshot']
+         'normal', 'zero', 'after-snapshot', 'display-free', 'display-session']
 for i in range(a.repeat):
     for case in cases:
         run(exe, f'{case}-{i}', case)
-print(f'PASS eight source-address paths ({a.repeat} repetitions)', flush=True)
+print(f'PASS ten source-address paths ({a.repeat} repetitions)', flush=True)
 getter = block(nvmap, 'DAddr NvMap::GetHandleAddress(')
 controls = [
+    ('omit-display-handle-lock', source.replace('    std::scoped_lock lock{description->mutex};', ''), 'display-free', 'address lookup bypassed mapping mutation lock'),
     ('omit-handle-lock', source.replace(getter, getter.replace('    std::scoped_lock lock(handle_description->mutex);', '')), 'guest-free', 'address lookup bypassed mapping mutation lock'),
     ('hold-table-over-handle', source.replace(getter, getter.replace('    std::scoped_lock lock(handle_description->mutex);', '    std::scoped_lock wrong_lock(handles_lock);\n    std::scoped_lock lock(handle_description->mutex);')), 'guest-free', 'address lookup held table lock across handle wait'),
-    ('forget-zero-refusal', source.replace('        if (address == 0) return;', ''), 'zero', 'zero source address published deferred read'),
-    ('discard-valid-address', source.replace('        const DAddr address = nvmap.GetHandleAddress(layer.buffer_handle);', '        const DAddr address = 0;'), 'normal', 'valid source translation lost normal publication'),
+    ('forget-zero-refusal', source.replace('        if (!mapping) return;', '        if (!mapping) { system.GPU().RequestComposite({}, {}); return; }'), 'zero', 'zero source address published deferred read'),
+    ('discard-valid-address', source.replace('        const auto mapping = nvmap.GetDisplayMapping(layer.buffer_handle);', '        const std::optional<Common::FrameMappingDomain::Stamp> mapping{};'), 'normal', 'valid source translation lost normal publication'),
     ('ignore-unmap-failure', source.replace('if (!UnmapHandle(*handle_description))', 'if (UnmapHandle(*handle_description))'), 'free-failure', 'failed unmap changed guest ownership boundary'),
 ]
 for name, changed, case, message in controls:
@@ -107,6 +111,7 @@ for name, changed, case, message in controls:
         run(mutant, f'{name}-{i}', case, message)
     print('PASS source-address control: ' + name, flush=True)
 inputs.update([fixture, 'tools/gpu_lifecycle_tests/run_frame_address_tests.py',
+               'src/common/frame_mapping.h',
                'src/core/hle/service/nvnflinger/ui/graphic_buffer.h', 'src/video_core/framebuffer_config.h'])
 (out / 'extraction.json').write_text(json.dumps({
     'sha256': {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in sorted(inputs)},

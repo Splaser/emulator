@@ -1,5 +1,9 @@
 # GPU lifecycle correctness: F4/F5
 
+Delayed source mapping use runs `run_frame_mapping_tests.py`: bounded copy and
+cache selection versus mapping intent, reuse and session retirement. See
+[protocol, cancellation and native limits](../../docs/M4_P2_FRAME_MAPPING_USE.md).
+
 Source-address/free/session interleavings use `run_frame_address_tests.py`.
 See [snapshot synchronization and remaining mapping-use gap](../../docs/M4_P2_SOURCE_ADDRESS_TRANSLATION.md).
 

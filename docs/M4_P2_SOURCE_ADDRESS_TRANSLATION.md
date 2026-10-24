@@ -1,5 +1,9 @@
 # M4 P2: source address resolution versus sustained mapping use
 
+Follow-up: [bounded use at the actual source copy/cache selection](M4_P2_FRAME_MAPPING_USE.md)
+repairs the queued-stamp window characterized below. Native completion and
+permanent per-session re-admission remain separate obligations.
+
 2026-10-24 (Asia/Taipei). Baseline `0412393e94aa75a936c48ab41cfec3c5598d4838`;
 local/fork/PR375 heads agreed before work. Branch `codex/issue-372-fixes`;
 main remains `b6a2ce9488d78efdbbeb0efe14c2ec5c0a263e76`. This repairs a

@@ -91,7 +91,9 @@ struct System{
 };
 namespace Service::Nvidia::Devices{
 struct nvdisp_disp0{
-    ::System& system;struct NvMap{int lookups=0;u64 GetHandleAddress(u32){++lookups;return 4096;}}nvmap;
+    ::System& system;struct NvMap{int lookups=0;u64 GetHandleAddress(u32){++lookups;return 4096;}
+        Common::FrameMappingDomain mappings;
+        auto GetDisplayMapping(u32 id){return mappings.Capture(GetHandleAddress(id),4096);}}nvmap;
     void Composite(std::span<const Nvnflinger::HwcLayer>);
 };
 @BLEND@

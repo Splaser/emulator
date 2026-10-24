@@ -1813,12 +1813,18 @@ void RasterizerVulkan::AccelerateInlineToMemory(GPUVAddr address, size_t copy_si
 
 std::optional<FramebufferTextureInfo> RasterizerVulkan::AccelerateDisplay(
     const Tegra::FramebufferConfig& config, DAddr framebuffer_addr, u32 pixel_stride) {
-    if (!framebuffer_addr) {
+    if (!framebuffer_addr || !config.source_mapping) {
         return {};
     }
     std::scoped_lock lock{texture_cache.mutex};
-    const auto [image_view, scaled] =
-        texture_cache.TryFindFramebufferImageView(config, framebuffer_addr);
+    // Cache lock first; mapping mutation closes its source domain before entering
+    // invalidation callbacks and never holds that domain over cache/GPU waits.
+    decltype(texture_cache.TryFindFramebufferImageView(config, framebuffer_addr)) selected{};
+    if (!device_memory.WithFrameMapping(*config.source_mapping, framebuffer_addr, 1, [&] {
+            selected = texture_cache.TryFindFramebufferImageView(config, framebuffer_addr);
+            return true;
+        })) return {};
+    const auto [image_view, scaled] = selected;
     if (!image_view) {
         return {};
     }

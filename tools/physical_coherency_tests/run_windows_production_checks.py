@@ -88,6 +88,19 @@ if 'src/video_core/renderer_vulkan/vk_turbo_mode.cpp' in (a.source or DEFAULT_SO
                        'source_sha256': hashlib.sha256(shader.read_bytes()).hexdigest(),
                        'generated_sha256': hashlib.sha256(generated.read_bytes()).hexdigest(),
                        'compiler': subprocess.check_output([a.glslang, '--version'], text=True)}
+window_shader_evidence = None
+if 'src/video_core/renderer_vulkan/present/window_adapt_pass.cpp' in (a.source or DEFAULT_SOURCES):
+    shader = root / 'src/video_core/host_shaders/vulkan_present.vert'
+    generated = out / 'generated/video_core/host_shaders/vulkan_present_vert_spv.h'
+    generated.parent.mkdir(parents=True, exist_ok=True)
+    command = [a.glslang, '-V', '--quiet', '--variable-name', 'VULKAN_PRESENT_VERT_SPV',
+               '-o', str(generated), str(shader), '--target-env', 'spirv1.3']
+    subprocess.run(command, check=True)
+    flags += ['-I', str(out / 'generated')]
+    window_shader_evidence = {'command': command, 'source': shader.relative_to(root).as_posix(),
+                             'source_sha256': hashlib.sha256(shader.read_bytes()).hexdigest(),
+                             'generated_sha256': hashlib.sha256(generated.read_bytes()).hexdigest(),
+                             'compiler': subprocess.check_output([a.glslang, '--version'], text=True)}
 for index, name in enumerate(a.source or DEFAULT_SOURCES):
     source = (root / name).resolve()
     relative = source.relative_to(root).as_posix()
@@ -119,6 +132,9 @@ inputs = set(a.source or DEFAULT_SOURCES) | {
     'src/core/hle/service/nvdrv/devices/nvhost_as_gpu.h',
     'src/video_core/control/channel_state.h',
     'tools/physical_coherency_tests/run_windows_production_checks.py',
+    'src/common/frame_mapping.h', 'src/core/device_memory_manager.h',
+    'src/core/device_memory_manager.inc', 'src/video_core/framebuffer_config.h',
+    'src/video_core/renderer_vulkan/present/layer.h',
 }
 manifest = {'platform': platform.platform(), 'python': sys.version,
             'compiler': subprocess.check_output([a.cxx, '--version'], text=True).splitlines()[0],
@@ -126,6 +142,7 @@ manifest = {'platform': platform.platform(), 'python': sys.version,
             'boost_official_archive_sha256': BOOST_SHA256 if a.fetch_boost else None,
             'sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sorted(inputs)},
             'objects': records, 'shader_evidence': shader_evidence,
+            'window_shader_evidence': window_shader_evidence,
             'boundary': 'Actual production Windows x64 object compilation with real headers. No application link, runtime, native Vulkan or Android claim.'}
 (out / 'extraction.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
 print('PASS focused Windows production compilation: ' + str(len(records)) + ' real COFF objects', flush=True)

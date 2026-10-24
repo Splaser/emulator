@@ -174,6 +174,14 @@ std::shared_ptr<NvMap::Handle> NvMap::GetHandle(Handle::Id handle) {
     }
 }
 
+std::optional<Common::FrameMappingDomain::Stamp> NvMap::GetDisplayMapping(Handle::Id handle) {
+    auto description = GetHandle(handle);
+    if (!description) return {};
+    std::scoped_lock lock{description->mutex};
+    return host1x.MemoryManager().CaptureFrameMapping(description->d_address,
+                                                      description->aligned_size);
+}
+
 DAddr NvMap::GetHandleAddress(Handle::Id handle) {
     auto handle_description = GetHandle(handle);
     if (!handle_description) return 0;

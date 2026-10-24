@@ -8,6 +8,7 @@
 #include <atomic>
 #include <bit>
 #include <deque>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -15,6 +16,7 @@
 
 #include "common/common_types.h"
 #include "common/host_memory.h"
+#include "common/frame_mapping.h"
 #include "common/mapping_lifetime.h"
 #include "common/range_mutex.h"
 #include "common/scratch_buffer.h"
@@ -58,6 +60,39 @@ public:
     ~DeviceMemoryManager();
 
     void BindInterface(DeviceInterface* device_inter);
+
+    // Independent of controlled coherency admission. Mutations close this source-use
+    // domain before cache callbacks, without carrying a mapping lock into GPU waits.
+    auto BeginFrameMappingMutation() { return frame_mapping.BeginMutation(); }
+    std::optional<Common::FrameMappingDomain::Stamp> CaptureFrameMapping(DAddr address, u64 size) {
+        if (!address || address >= device_as_size || size > device_as_size - address) return {};
+        return frame_mapping.Capture(address, size);
+    }
+    // Only short cache selection/native view creation, never recording, submission or waits.
+    template <typename Func>
+    bool WithFrameMapping(const Common::FrameMappingDomain::Stamp& stamp,
+                          DAddr address, u64 size, Func&& operation) {
+        return frame_mapping.WithUse(stamp, address, size, std::forward<Func>(operation));
+    }
+    bool CopyFrameMapping(const Common::FrameMappingDomain::Stamp& stamp,
+                          DAddr address, std::span<u8> output) {
+        return frame_mapping.WithUse(stamp, address, output.size(), [&] {
+            std::scoped_lock lock{mapping_guard};
+            // Validate every page before writing output. No returned raw pointer escapes.
+            for (size_t offset = 0; offset < output.size();) {
+                if (!GetPointer<u8>(address + offset)) return false;
+                offset += std::min<size_t>(output.size() - offset,
+                                          page_size - ((address + offset) & page_mask));
+            }
+            for (size_t offset = 0; offset < output.size();) {
+                const size_t count = std::min<size_t>(output.size() - offset,
+                                                     page_size - ((address + offset) & page_mask));
+                std::memcpy(output.data() + offset, GetPointer<u8>(address + offset), count);
+                offset += count;
+            }
+            return true;
+        });
+    }
 
     // Resolve under the device page-table lock, checking every page rather than
     // assuming DAddr continuity implies continuity in physical guest backing.
@@ -371,6 +406,7 @@ private:
     std::shared_ptr<const Common::GuestBackingEpoch> backing_epoch;
     u64 physical_backing_size{};
     Common::MappingLifetime mapping_lifetime;
+    Common::FrameMappingDomain frame_mapping;
     std::atomic<u64>& mapping_generation{mapping_lifetime.Get()->generation};
     std::mutex& mapping_guard{mapping_lifetime.Get()->mutex};
 };

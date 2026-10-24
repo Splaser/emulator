@@ -20,6 +20,7 @@ root = Path(__file__).resolve().parents[2]
 out = (a.output_dir or root / '.diagnostics/m4-frame-source').resolve()
 out.mkdir(parents=True, exist_ok=True)
 inputs = set()
+inputs.add('src/common/frame_mapping.h')
 
 
 def read(path):

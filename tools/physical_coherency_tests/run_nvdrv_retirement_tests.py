@@ -72,6 +72,10 @@ def run(name,value,expected=None):
 
 run('production',source)
 controls=[
+    ('omit-session-frame-retirement',source.replace(
+        '    auto frame_retirement = impl->host1x.MemoryManager().BeginFrameMappingMutation();','').replace(
+        '        frame_retirement.Complete();','').replace('    frame_retirement.Complete();',''),
+     'shutdown session retained old frame authority'),
     ('discard-preparation-failure',source.replace('retirements->Quarantine(std::move(record));','record.reset();'),
      'failed GraphicBuffer preparation discarded uncertain owners'),
     ('borrow-module-owner',source.replace('owner = shared_from_this()', 'owner = std::shared_ptr<Module>(this, [](Module*) {})'),
@@ -131,7 +135,7 @@ for name,value,expected in controls:
 paths=[base+p for p in ['nvdrv/nvdrv.cpp','nvdrv/nvdrv.h','nvdrv/nvdrv_interface.cpp','nvdrv/nvdrv_interface.h',
     'nvdrv/core/container.cpp','nvdrv/core/container.h','nvnflinger/ui/graphic_buffer.cpp','nvnflinger/ui/graphic_buffer.h',
     'nvnflinger/buffer_queue_producer.cpp']]+['src/common/owned_retirement.h','src/common/producer_drain.h',fixture,
-    'tools/physical_coherency_tests/run_nvdrv_retirement_tests.py']
+    'tools/physical_coherency_tests/run_nvdrv_retirement_tests.py','src/common/frame_mapping.h']
 (out/'extraction.json').write_text(json.dumps({'sha256':{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in paths},
     'positive_repeats':a.repeat,'controls':[c[0] for c in controls],
     'actual':['Module retirement factory bodies','GraphicBuffer factory/destructor','NVDRV destructor','SetPreallocatedBuffer','Session construction/move/destruction','OpenSession ownership/reuse prefix (heap optimization excluded)','CloseSession and RetainSession bodies'],

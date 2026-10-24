@@ -59,12 +59,19 @@ struct NvMap{
     ObservedMutex handles_lock,unmap_queue_lock;
     std::unordered_map<Handle::Id,std::shared_ptr<Handle>> handles;
     std::list<std::shared_ptr<Handle>> unmap_queue;
-    struct Host{::System system;auto& System(){return system;}}host1x;
+    struct Host{::System system;auto& System(){return system;}
+        struct Memory {Common::FrameMappingDomain domain;
+            auto CaptureFrameMapping(DAddr address,u64 size) {
+                if(!address)return std::optional<Common::FrameMappingDomain::Stamp>{};
+                return domain.Capture(address,size);
+            }}memory;
+        auto& MemoryManager(){return memory;}}host1x;
     std::function<void()> unmap_hook;bool fail_unmap=false;int unmaps=0;
     bool UnmapHandle(Handle& h){Require(h.mutex.HeldByCurrent(),"unmap writer lost handle guard");++unmaps;if(unmap_hook)unmap_hook();
         if(fail_unmap){return false;}
         h.d_address=0;h.pin_virt_address=0;return true;}
     std::shared_ptr<Handle> GetHandle(Handle::Id);DAddr GetHandleAddress(Handle::Id);
+    std::optional<Common::FrameMappingDomain::Stamp> GetDisplayMapping(Handle::Id);
     bool TryRemoveHandle(const Handle&);std::optional<FreeInfo> FreeHandle(Handle::Id,bool);void UnmapAllHandles(SessionId);
 };
 @METHODS@
@@ -84,9 +91,15 @@ struct Fixture{
 void Racing(const std::string& mode){Fixture f;Gate entered,release;Choice progress;
     if(mode=="last-free")f.handle->internal_dupes=0;
     f.file.fail_unmap=mode=="free-failure";f.file.unmap_hook=[&]{entered.Set();release.Wait();};
-    bool freed=false;std::thread writer([&]{if(mode=="session-retire"){f.file.UnmapAllHandles({1});freed=true;}else freed=f.file.FreeHandle(1,false).has_value();});entered.Wait();
+    bool freed=false;std::thread writer([&]{if(mode=="session-retire"||mode=="display-session"){f.file.UnmapAllHandles({1});freed=true;}else freed=f.file.FreeHandle(1,false).has_value();});entered.Wait();
     f.handle->mutex.before=[&]{Require(!f.file.handles_lock.HeldByCurrent(),"address lookup held table lock across handle wait");progress.Set(1);};
-    DAddr address=123;std::thread reader([&]{address=f.file.GetHandleAddress(1);progress.Set(2);});
+    DAddr address=123;std::thread reader([&]{
+#if @DISPLAY_MAPPING@
+        if(mode.starts_with("display-")){const auto mapping=f.file.GetDisplayMapping(1);address=mapping?mapping->address:0;}
+        else
+#endif
+        {address=f.file.GetHandleAddress(1);}
+        progress.Set(2);});
     Require(progress.Wait()==1,"address lookup bypassed mapping mutation lock");release.Set();writer.join();reader.join();
     if(mode=="free-failure")Require(!freed&&address==4096&&f.handle->dupes==1&&f.handle->pins==1&&f.file.host1x.system.gpu.notifications==1,"failed unmap changed guest ownership boundary");
     else Require(freed&&address==0&&f.handle->dupes==0&&f.handle->pins==0,"lookup published source after mapping retirement");
@@ -105,6 +118,6 @@ void AfterSnapshot(){Fixture f;const auto saved=f.file.GetHandleAddress(1);auto 
     // Deliberately never dereference saved: an object/once-valid address is not a mapping-use epoch.
 }
 int main(int argc,char** argv){Require(argc==2,"missing case");std::string c=argv[1];
-    if(c=="guest-free"||c=="session-retire"||c=="free-failure"||c=="last-free")Racing(c);
+    if(c=="guest-free"||c=="session-retire"||c=="free-failure"||c=="last-free"||c.starts_with("display-"))Racing(c);
     else if(c=="snapshot-retire")SnapshotRetire();else if(c=="normal"||c=="zero")Publish(c=="zero");else if(c=="after-snapshot")AfterSnapshot();else Require(false,"unknown case");
     std::cout<<"PASS frame address "<<c<<'\n';}
