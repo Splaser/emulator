@@ -34,6 +34,7 @@ void WindowAdaptPass::Draw(RasterizerVulkan& rasterizer, Scheduler& scheduler, s
                            std::list<Layer>& layers,
                            std::span<const Tegra::FramebufferConfig> configs,
                            const Layout::FramebufferLayout& layout, Frame* dst) {
+    auto source_scope = scheduler.BeginPresentationSources();
 
     const VkFramebuffer host_framebuffer{*dst->framebuffer};
     const VkRenderPass renderpass{*render_pass};

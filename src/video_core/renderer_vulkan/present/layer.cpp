@@ -97,6 +97,7 @@ bool Layer::ConfigureDraw(PresentPushConstants* out_push_constants,
         if (!UpdateRawImage(framebuffer, image_index)) return false;
     }
 
+    if (texture_info) scheduler.RetainPresentationSource(texture_info->native_owner);
     VkImage source_image = texture_info ? texture_info->image : *raw_images[image_index];
     VkImageView source_image_view =
         texture_info ? texture_info->image_view : *raw_image_views[image_index];

@@ -11,6 +11,7 @@
 #include "video_core/renderer_vulkan/vk_query_cache.h"
 
 #include "common/thread.h"
+#include "common/terminal_fail_stop.h"
 #include "common/profiling.h"
 #include "video_core/renderer_vulkan/vk_command_pool.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
@@ -60,6 +61,8 @@ Scheduler::~Scheduler() {
     if (worker_thread.joinable()) {
         worker_thread.join();
     }
+    if (!presentation_sources.Empty())
+        Common::TerminalFailStop("scheduler.native_source_disposal", "unconfirmed_native_owners");
 }
 
 void Scheduler::Shutdown() {
@@ -71,6 +74,47 @@ void Scheduler::Shutdown() {
     worker_thread.request_stop();
     event_cv.notify_all();
     worker_thread.join();
+}
+
+NativeSourceRetainer<Scheduler::Submission>::Scope Scheduler::BeginPresentationSources() {
+    if (!submission_owner->load(std::memory_order_acquire))
+        Common::TerminalFailStop("native_source.scope", "closed_admission");
+    // Applet/capture draws can run without Rasterizer::TickFrame (hidden window).
+    CollectPresentationSources();
+    return presentation_sources.Begin();
+}
+
+void Scheduler::RetainPresentationSource(std::shared_ptr<const void> owner) {
+    if (!owner || !submission_owner->load(std::memory_order_acquire))
+        Common::TerminalFailStop("native_source.admission", "closed_or_missing_owner");
+    try { presentation_sources.Retain(owner); }
+    catch (...) { Common::TerminalFailStop("native_source.admission", "host_exception"); }
+}
+
+void Scheduler::TrackPresentationSources() {
+    if (!submission_owner->load(std::memory_order_acquire) && !presentation_sources.Empty())
+        Common::TerminalFailStop("native_source.record_admission", "closed_admission");
+    try { presentation_sources.BeforeRecord(); }
+    catch (...) { Common::TerminalFailStop("native_source.record_admission", "host_exception"); }
+}
+
+void Scheduler::CollectPresentationSources() {
+    presentation_sources.Collect([this](const Submission& receipt) {
+        if (!receipt || receipt->owner != submission_owner ||
+            !submission_owner->load(std::memory_order_acquire)) return NativeSourceStatus::Unknown;
+        const auto result = receipt->result.load(std::memory_order_acquire);
+        if (result == VK_NOT_READY) return NativeSourceStatus::Pending;
+        if (result != VK_SUCCESS || !receipt->queue_attempted.load(std::memory_order_acquire) ||
+            receipt->queue != device.GetGraphicsQueue().Handle()) return NativeSourceStatus::Unknown;
+        const auto complete = master_semaphore->PollNativeResourceLifetime(receipt->tick);
+        return complete == VK_SUCCESS ? NativeSourceStatus::Complete :
+            complete == VK_NOT_READY ? NativeSourceStatus::Pending : NativeSourceStatus::Unknown;
+    });
+}
+
+bool Scheduler::RetirePresentationSourcesAfterDeviceIdle() {
+    if (worker_thread.joinable() || submission_owner->load(std::memory_order_acquire)) return false;
+    return presentation_sources.RetireAfterIdle();
 }
 
 u64 Scheduler::Flush(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {
@@ -942,13 +986,16 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
     if (observed_submission) {
         checked = std::exchange(observed_submission, {});
     }
+    Submission native_submission;
     try {
         EndPendingOperations();
         InvalidateState();
+        native_submission = presentation_sources.TakeSubmission();
 
         const u64 signal_value = master_semaphore->NextTick();
         if (checked) checked->tick = signal_value;
-        EnqueueCommand([signal_semaphore, wait_semaphore, signal_value, checked, ordinary_errors,
+        if (native_submission) native_submission->tick = signal_value;
+        EnqueueCommand([signal_semaphore, wait_semaphore, signal_value, checked, native_submission, ordinary_errors,
                                 this](vk::CommandBuffer cmdbuf, vk::CommandBuffer upload_cmdbuf) {
             try {
                 static constexpr VkMemoryBarrier WRITE_BARRIER{
@@ -968,8 +1015,13 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
 
                 std::scoped_lock lock{submit_mutex};
                 if (checked) checked->queue_attempted.store(true, std::memory_order_release);
+                if (native_submission) native_submission->queue_attempted.store(true, std::memory_order_release);
                 const VkResult result = master_semaphore->SubmitQueue(
                     cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value);
+                if (native_submission) {
+                    native_submission->queue = device.GetGraphicsQueue().Handle();
+                    native_submission->result.store(result, std::memory_order_release);
+                }
                 if (result == VK_SUCCESS) {
                     if (checked) {
                         checked->queue = device.GetGraphicsQueue().Handle();
@@ -998,11 +1050,13 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
                 last_accepted_submission.reset();
                 current_content_uncertain.store(true, std::memory_order_release);
                 if (checked) checked->result.store(error.GetResult(), std::memory_order_release);
+                if (native_submission) native_submission->result.store(error.GetResult(), std::memory_order_release);
                 if (ordinary_errors || !checked) throw;
             } catch (...) {
                 last_accepted_submission.reset();
                 current_content_uncertain.store(true, std::memory_order_release);
                 if (checked) checked->result.store(VK_ERROR_UNKNOWN, std::memory_order_release);
+                if (native_submission) native_submission->result.store(VK_ERROR_UNKNOWN, std::memory_order_release);
                 if (ordinary_errors || !checked) throw;
             }
         });
@@ -1011,6 +1065,7 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
         return signal_value;
     } catch (...) {
         if (checked) checked->result.store(VK_ERROR_UNKNOWN, std::memory_order_release);
+        if (native_submission) native_submission->result.store(VK_ERROR_UNKNOWN, std::memory_order_release);
         current_content_uncertain.store(true, std::memory_order_release);
         throw; // Host-side failure before queue acceptance is not indefinitely Pending.
     }

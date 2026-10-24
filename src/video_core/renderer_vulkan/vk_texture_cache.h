@@ -10,6 +10,7 @@
 #include "shader_recompiler/shader_info.h"
 #include "video_core/renderer_vulkan/vk_compute_pass.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
+#include "video_core/renderer_vulkan/vk_presentation_source.h"
 #include "video_core/texture_cache/image_view_base.h"
 #include "video_core/vulkan_common/vulkan_memory_allocator.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
@@ -142,7 +143,7 @@ public:
     Image& operator=(const Image&) = delete;
 
     Image(Image&&) = default;
-    Image& operator=(Image&&) = default;
+    Image& operator=(Image&&) noexcept;
 
     void UploadMemory(VkBuffer buffer, VkDeviceSize offset,
                       std::span<const VideoCommon::BufferImageCopy> copies);
@@ -161,6 +162,12 @@ public:
 
     [[nodiscard]] VkImage Handle() const noexcept {
         return current_image;
+    }
+
+    std::shared_ptr<const vk::Image> RetainCurrentImage() const noexcept {
+        if (original_image && **original_image == current_image) return original_image;
+        if (scaled_image && **scaled_image == current_image) return scaled_image;
+        return {};
     }
 
     [[nodiscard]] VkImageAspectFlags AspectMask() const noexcept {
@@ -189,11 +196,11 @@ private:
     Scheduler* scheduler{};
     TextureCacheRuntime* runtime{};
 
-    vk::Image original_image;
+    std::shared_ptr<vk::Image> original_image;
     std::vector<vk::ImageView> storage_image_views;
     VkImageAspectFlags aspect_mask = 0;
     bool initialized = false;
-    vk::Image scaled_image{};
+    std::shared_ptr<vk::Image> scaled_image;
     VkImage current_image{};
 
     std::unique_ptr<Framebuffer> scale_framebuffer;
@@ -218,7 +225,7 @@ public:
     ImageView& operator=(const ImageView&) = delete;
 
     ImageView(ImageView&&) = default;
-    ImageView& operator=(ImageView&&) = default;
+    ImageView& operator=(ImageView&&) noexcept;
 
     [[nodiscard]] VkImageView DepthView();
 
@@ -232,7 +239,14 @@ public:
     [[nodiscard]] bool IsRescaled() const noexcept;
 
     [[nodiscard]] VkImageView Handle(Shader::TextureType texture_type) const noexcept {
-        return *image_views[static_cast<size_t>(texture_type)];
+        const auto& view = image_views[static_cast<size_t>(texture_type)];
+        return view ? **view : VK_NULL_HANDLE;
+    }
+
+    std::shared_ptr<const PresentationSource> RetainPresentationSource() const {
+        const auto& view = image_views[static_cast<size_t>(Shader::TextureType::Color2D)];
+        if (!image_owner || !view || **image_owner != image_handle) return {};
+        return std::make_shared<const PresentationSource>(image_owner, view);
     }
 
     [[nodiscard]] VkImageView HandleNonSrgb(Shader::TextureType texture_type);
@@ -277,13 +291,15 @@ private:
     const Device* device = nullptr;
     const SlotVector<Image>* slot_images = nullptr;
 
-    std::array<vk::ImageView, Shader::NUM_TEXTURE_TYPES> image_views;
+    // Parent precedes children; reverse destruction releases native views first.
+    std::shared_ptr<const vk::Image> image_owner;
+    std::array<std::shared_ptr<vk::ImageView>, Shader::NUM_TEXTURE_TYPES> image_views;
     std::array<vk::ImageView, Shader::NUM_TEXTURE_TYPES> non_srgb_image_views;
     std::unique_ptr<StorageViews> storage_views;
     vk::ImageView depth_view;
     vk::ImageView stencil_view;
     vk::ImageView color_view;
-    vk::Image null_image;
+    std::shared_ptr<vk::Image> null_image;
     VkImage image_handle = VK_NULL_HANDLE;
     VkImageView render_target = VK_NULL_HANDLE;
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;

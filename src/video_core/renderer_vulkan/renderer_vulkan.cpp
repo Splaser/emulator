@@ -189,6 +189,9 @@ void RendererVulkan::Shutdown() {
                 if (!rasterizer.RetireControlledTransfersAfterDeviceIdle()) {
                     Common::TerminalFailStop(stage, "unsettled_host_ownership", static_cast<int>(idle));
                 }
+                if (!scheduler.RetirePresentationSourcesAfterDeviceIdle()) {
+                    Common::TerminalFailStop(stage, "unsettled_native_sources", static_cast<int>(idle));
+                }
             } else {
                 Common::TerminalFailStop(stage, "vulkan_result", static_cast<int>(idle));
             }

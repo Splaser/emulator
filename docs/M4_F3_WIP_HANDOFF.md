@@ -1,5 +1,24 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-24: accelerated native source owner through split submissions
+
+From `4ee7ee0fee`, baseline bare native handles outlive CPU-ring retirement and
+failed present fence waits still reset/reuse frames. Exact original/scaled/null
+image allocations and selected native views now have shared, immutable ownership
+pairs independent of cache metadata. A whole WindowAdapt draw scope renews them
+before every later record across internal Finish, with receipts on the existing
+submissions. Disposal requires accepted same-queue receipt plus actual timeline
+or checked fallback fence acknowledgment; failures retain. Closed entry, worker
+join and successful checked device idle gate terminal release. Presentation
+output has its separate checked present_done reuse boundary. See
+[protocol, evidence and next audit](M4_P2_ACCELERATED_NATIVE_SOURCE.md) and
+[results](M4_P2_ACCELERATED_NATIVE_RESULTS.json). Eight Windows production COFF
+units compile; deterministic source/fallback/presentation/shutdown and data
+provenance regressions are recorded with their fixture limits. Temporary
+artifacts cleaned; issue branch pushed; main untouched. Next: native helper and
+capture-output exception ownership. HostMemory high risk, all M4 phases incomplete,
+F2/F3 open and admission Unknown.
+
 ## 2026-10-24: close retired session frame-source re-admission
 
 From `a8daa2c75a`, test-first shutdown/stale recapture and stale queued-stamp

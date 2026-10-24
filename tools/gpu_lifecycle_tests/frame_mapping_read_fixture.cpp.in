@@ -120,13 +120,16 @@ struct Layer {
 @RAW@
 #if !@BASELINE@
 namespace Shader {enum class TextureType{Color2D};}
-struct FramebufferTextureInfo {int image{},image_view{};u32 width{},height{},scaled_width{},scaled_height{};};
+struct NativePacketStub {bool Matches(int,int)const{return true;}};
+struct FramebufferTextureInfo {int image{},image_view{};u32 width{},height{},scaled_width{},scaled_height{};
+    std::shared_ptr<NativePacketStub> native_owner;};
 struct RasterizerVulkan {
     Core::DeviceMemoryManager<int>& device_memory;
     struct TextureCache {
         std::mutex mutex;int selections{};
         struct View {struct {u32 width=2,height=1;}size;
-            int ImageHandle(){return 1;}int Handle(Shader::TextureType){return 2;}}view;
+            int ImageHandle(){return 1;}int Handle(Shader::TextureType){return 2;}
+            auto RetainPresentationSource(){return std::make_shared<NativePacketStub>();}}view;
         auto TryFindFramebufferImageView(const Tegra::FramebufferConfig&,DAddr) {
             ++selections;return std::pair(&view,false);
         }

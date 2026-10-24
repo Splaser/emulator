@@ -136,6 +136,12 @@ inputs = set(a.source or DEFAULT_SOURCES) | {
     'src/common/frame_mapping.h', 'src/core/device_memory_manager.h',
     'src/core/device_memory_manager.inc', 'src/video_core/framebuffer_config.h',
     'src/video_core/renderer_vulkan/present/layer.h',
+    'src/video_core/renderer_vulkan/vk_native_source_retainer.h',
+    'src/video_core/renderer_vulkan/vk_presentation_source.h',
+    'src/video_core/renderer_vulkan/vk_texture_cache.h',
+    'src/video_core/renderer_vulkan/vk_master_semaphore.h',
+    'src/video_core/renderer_vulkan/vk_scheduler.h',
+    'src/video_core/renderer_vulkan/vk_blit_screen.h',
 }
 manifest = {'platform': platform.platform(), 'python': sys.version,
             'compiler': subprocess.check_output([a.cxx, '--version'], text=True).splitlines()[0],

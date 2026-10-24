@@ -1473,8 +1473,8 @@ void TextureCacheRuntime::TickFrame() {}
 Image::Image(TextureCacheRuntime& runtime_, const ImageInfo& info_, GPUVAddr gpu_addr_,
              VAddr cpu_addr_)
     : VideoCommon::ImageBase(info_, gpu_addr_, cpu_addr_), scheduler{&runtime_.scheduler},
-      runtime{&runtime_}, original_image(MakeImage(runtime_.device, runtime_.memory_allocator, info,
-                                                   runtime->ViewFormats(info.format))),
+      runtime{&runtime_}, original_image(std::make_shared<vk::Image>(MakeImage(runtime_.device, runtime_.memory_allocator, info,
+                                                   runtime->ViewFormats(info.format)))),
       aspect_mask(ImageAspectMask(info.format)) {
     if (IsPixelFormatASTC(info.format) && !runtime->device.IsOptimalAstcSupported()) {
         switch (Settings::values.accelerate_astc.GetValue()) {
@@ -1503,9 +1503,9 @@ Image::Image(TextureCacheRuntime& runtime_, const ImageInfo& info_, GPUVAddr gpu
         flags |= VideoCommon::ImageFlagBits::CostlyLoad;
     }
     if (runtime->device.HasDebuggingToolAttached()) {
-        original_image.SetObjectNameEXT(VideoCommon::Name(*this).c_str());
+        original_image->SetObjectNameEXT(VideoCommon::Name(*this).c_str());
     }
-    current_image = *original_image;
+    current_image = **original_image;
     const u32 mip_levels = PhysicalMipLevels(info);
     storage_image_views.resize(mip_levels);
     if (IsPixelFormatASTC(info.format) && !runtime->device.IsOptimalAstcSupported() &&
@@ -1514,7 +1514,7 @@ Image::Image(TextureCacheRuntime& runtime_, const ImageInfo& info_, GPUVAddr gpu
         const auto& device = runtime->device.GetLogical();
         for (u32 level = 0; level < mip_levels; ++level) {
             storage_image_views[level] =
-                MakeStorageView(device, level, *original_image, VK_FORMAT_A8B8G8R8_UNORM_PACK32);
+                MakeStorageView(device, level, **original_image, VK_FORMAT_A8B8G8R8_UNORM_PACK32);
         }
     }
 }
@@ -1522,6 +1522,12 @@ Image::Image(TextureCacheRuntime& runtime_, const ImageInfo& info_, GPUVAddr gpu
 Image::Image(const VideoCommon::NullImageParams& params) : VideoCommon::ImageBase{params} {}
 
 Image::~Image() = default;
+
+Image& Image::operator=(Image&& other) noexcept {
+    static_assert(std::is_nothrow_move_constructible_v<Image>);
+    if (this != &other) { this->~Image(); std::construct_at(this, std::move(other)); }
+    return *this;
+}
 
 void Image::UploadMemory(VkBuffer buffer, VkDeviceSize offset,
                          std::span<const VideoCommon::BufferImageCopy> copies) {
@@ -1533,7 +1539,7 @@ void Image::UploadMemory(VkBuffer buffer, VkDeviceSize offset,
     scheduler->RequestOutsideRenderPassOperationContext();
     auto vk_copies = TransformBufferImageCopies(copies, offset, aspect_mask);
     const VkBuffer src_buffer = buffer;
-    const VkImage vk_image = *original_image;
+    const VkImage vk_image = **original_image;
     const VkImageAspectFlags vk_aspect_mask = aspect_mask;
     const bool is_initialized = std::exchange(initialized, true);
     scheduler->Record([src_buffer, vk_image, vk_aspect_mask, is_initialized,
@@ -1575,7 +1581,7 @@ void Image::DownloadMemory(std::span<VkBuffer> buffers_span, std::span<size_t> o
             TransformBufferImageCopies(copies, offsets_span[index], aspect_mask));
     }
     scheduler->RequestOutsideRenderPassOperationContext();
-    scheduler->Record([buffers = std::move(buffers_vector), image = *original_image,
+    scheduler->Record([buffers = std::move(buffers_vector), image = **original_image,
                        aspect_mask_ = aspect_mask, vk_copies](vk::CommandBuffer cmdbuf) {
         const VkImageMemoryBarrier read_barrier{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -1678,11 +1684,11 @@ bool Image::ScaleUp(bool ignore) {
         auto scaled_info = info;
         scaled_info.size.width = scaled_width;
         scaled_info.size.height = scaled_height;
-        scaled_image = MakeImage(runtime->device, runtime->memory_allocator, scaled_info,
-                                 runtime->ViewFormats(info.format));
+        scaled_image = std::make_shared<vk::Image>(MakeImage(runtime->device, runtime->memory_allocator, scaled_info,
+                                 runtime->ViewFormats(info.format)));
         ignore = false;
     }
-    current_image = *scaled_image;
+    current_image = **scaled_image;
     if (ignore) {
         return true;
     }
@@ -1692,7 +1698,7 @@ bool Image::ScaleUp(bool ignore) {
     if (NeedsScaleHelper()) {
         return BlitScaleHelper(true);
     } else {
-        BlitScale(*scheduler, *original_image, *scaled_image, info, aspect_mask, resolution);
+        BlitScale(*scheduler, **original_image, **scaled_image, info, aspect_mask, resolution);
     }
     return true;
 }
@@ -1707,7 +1713,7 @@ bool Image::ScaleDown(bool ignore) {
     }
     ASSERT(info.type != ImageType::Linear);
     flags &= ~ImageFlagBits::Rescaled;
-    current_image = *original_image;
+    current_image = **original_image;
     if (ignore) {
         return true;
     }
@@ -1717,7 +1723,7 @@ bool Image::ScaleDown(bool ignore) {
     if (NeedsScaleHelper()) {
         return BlitScaleHelper(false);
     } else {
-        BlitScale(*scheduler, *scaled_image, *original_image, info, aspect_mask, resolution, false);
+        BlitScale(*scheduler, **scaled_image, **original_image, info, aspect_mask, resolution, false);
     }
     return true;
 }
@@ -1812,6 +1818,7 @@ ImageView::ImageView(TextureCacheRuntime& runtime, const VideoCommon::ImageViewI
       device{&runtime.device}, image_handle{image.Handle()},
       samples(ConvertSampleCount(image.info.num_samples)),
       physical_image_type{image.info.type} {
+    image_owner = image.RetainCurrentImage();
     using Shader::TextureType;
 
     const VkImageAspectFlags aspect_mask = ImageViewAspectMask(info);
@@ -1875,7 +1882,7 @@ ImageView::ImageView(TextureCacheRuntime& runtime, const VideoCommon::ImageViewI
         if (device->HasDebuggingToolAttached()) {
             handle.SetObjectNameEXT(VideoCommon::Name(*this, gpu_addr).c_str());
         }
-        image_views[static_cast<size_t>(tex_type)] = std::move(handle);
+        image_views[static_cast<size_t>(tex_type)] = std::make_shared<vk::ImageView>(std::move(handle));
     };
     switch (info.type) {
     case VideoCommon::ImageViewType::e1D:
@@ -1928,14 +1935,21 @@ ImageView::ImageView(TextureCacheRuntime& runtime, const VideoCommon::NullImageV
     ImageInfo info{};
     info.format = PixelFormat::A8B8G8R8_UNORM;
 
-    null_image = MakeImage(*device, runtime.memory_allocator, info, {});
-    image_handle = *null_image;
+    null_image = std::make_shared<vk::Image>(MakeImage(*device, runtime.memory_allocator, info, {}));
+    image_owner = null_image;
+    image_handle = **null_image;
     for (u32 i = 0; i < Shader::NUM_TEXTURE_TYPES; i++) {
-        image_views[i] = MakeView(VK_FORMAT_A8B8G8R8_UNORM_PACK32, VK_IMAGE_ASPECT_COLOR_BIT);
+        image_views[i] = std::make_shared<vk::ImageView>(MakeView(VK_FORMAT_A8B8G8R8_UNORM_PACK32, VK_IMAGE_ASPECT_COLOR_BIT));
     }
 }
 
 ImageView::~ImageView() = default;
+
+ImageView& ImageView::operator=(ImageView&& other) noexcept {
+    static_assert(std::is_nothrow_move_constructible_v<ImageView>);
+    if (this != &other) { this->~ImageView(); std::construct_at(this, std::move(other)); }
+    return *this;
+}
 
 VkImageView ImageView::DepthView() {
     if (!image_handle) {

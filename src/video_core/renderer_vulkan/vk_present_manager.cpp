@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/settings.h"
+#include "common/terminal_fail_stop.h"
 #include "common/thread.h"
 #include "core/frontend/emu_window.h"
 #include "video_core/renderer_vulkan/vk_present_manager.h"
@@ -165,8 +166,21 @@ Frame* PresentManager::GetRenderFrame() {
     ++frames_in_flight;
 
     // Wait for the presentation to be finished so all frame resources are free
-    frame->present_done.Wait();
-    frame->present_done.Reset();
+    const char* stage = "present.frame_completion";
+    try {
+        const auto completed = frame->present_done.Wait();
+        if (completed != VK_SUCCESS) {
+            Common::TerminalFailStop(stage, "vulkan_result", static_cast<int>(completed));
+        }
+        stage = "present.frame_reset";
+        frame->present_done.Reset();
+    } catch (const vk::Exception& error) {
+        // Reuse is uncertain. Do not unwind frame/renderer owners or reset/retry
+        // an unconfirmed fence; host presentation drainage is not native completion.
+        Common::TerminalFailStop(stage, "vulkan_exception", static_cast<int>(error.GetResult()));
+    } catch (...) {
+        Common::TerminalFailStop(stage, "host_exception");
+    }
 
     return frame;
 }

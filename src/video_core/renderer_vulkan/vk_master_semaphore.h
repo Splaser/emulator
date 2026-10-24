@@ -52,6 +52,17 @@ public:
     /// Refresh the known GPU tick
     void Refresh();
 
+    // Disposal only: fallback acknowledges WaitThread's successful wait/reset,
+    // together with Scheduler's accepted submission identity. No content authority.
+    [[nodiscard]] VkResult PollNativeResourceLifetime(u64 tick) {
+        if (!tick) return VK_NOT_READY;
+        if (semaphore) return PollTimeline(tick);
+        std::scoped_lock lock{free_mutex};
+        const auto failure = completion_failure.load(std::memory_order_acquire);
+        if (failure != VK_SUCCESS) return failure;
+        return gpu_tick.load(std::memory_order_acquire) >= tick ? VK_SUCCESS : VK_NOT_READY;
+    }
+
     /// Checked, nonblocking timeline query. Unsupported fence fallback is never success.
     [[nodiscard]] VkResult PollTimeline(u64 tick) const noexcept {
         if (!semaphore) return VK_ERROR_FEATURE_NOT_PRESENT;

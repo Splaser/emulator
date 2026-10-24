@@ -22,6 +22,7 @@
 #include "common/slow_path_metrics.h"
 #include "video_core/buffer_cache/physical_write_identity.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
+#include "video_core/renderer_vulkan/vk_native_source_retainer.h"
 #include "video_core/renderer_vulkan/vk_buffer_payload.h"
 #include "video_core/renderer_vulkan/vk_sync_provenance.h"
 #include "video_core/renderer_vulkan/vk_transfer_content.h"
@@ -539,6 +540,11 @@ public:
     ~Scheduler();
 
     /// Sends the current execution context to the GPU.
+    NativeSourceRetainer<Submission>::Scope BeginPresentationSources();
+    void RetainPresentationSource(std::shared_ptr<const void> owner);
+    void TrackPresentationSources();
+    void CollectPresentationSources();
+    bool RetirePresentationSourcesAfterDeviceIdle();
     u64 Flush(VkSemaphore signal_semaphore = nullptr, VkSemaphore wait_semaphore = nullptr);
 
     [[nodiscard]] Submission FlushChecked();
@@ -612,6 +618,7 @@ public:
     template <typename T>
         requires std::is_invocable_v<T, vk::CommandBuffer, vk::CommandBuffer>
     void RecordWithUploadBuffer(T&& command) {
+        TrackPresentationSources();
         RevokeTransferContentEligibility();
         EnqueueCommand(std::forward<T>(command));
     }
@@ -832,6 +839,9 @@ private:
     const Device& device;
     const std::shared_ptr<std::atomic_bool> submission_owner{
         std::make_shared<std::atomic_bool>(true)};
+    NativeSourceRetainer<Submission> presentation_sources{[this] {
+        return Submission{new CheckedSubmission{submission_owner}};
+    }};
     StateTracker& state_tracker;
 
     std::unique_ptr<MasterSemaphore> master_semaphore;

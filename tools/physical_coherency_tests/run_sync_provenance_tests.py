@@ -12,9 +12,10 @@ p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--vulkan-include', type=Path)
 p.add_argument('--positive-only', action='store_true', help='Iterative fixture check only; excludes mutation acceptance')
 p.add_argument('--content', action='store_true', help='Also validate exact transfer content and copy provenance')
+p.add_argument('--output-dir',type=Path)
 a = p.parse_args()
 root = Path(__file__).resolve().parents[2]
-out = root / '.diagnostics/m4-sync-provenance'
+out = (a.output_dir or root / '.diagnostics/m4-sync-provenance').resolve()
 stub = out / 'stubs/video_core/vulkan_common'
 stub.mkdir(parents=True, exist_ok=True)
 (stub / 'vulkan_wrapper.h').write_text('#pragma once\n// Fixture dispatch types precede payload.\n')
@@ -284,7 +285,7 @@ if a.content:
         ('fill-without-device-command', 'cmdbuf.FillBuffer(destination.Handle(), destination.Offset() + operation.destination_offset,\n                                          operation.size, operation.value);', '(void)destination;'),
         ('content-without-sync-evidence', 'transfer->positions[i], next)) return nullptr;', 'transfer->positions[i], next)) {}'),
         ('content-without-host-retention',
-         'if (transfer->worker_pending.load(std::memory_order_acquire) ||\n            !transfer->submission->queue_attempted.load(std::memory_order_acquire) ||\n            transfer->submission->result.load(std::memory_order_acquire) == VK_NOT_READY) return;',
+         'if (!transfer->submission ||\n            transfer->worker_pending.load(std::memory_order_acquire) ||\n            !transfer->submission->queue_attempted.load(std::memory_order_acquire) ||\n            transfer->submission->result.load(std::memory_order_acquire) == VK_NOT_READY) return false;',
          '(void)transfer;')]:
         assert source.count(guard) == 1, name
         result = run(name, source.replace(guard, replacement))

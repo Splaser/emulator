@@ -1692,6 +1692,7 @@ void RasterizerVulkan::UpdatePassEndSubmit() {
 }
 
 void RasterizerVulkan::TickFrame() {
+    scheduler.CollectPresentationSources();
     memory_allocator.TickFrame();
     draw_counter = 0;
     UpdatePassEndSubmit();
@@ -1833,6 +1834,9 @@ std::optional<FramebufferTextureInfo> RasterizerVulkan::AccelerateDisplay(
     const auto& resolution = Settings::values.resolution_info;
 
     FramebufferTextureInfo info{};
+    info.native_owner = image_view->RetainPresentationSource();
+    if (!info.native_owner || !info.native_owner->Matches(image_view->ImageHandle(),
+            image_view->Handle(Shader::TextureType::Color2D))) return {};
     info.image = image_view->ImageHandle();
     info.image_view = image_view->Handle(Shader::TextureType::Color2D);
     info.width = image_view->size.width;

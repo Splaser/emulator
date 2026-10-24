@@ -34,6 +34,14 @@ def method(marker):
 wait = method('void MasterSemaphore::Wait(u64 tick)')
 worker = method('void MasterSemaphore::WaitThread(')
 submit = method('VkResult MasterSemaphore::SubmitQueueFence(')
+header_path='src/video_core/renderer_vulkan/vk_master_semaphore.h'
+header=(root/header_path).read_text()
+start=header.index('    [[nodiscard]] VkResult PollNativeResourceLifetime(')
+pos=header.index('{',start);depth=1;end=pos+1
+while depth:
+    depth+=(header[end]=='{')-(header[end]=='}');end+=1
+poll_native=header[start:end]
+
 source = r'''
 #include <atomic>
 #include <array>
@@ -49,7 +57,7 @@ source = r'''
 #include <functional>
 #include <thread>
 using u64=unsigned long long;
-using VkResult=int;
+using VkResult=int; constexpr int VK_NOT_READY=1;
 using u32=unsigned;using VkSemaphore=int;
 constexpr int VK_SUCCESS=0,VK_TIMEOUT=2,VK_ERROR_DEVICE_LOST=-4,VK_ERROR_UNKNOWN=-13,VK_ERROR_OUT_OF_HOST_MEMORY=-1;
 constexpr int VK_STRUCTURE_TYPE_SUBMIT_INFO=4;
@@ -118,7 +126,8 @@ struct Master {
     FakeDevice device;int acquired_fences=0;
     vk::Fence GetFreeFence() {++acquired_fences;return vk::Fence{17,VK_SUCCESS};}
     bool IsFree(u64 tick) {return gpu_tick.load()>=tick;}void Refresh() {}
-''' + wait + '\n' + worker + '\n' + submit + r'''
+    int PollTimeline(u64) {return -8;}
+''' + wait + '\n' + worker + '\n' + submit + '\n' + poll_native + r'''
 };
 void Check(int result,int reset_error=VK_SUCCESS,bool fail_return=false) {
     Master master;vk::Fence::resets=0;vk::Fence::reset_result=reset_error;
@@ -146,6 +155,7 @@ void Check(int result,int reset_error=VK_SUCCESS,bool fail_return=false) {
     const auto first_result=first.get(),second_result=second.get();
     worker.request_stop();master.wait_cv.notify_all();worker.join();
     if(outcome==VK_SUCCESS) {
+        Require(master.PollNativeResourceLifetime(7)==VK_SUCCESS && master.PollNativeResourceLifetime(8)==VK_NOT_READY, "fallback lifetime poll ignored successful native acknowledgment");
         Require(first_result==VK_SUCCESS && second_result==VK_SUCCESS && master.gpu_tick==7 &&
                 vk::Fence::resets==1 && master.free_queue.size()==1,"successful native fence failed to retire");
     } else {
@@ -154,6 +164,7 @@ void Check(int result,int reset_error=VK_SUCCESS,bool fail_return=false) {
                 "failed native fence advanced tick or recycled resource");
         Require(master.failed_wait && master.failed_wait->second.id==17 && master.wait_queue.size()==1,
                 "unknown native fence or queued suffix lost ownership");
+        Require(master.PollNativeResourceLifetime(7)==outcome, "failed native fence authorized lifetime disposal");
         master.Wait(0); // already completed history remains available
         std::cout<<"PASS native fence failure wakes waiters and retains unknown prefix/suffix\n";
     }
@@ -256,6 +267,8 @@ for i in range(a.repeat):
     assert result.returncode == 0 and log.count('PASS native fence failure') == 4 and 'PASS durable submission' in log, log
 print(f'PASS actual native fence completion bodies ({a.repeat} repetitions)', flush=True)
 controls = [
+    ('ignore-lifetime-failure', source.replace('if (failure != VK_SUCCESS) return failure;', 'if (false) return failure;'),
+     'failed native fence authorized lifetime disposal'),
     ('ignore-wait-result', source.replace(worker,worker.replace('if (result != VK_SUCCESS) {', 'if (false) {')),
      'failed native fence reported completion'),
     ('recycle-unknown-fence', source.replace('failed_wait.emplace(host_tick, std::move(fence));',

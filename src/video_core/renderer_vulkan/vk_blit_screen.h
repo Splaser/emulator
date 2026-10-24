@@ -43,6 +43,7 @@ struct FramebufferTextureInfo {
     u32 height{};
     u32 scaled_width{};
     u32 scaled_height{};
+    std::shared_ptr<const struct PresentationSource> native_owner;
 };
 
 class BlitScreen {

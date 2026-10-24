@@ -97,6 +97,7 @@ void SetCurrentThreadPriority(ThreadPriority) {}
 }
 Event* drain_entered=nullptr;
 struct Scheduler {
+    struct NativeSourcesStub {bool Empty()const{return true;}} presentation_sources;
     std::shared_ptr<std::atomic_bool> submission_owner=std::make_shared<std::atomic_bool>(true);
     struct CommandChunk {
         std::function<void()> operation; bool Empty() { return !operation; }
@@ -219,6 +220,12 @@ struct RendererVulkan {
     bool terminal_shutdown_started=false;
     RasterizerVulkan rasterizer;
     struct SchedulerSpy {
+        bool native_retirement_ready=true;
+        bool RetirePresentationSourcesAfterDeviceIdle() {
+            Require(!order.empty()&&order.back()=="controlled_retire","native owners retired before checked idle/host closure");
+            if(!native_retirement_ready)return false;
+            order.push_back("native_source_retire");return true;
+        }
         std::mutex submit_mutex;
         struct Master { void Shutdown() {order.push_back("completion_join");} } master;
         Master& GetMasterSemaphore() {return master;}
@@ -262,7 +269,7 @@ void renderer_order() {
     Require(domain->cancelled==1 && domain->unknown==1,"alias shutdown cancelled an active effect or lost pending cancellation");
     Require(pending->phase==ControlledAliasPhase::Refused && active->phase==ControlledAliasPhase::Unknown,
             "alias shutdown returned a false completion");
-    const std::vector<std::string> expected={"pin_seal","pipelines","finish","fencing","runtime_finish","runtime_finish","recording","presentation_join","scheduler_join","detach_on_submit","turbo_join","device_idle","controlled_retire","completion_join","imports"};
+    const std::vector<std::string> expected={"pin_seal","pipelines","finish","fencing","runtime_finish","runtime_finish","recording","presentation_join","scheduler_join","detach_on_submit","turbo_join","device_idle","controlled_retire","native_source_retire","completion_join","imports"};
     Require(order==expected,"renderer destroys resources or waits idle before host workers are joined");
 }
 void renderer_failed_idle() {
@@ -272,6 +279,10 @@ void renderer_failed_idle() {
 void renderer_pending_disposal() {
     order.clear(); {RendererVulkan renderer;renderer.rasterizer.retirement_ready=false;renderer.Shutdown();}
     for(const auto& event:order) Require(event!="controlled_retire","unsettled ownership retired controlled resources");
+}
+void renderer_pending_native_sources() {
+    order.clear(); {RendererVulkan renderer;renderer.scheduler.native_retirement_ready=false;renderer.Shutdown();}
+    Require(false,"unsettled native owners escaped renderer shutdown");
 }
 void scheduler_drain() {
     Scheduler scheduler; scheduler.Start(); Event entered,release,draining;
@@ -342,6 +353,7 @@ int main(int argc,char** argv) {
         if(test=="renderer_order") renderer_order(); else if(test=="scheduler") scheduler_drain();
         else if(test=="renderer_failed_idle") renderer_failed_idle();
         else if(test=="renderer_pending_disposal") renderer_pending_disposal();
+        else if(test=="renderer_pending_native_sources") renderer_pending_native_sources();
         else if(test=="scheduler_cancel") scheduler_cancel();
         else if(test=="presentation") present_drain(); else if(test=="fencing") fence_cancel();
         else if(test=="turbo") turbo_drain(); else if(test=="completion") completion_drain();
@@ -368,12 +380,13 @@ subprocess.run(flags+[str(cpp),'-o',str(exe)],check=True)
     'instrumentation':['signal on entry to wait/drain'],
 },indent=2))
 failed=False
-for case in args.case or ['renderer_order','renderer_failed_idle','renderer_pending_disposal','scheduler','scheduler_cancel','presentation','fencing','turbo','completion']:
+for case in args.case or ['renderer_order','renderer_failed_idle','renderer_pending_disposal','renderer_pending_native_sources','scheduler','scheduler_cancel','presentation','fencing','turbo','completion']:
     for i in range(args.repeat):
         result=subprocess.run([str(exe),case],capture_output=True,text=True,timeout=20)
         (out/f'renderer-{case}-{i}.log').write_text(result.stdout+result.stderr)
         expected_failure = {'renderer_failed_idle': 'stage=renderer.native_idle reason=vulkan_result vk_result=-4',
-                            'renderer_pending_disposal': 'stage=renderer.checked_disposal reason=unsettled_host_ownership vk_result=0'}.get(case)
+                            'renderer_pending_disposal': 'stage=renderer.checked_disposal reason=unsettled_host_ownership vk_result=0',
+                            'renderer_pending_native_sources': 'stage=renderer.checked_disposal reason=unsettled_native_sources vk_result=0'}.get(case)
         valid = ((result.returncode == 86 and expected_failure in result.stderr) if expected_failure
                  else result.returncode == 0)
         if not valid:

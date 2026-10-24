@@ -1,5 +1,9 @@
 # M4 P2: session retirement closes escaped frame-source re-admission
 
+Follow-up: [accelerated native source ownership](M4_P2_ACCELERATED_NATIVE_SOURCE.md)
+connects the selected native pair through recording/split submissions and checked
+resource completion. Generic producer/native output and guest admission remain separate.
+
 2026-10-24 (Asia/Taipei). Baseline `a8daa2c75a4dd02475970ccb8b61f92edb72a341`;
 branch `codex/issue-372-fixes`. Personal main stays
 `b6a2ce9488d78efdbbeb0efe14c2ec5c0a263e76`. No main merge or manual CI dispatch.

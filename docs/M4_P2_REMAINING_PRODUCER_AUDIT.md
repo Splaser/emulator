@@ -3,6 +3,12 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [accelerated native source follow-up](M4_P2_ACCELERATED_NATIVE_SOURCE.md)
+retains exact image/view versions across cache metadata eviction and internal
+Finish, using accepted submissions and checked timeline/fallback completion.
+Presentation output keeps a separate checked fence boundary. Other native
+helper/capture-output owners and all guest content/admission obligations remain open.
+
 The [retired-session source admission follow-up](M4_P2_SESSION_SOURCE_ADMISSION.md)
 closes new nvdisp source capture after shutdown/stale retirement, including slot
 reuse, while preserving retained resources. Actual source stamps precede session

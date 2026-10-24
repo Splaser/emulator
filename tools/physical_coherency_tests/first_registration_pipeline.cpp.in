@@ -151,6 +151,9 @@ public:
 class Scheduler {
 public:
     // @CHECKED_SUBMISSION@
+    // This data-coherency fixture enrolls no presentation consumers.
+    struct NoPresentationSources {Submission TakeSubmission(){return {};}} presentation_sources;
+    void TrackPresentationSources() {}
     Device& device;
     const std::shared_ptr<std::atomic_bool> submission_owner{std::make_shared<std::atomic_bool>(true)};
     std::unique_ptr<MasterSemaphore> master_semaphore;

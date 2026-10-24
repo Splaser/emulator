@@ -1,5 +1,9 @@
 # GPU lifecycle correctness: F4/F5
 
+Accelerated cache-native ownership runs `run_native_source_tests.py`; checked
+presentation reuse runs `run_present_completion_tests.py`. See
+[native handoff, split submissions and fallback/teardown limits](../../docs/M4_P2_ACCELERATED_NATIVE_SOURCE.md).
+
 Retired session source re-admission runs `run_session_source_tests.py`: actual
 session transitions, handle allocation and nvdisp publication with session
 incarnations. See [shutdown/stale-session closure and limits](../../docs/M4_P2_SESSION_SOURCE_ADMISSION.md).
