@@ -1,5 +1,24 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-24: close retired session frame-source re-admission
+
+From `a8daa2c75a`, test-first shutdown/stale recapture and stale queued-stamp
+witnesses reproduced. SessionId now carries a nonzero per-Container incarnation;
+GetDisplayMapping captures its device stamp under the handle lock, releases that
+lock, then validates the session identity/active state/backing/PID. Retirement
+before validation refuses; retirement after validation revokes the original stamp.
+Stale detection now invalidates queued stamps without reclaiming retained state.
+Close/RetainSession and UnmapAllHandles distinguish reused slots from old handles.
+Fifteen paths/nine exact controls pass three times, including the counterexample
+which validates first then incorrectly captures a fresh epoch. Address, prepared
+owner, packet and actual-copy mapping-use regressions pass; six Windows production
+COFF units compile without diagnostics. See [scope, evidence and resume commands](M4_P2_SESSION_SOURCE_ADMISSION.md)
+and [results](M4_P2_SESSION_SOURCE_RESULTS.json). Current-run exe/objects/generated
+fixtures cleaned; main untouched. Next: accelerated image-owner handoff through
+recording/submission/presentation completion. Generic raw session/GMMU admission
+is not upgraded to a lease. HostMemory high risk; all M4 phases incomplete,
+F2/F3 open and GuestBackingAdmission Unknown.
+
 ## 2026-10-24: bounded mapping use at the delayed frame-source read
 
 From `96d993457d`, an actual raw-read baseline witnesses address reuse selecting

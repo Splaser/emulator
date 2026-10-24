@@ -128,6 +128,7 @@ inputs = set(a.source or DEFAULT_SOURCES) | {
     'src/video_core/gpu_thread.h', 'src/video_core/rasterizer_interface.h',
     'src/video_core/renderer_vulkan/vk_rasterizer.h',
     'src/core/hle/service/nvdrv/core/nvmap.h',
+    'src/core/hle/service/nvdrv/core/container.h',
     'src/core/hle/service/nvdrv/devices/nvhost_gpu.h',
     'src/core/hle/service/nvdrv/devices/nvhost_as_gpu.h',
     'src/video_core/control/channel_state.h',

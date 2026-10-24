@@ -3,6 +3,12 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [retired-session source admission follow-up](M4_P2_SESSION_SOURCE_ADMISSION.md)
+closes new nvdisp source capture after shutdown/stale retirement, including slot
+reuse, while preserving retained resources. Actual source stamps precede session
+validation and are never refreshed after it. Native accelerated-view ownership,
+generic raw session/GMMU admission and HostMemory alias lifetime remain separate.
+
 The [delayed source mapping-use follow-up](M4_P2_FRAME_MAPPING_USE.md) now guards
 bounded actual CPU copies and cache selection against mapping intent/reuse and
 final session retirement. It does not close permanent session re-admission via

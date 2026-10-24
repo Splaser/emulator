@@ -177,9 +177,19 @@ std::shared_ptr<NvMap::Handle> NvMap::GetHandle(Handle::Id handle) {
 std::optional<Common::FrameMappingDomain::Stamp> NvMap::GetDisplayMapping(Handle::Id handle) {
     auto description = GetHandle(handle);
     if (!description) return {};
-    std::scoped_lock lock{description->mutex};
-    return host1x.MemoryManager().CaptureFrameMapping(description->d_address,
-                                                      description->aligned_size);
+    SessionId session_id{};
+    std::optional<Common::FrameMappingDomain::Stamp> mapping;
+    {
+        std::scoped_lock lock{description->mutex};
+        session_id = description->session_id;
+        mapping = host1x.MemoryManager().CaptureFrameMapping(description->d_address,
+                                                            description->aligned_size);
+    }
+    // Never take session_guard while holding a handle/table lock: retirement
+    // takes session -> handle. Capture the device stamp first, then validate the
+    // immutable session incarnation. Later retirement revokes this old stamp.
+    if (!mapping || !core.IsDisplaySessionActive(session_id)) return {};
+    return mapping;
 }
 
 DAddr NvMap::GetHandleAddress(Handle::Id handle) {
@@ -410,7 +420,8 @@ void NvMap::UnmapAllHandles(NvCore::SessionId session_id) {
     for (auto& [id, handle] : handles_copy) {
         {
             std::scoped_lock lk{handle->mutex};
-            if (handle->session_id.id != session_id.id || handle->dupes <= 0) {
+            if (handle->session_id.id != session_id.id ||
+                handle->session_id.generation != session_id.generation || handle->dupes <= 0) {
                 continue;
             }
         }

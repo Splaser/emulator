@@ -1,5 +1,9 @@
 # M4 P2: delayed frame-source mapping use
 
+Follow-up: [session-incarnation source admission](M4_P2_SESSION_SOURCE_ADMISSION.md)
+closes the escaped-producer recapture gap identified below. Native image lifetime
+and generic raw session/GMMU admission remain separate obligations.
+
 2026-10-24 (Asia/Taipei). Baseline `96d993457dd0cf2078b9538854b566ceec3b9146`,
 branch `codex/issue-372-fixes`. Personal main remains
 `b6a2ce9488d78efdbbeb0efe14c2ec5c0a263e76`; no merge or manual workflow dispatch.

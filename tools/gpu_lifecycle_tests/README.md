@@ -1,5 +1,9 @@
 # GPU lifecycle correctness: F4/F5
 
+Retired session source re-admission runs `run_session_source_tests.py`: actual
+session transitions, handle allocation and nvdisp publication with session
+incarnations. See [shutdown/stale-session closure and limits](../../docs/M4_P2_SESSION_SOURCE_ADMISSION.md).
+
 Delayed source mapping use runs `run_frame_mapping_tests.py`: bounded copy and
 cache selection versus mapping intent, reuse and session retirement. See
 [protocol, cancellation and native limits](../../docs/M4_P2_FRAME_MAPPING_USE.md).

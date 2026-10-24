@@ -55,7 +55,7 @@ struct FakeSystem {
     Memory& DeviceMemory(){return memory;}
 };
 namespace Service::Nvidia::NvCore {
-struct SessionId {size_t id;};
+@SESSION_ID@;
 @FAILURE_DECL@;
 static std::atomic<ProcessReleaseFailure*> failed_process_releases{nullptr};
 @RELEASE_HELPER@
@@ -265,7 +265,7 @@ using NvCore::ProcessReleaseFailure;
 struct Smmu {Common::FrameMappingDomain frames;auto BeginFrameMappingMutation(){return frames.BeginMutation();}
     int registered=0;Core::Asid RegisterProcess(int*){++registered;return 1;}void Free(u64,size_t){}void UnregisterProcess(Core::Asid){}};
 struct Host1x {FakeSystem& system;Smmu smmu;FakeSystem& System(){return system;}Smmu& MemoryManager(){return smmu;}};
-struct Impl {Host1x host1x;struct File{std::function<void()> hook;void UnmapAllHandles(SessionId){if(hook)hook();}} file;std::deque<Session> sessions;size_t new_ids=0;std::deque<size_t> id_pool;std::mutex session_guard;explicit Impl(FakeSystem& s):host1x{s,{}} {}};
+struct Impl {Host1x host1x;struct File{std::function<void()> hook;void UnmapAllHandles(SessionId){if(hook)hook();}} file;std::deque<Session> sessions;size_t new_ids=0;u64 next_session_generation{1};std::deque<size_t> id_pool;std::mutex session_guard;explicit Impl(FakeSystem& s):host1x{s,{}} {}};
 struct Container {std::unique_ptr<Impl> impl;explicit Container(FakeSystem& s):impl{std::make_unique<Impl>(s)} {}
     using SessionLifetime=NvCore::Container::SessionLifetime;
 #define LOG_WARNING(...) ((void)0)
@@ -303,7 +303,7 @@ void Test() {
     system.memory.buffer.storage.reset();const auto before=container.impl->host1x.smmu.registered;
     bool refused=false;try{(void)container.OpenSession(&next);}catch(const std::runtime_error&){refused=true;}
     Require(refused && container.impl->host1x.smmu.registered==before,"session registered ASID without retained backing");
-    FakeSystem normal_system;Kernel::KProcess normal_process;Container normal{normal_system};
+    FakeSystem normal_system;Kernel::KProcess normal_process,replacement_process;Container normal{normal_system};
     const auto normal_id=normal.OpenSession(&normal_process);
     auto normal_stamp=normal.impl->host1x.smmu.frames.Capture(4096,4096);
     normal.impl->file.hook=[&] {
@@ -313,6 +313,12 @@ void Test() {
     normal.CloseSession(normal_id,false);
     Require(!normal.impl->host1x.smmu.frames.WithUse(*normal_stamp,4096,1,[]{return true;}),
             "ordinary session retained old frame authority");
+    const auto replacement=normal.OpenSession(&replacement_process);
+    Require(replacement.id==normal_id.id && !normal.RetainSession(normal_id),
+            "reused session retained old source owner");
+    {auto retained=normal.RetainSession(replacement);Require(bool(retained),"replacement lost retained owner");}
+    replacement_process.pid=2;
+    Require(!normal.RetainSession(replacement),"PID mismatch retained source owner");
 }
 }
 int main(){GraphicClosed(false);GraphicClosed(true);GraphicPreparationFailure(false);GraphicPreparationFailure(true);GraphicFreeFailure();

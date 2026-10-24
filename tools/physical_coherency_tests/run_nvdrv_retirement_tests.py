@@ -45,7 +45,7 @@ set_buffer=block(producer,'Status BufferQueueProducer::SetPreallocatedBuffer(').
 # Exact ownership/reuse prefix. The application heap preallocation optimization
 # is outside this fixture; no full heap mapper/session initialization claim.
 open_session=block(container,'SessionId Container::OpenSession(')
-open_session=open_session[:open_session.index('    // Optimization')]+ '    return SessionId{new_id};\n}'
+open_session=open_session[:open_session.index('    // Optimization')]+open_session[open_session.rindex('\n    return '):]
 open_session=open_session.replace('Container::','')
 close_session=block(container,'void Container::CloseSession(').replace('Container::','')
 retain_session=block(container,'std::optional<Container::SessionLifetime> Container::RetainSession(').replace('Container::','')
@@ -53,6 +53,7 @@ graphic=graphic[graphic.index('namespace Service::android {'):]
 fixture='tools/physical_coherency_tests/nvdrv_retirement_tests.cpp.in'
 source=(root/fixture).read_text()
 for key,value in {'SESSION_DECL':session_decl,'SESSION_METHODS':session_methods,'MODULE_METHODS':factories,
+                  'SESSION_ID':block(container_h,'struct SessionId {'),
                   'FAILURE_DECL':failure_decl,'RELEASE_HELPER':release_helper,'LIFETIME_DECL':lifetime_decl,'LIFETIME_METHODS':lifetime_methods,
                   'NVDRV_DESTRUCTOR':destructor,'GRAPHIC_BODIES':graphic,'SET_BUFFER':set_buffer,'OPEN_SESSION':open_session,
                   'CLOSE_SESSION':close_session,'RETAIN_SESSION':retain_session}.items():
@@ -72,6 +73,10 @@ def run(name,value,expected=None):
 
 run('production',source)
 controls=[
+    ('omit-retain-pid',source.replace(' ||\n        session.pid != session.process->GetProcessId()', ''),
+     'PID mismatch retained source owner'),
+    ('omit-retain-incarnation',source.replace('!id.generation || id.generation != session.id.generation ||','false ||'),
+     'reused session retained old source owner'),
     ('omit-session-frame-retirement',source.replace(
         '    auto frame_retirement = impl->host1x.MemoryManager().BeginFrameMappingMutation();','').replace(
         '        frame_retirement.Complete();','').replace('    frame_retirement.Complete();',''),
@@ -106,10 +111,9 @@ controls=[
      'GraphicBuffer provider release escaped retirement entry'),
     ('hold-session-facade-through-retire',source.replace('        nvdrv.reset();',''),
      'session provider release escaped retirement entry'),
-    ('allow-duplicate-session-retire',source.replace('    if (!session.is_active || session.ref_count <= 0)\n        throw std::runtime_error("nvdrv session already retired");',''),
+    ('allow-duplicate-session-retire',source.replace('    if (session_id.generation != session.id.generation || !session.is_active || session.ref_count <= 0)\n        throw std::runtime_error("nvdrv session already retired");',''),
      'duplicate session retirement changed reference accounting'),
-    ('borrow-retired-session',source.replace('    if (!session.is_active || session.ref_count <= 0 ||\n        !session.backing',
-        '    if (!session.backing'),
+    ('borrow-retired-session',source.replace('        !session.is_active || session.ref_count <= 0 ||\n', ''),
      'retired session admitted a new owner borrow'),
     ('discard-empty-descriptor',source.replace('    // Allocate the public wrapper before any nvmap effect.',
         '    if(!buffer)return {};\n    // Allocate the public wrapper before any nvmap effect.'),

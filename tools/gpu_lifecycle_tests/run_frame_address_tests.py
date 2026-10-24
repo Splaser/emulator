@@ -90,13 +90,14 @@ if a.baseline:
     (out / 'baseline.json').write_text(json.dumps({'revision': a.revision, 'witnesses': ['unsynchronized source address', 'zero source address published']}, indent=2), encoding='utf-8')
     raise SystemExit(0)
 cases = ['guest-free', 'session-retire', 'free-failure', 'last-free', 'snapshot-retire',
-         'normal', 'zero', 'after-snapshot', 'display-free', 'display-session']
+         'normal', 'zero', 'after-snapshot', 'display-free', 'display-session', 'session-generation']
 for i in range(a.repeat):
     for case in cases:
         run(exe, f'{case}-{i}', case)
-print(f'PASS ten source-address paths ({a.repeat} repetitions)', flush=True)
+print(f'PASS eleven source-address paths ({a.repeat} repetitions)', flush=True)
 getter = block(nvmap, 'DAddr NvMap::GetHandleAddress(')
 controls = [
+    ('omit-unmap-incarnation', source.replace('handle->session_id.generation != session_id.generation || ', ''), 'session-generation', 'replacement unmap retired old incarnation'),
     ('omit-display-handle-lock', source.replace('    std::scoped_lock lock{description->mutex};', ''), 'display-free', 'address lookup bypassed mapping mutation lock'),
     ('omit-handle-lock', source.replace(getter, getter.replace('    std::scoped_lock lock(handle_description->mutex);', '')), 'guest-free', 'address lookup bypassed mapping mutation lock'),
     ('hold-table-over-handle', source.replace(getter, getter.replace('    std::scoped_lock lock(handle_description->mutex);', '    std::scoped_lock wrong_lock(handles_lock);\n    std::scoped_lock lock(handle_description->mutex);')), 'guest-free', 'address lookup held table lock across handle wait'),

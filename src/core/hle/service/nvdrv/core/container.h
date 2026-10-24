@@ -32,6 +32,8 @@ struct ContainerImpl;
 
 struct SessionId {
     size_t id;
+    // Zero is unpublished. A reused numeric slot never reuses source identity.
+    u64 generation{};
 };
 
 // Preallocated escape owner for an exception from the final Process::Close.
@@ -86,6 +88,7 @@ public:
     void CloseSession(SessionId id, bool is_shutdown = false);
 
     Session* GetSession(SessionId id);
+    bool IsDisplaySessionActive(SessionId id);
     std::optional<SessionLifetime> RetainSession(SessionId id);
 
     NvMap& GetNvMapFile();

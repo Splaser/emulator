@@ -52,7 +52,7 @@ GraphicBuffer::GraphicBuffer(u32 w,u32 h,PixelFormat f,u32 u):NvGraphicBuffer(w,
 GraphicBuffer::~GraphicBuffer()=default;
 }
 namespace Service::Nvidia::NvCore{
-struct SessionId{u32 id;};
+struct SessionId{u32 id;u64 generation{};};
 struct NvMap{
     @HANDLE@
     @INFO@
@@ -67,6 +67,7 @@ struct NvMap{
             }}memory;
         auto& MemoryManager(){return memory;}}host1x;
     std::function<void()> unmap_hook;bool fail_unmap=false;int unmaps=0;
+    struct Core{bool IsDisplaySessionActive(SessionId){return true;}}core;
     bool UnmapHandle(Handle& h){Require(h.mutex.HeldByCurrent(),"unmap writer lost handle guard");++unmaps;if(unmap_hook)unmap_hook();
         if(fail_unmap){return false;}
         h.d_address=0;h.pin_virt_address=0;return true;}
@@ -117,7 +118,12 @@ void AfterSnapshot(){Fixture f;const auto saved=f.file.GetHandleAddress(1);auto 
     f.file.FreeHandle(1,false);Require(saved==4096&&retained->internal_dupes==1&&retained->d_address==0&&retained->pins==0,"post-snapshot mapping characterization changed");
     // Deliberately never dereference saved: an object/once-valid address is not a mapping-use epoch.
 }
+void UnmapIncarnation(){Fixture f;f.handle->session_id.generation=1;
+    auto next=std::make_shared<NvMap::Handle>(4096,2);next->session_id={1,2};next->d_address=8192;next->pins=1;next->internal_dupes=1;f.file.handles.emplace(2,next);
+    f.file.UnmapAllHandles({1,2});
+    Require(f.handle->d_address==4096&&f.handle->dupes==1&&f.handle->pins==1&&next->d_address==0,
+            "replacement unmap retired old incarnation");}
 int main(int argc,char** argv){Require(argc==2,"missing case");std::string c=argv[1];
     if(c=="guest-free"||c=="session-retire"||c=="free-failure"||c=="last-free"||c.starts_with("display-"))Racing(c);
-    else if(c=="snapshot-retire")SnapshotRetire();else if(c=="normal"||c=="zero")Publish(c=="zero");else if(c=="after-snapshot")AfterSnapshot();else Require(false,"unknown case");
+    else if(c=="session-generation")UnmapIncarnation();else if(c=="snapshot-retire")SnapshotRetire();else if(c=="normal"||c=="zero")Publish(c=="zero");else if(c=="after-snapshot")AfterSnapshot();else Require(false,"unknown case");
     std::cout<<"PASS frame address "<<c<<'\n';}

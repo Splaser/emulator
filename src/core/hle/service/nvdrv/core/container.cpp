@@ -94,6 +94,7 @@ struct ContainerImpl {
     SyncpointManager manager;
     Container::Host1xDeviceFileData device_file_data;
     size_t new_ids{};
+    u64 next_session_generation{1};
     std::deque<size_t> id_pool;
     std::mutex session_guard;
 };
@@ -148,8 +149,10 @@ SessionId Container::OpenSession(Kernel::KProcess* process) {
                     session.has_preallocated_area = false;
                 }
                 */
+                auto stale_sources = impl->host1x.MemoryManager().BeginFrameMappingMutation();
                 session.is_active = false;
                 session.ref_count = 0;
+                stale_sources.Complete();
                 // smmu_mgr.UnregisterProcess(session.asid);
                 // impl->id_pool.emplace_front(session.id.id);
                 // Continue searching to clean up other stale sessions if any?
@@ -162,6 +165,9 @@ SessionId Container::OpenSession(Kernel::KProcess* process) {
         }
     }
     size_t new_id{};
+    if (impl->next_session_generation == 0)
+        throw std::runtime_error("nvdrv session generation exhausted");
+    pending.id.generation = impl->next_session_generation++;
     auto* memory_interface = &process->GetMemory();
     auto& smmu = impl->host1x.MemoryManager();
     auto asid = smmu.RegisterProcess(memory_interface);
@@ -169,12 +175,12 @@ SessionId Container::OpenSession(Kernel::KProcess* process) {
         new_id = impl->id_pool.front();
         impl->id_pool.pop_front();
         retired.emplace(std::move(impl->sessions[new_id]));
-        pending.id = SessionId{new_id};
+        pending.id.id = new_id;
         pending.asid = asid;
         impl->sessions[new_id] = std::move(pending);
     } else {
         new_id = impl->new_ids++;
-        pending.id = SessionId{new_id};
+        pending.id.id = new_id;
         pending.asid = asid;
         impl->sessions.emplace_back(std::move(pending));
     }
@@ -224,7 +230,7 @@ SessionId Container::OpenSession(Kernel::KProcess* process) {
             LOG_DEBUG(Debug, "Preallocation created!");
         }
     }
-    return SessionId{new_id};
+    return session.id;
 }
 
 void Container::CloseSession(SessionId session_id, bool is_shutdown) {
@@ -232,7 +238,7 @@ void Container::CloseSession(SessionId session_id, bool is_shutdown) {
     if (session_id.id >= impl->sessions.size())
         throw std::runtime_error("nvdrv session retirement id unavailable");
     auto& session = impl->sessions[session_id.id];
-    if (!session.is_active || session.ref_count <= 0)
+    if (session_id.generation != session.id.generation || !session.is_active || session.ref_count <= 0)
         throw std::runtime_error("nvdrv session already retired");
     if (--session.ref_count > 0) {
         return;
@@ -268,12 +274,24 @@ Session* Container::GetSession(SessionId session_id) {
     return &impl->sessions[session_id.id];
 }
 
+bool Container::IsDisplaySessionActive(SessionId id) {
+    std::scoped_lock lock{impl->session_guard};
+    if (id.id >= impl->sessions.size()) return false;
+    const auto& session = impl->sessions[id.id];
+    if (!id.generation || id.generation != session.id.generation ||
+        !session.is_active || session.ref_count <= 0 ||
+        !session.backing || !session.backing->OwnerAlive() || !session.process) return false;
+    return session.pid == session.process->GetProcessId();
+}
+
 std::optional<Container::SessionLifetime> Container::RetainSession(SessionId id) {
     std::scoped_lock lock{impl->session_guard};
     if (id.id >= impl->sessions.size()) return {};
     const auto& session = impl->sessions[id.id];
-    if (!session.is_active || session.ref_count <= 0 ||
-        !session.backing || !session.backing->OwnerAlive()) return {};
+    if (!id.generation || id.generation != session.id.generation ||
+        !session.is_active || session.ref_count <= 0 ||
+        !session.backing || !session.backing->OwnerAlive() || !session.process ||
+        session.pid != session.process->GetProcessId()) return {};
     auto process = Kernel::KScopedAutoObject<Kernel::KProcess>::TryOpen(session.process);
     auto backing = impl->host1x.System().DeviceMemory().buffer.RetainBackingStorage();
     if (!process || !backing || backing->Epoch() != session.backing->Epoch()) return {};
