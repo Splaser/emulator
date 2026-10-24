@@ -703,6 +703,8 @@ public:
     }
 
     // GPU owner thread only; these checks do not acquire an independent producer lease.
+    // Layer destruction may skip its cached tick only after terminal checked disposal.
+    void WaitForResourceRelease(u64 tick);
     void RequireNativeBorrowAdmission() const;
     // One existing Finish submission, host recording drain, then checked native lifetime.
     // Call inside a handler which retains all stack-borrowed native resources on error.
@@ -848,6 +850,7 @@ private:
     NativeSourceRetainer<Submission> presentation_sources{[this] {
         return Submission{new CheckedSubmission{submission_owner}};
     }};
+    bool native_resources_retired{}; // terminal owner only, never an admission/content token
     StateTracker& state_tracker;
 
     std::unique_ptr<MasterSemaphore> master_semaphore;

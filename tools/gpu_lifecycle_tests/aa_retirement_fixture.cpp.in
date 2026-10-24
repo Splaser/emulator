@@ -55,6 +55,7 @@ struct Scheduler {
         return self->complete>=value?VK_SUCCESS:VK_NOT_READY;
     }};
     std::unique_ptr<Master> master_semaphore=std::make_unique<Master>(this);
+    void WaitForResourceRelease(u64 t){Wait(t);}
     void RequireNativeBorrowAdmission()const;
     void FinishNativeBorrow();
     void Finish(VkSemaphore=nullptr,VkSemaphore=nullptr);

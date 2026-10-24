@@ -114,7 +114,9 @@ void Scheduler::CollectPresentationSources() {
 
 bool Scheduler::RetirePresentationSourcesAfterDeviceIdle() {
     if (worker_thread.joinable() || submission_owner->load(std::memory_order_acquire)) return false;
-    return presentation_sources.RetireAfterIdle();
+    if (!presentation_sources.RetireAfterIdle()) return false;
+    native_resources_retired = true;
+    return true;
 }
 
 u64 Scheduler::Flush(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {
@@ -784,6 +786,13 @@ void Scheduler::Finish(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore)
     SubmitExecution(signal_semaphore, wait_semaphore);
     Wait(presubmit_tick);
     AllocateNewContext();
+}
+
+void Scheduler::WaitForResourceRelease(u64 tick) {
+    // Terminal Renderer disposal publishes this only after join and checked idle.
+    if (native_resources_retired) return;
+    RequireNativeBorrowAdmission();
+    Wait(tick);
 }
 
 void Scheduler::RequireNativeBorrowAdmission() const {

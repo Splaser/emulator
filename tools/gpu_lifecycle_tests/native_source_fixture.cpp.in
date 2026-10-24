@@ -71,7 +71,7 @@ struct Scheduler{
     using Submission=std::shared_ptr<CheckedSubmission>;
     std::shared_ptr<std::atomic_bool> submission_owner=std::make_shared<std::atomic_bool>(true);
     std::vector<Submission> receipts;
-    bool fail_receipt{},fail_enqueue{};
+    bool fail_receipt{},fail_enqueue{},native_resources_retired{};
     NativeSourceRetainer<Submission> presentation_sources{[this]{if(fail_receipt)throw std::bad_alloc();auto r=std::make_shared<CheckedSubmission>(submission_owner);receipts.push_back(r);return r;}};
     struct Device{struct Queue{u64 Handle()const{return 5;}}queue;const Queue& GetGraphicsQueue()const{return queue;}void ReportLoss(){}}device;
     std::unique_ptr<MasterSemaphore> master_semaphore=std::make_unique<MasterSemaphore>();

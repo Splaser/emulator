@@ -1,5 +1,22 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-24: failed applet Draw readback quarantine and terminal release
+
+From `f892213b0a`, ten failure/export/replay/release witnesses reproduce. Applet
+Empty/Recording/Recorded/Failed/Closed state now distinguishes normal Draw return
+from checked readback completion. A failed prefix remains quarantined and retains
+owners; no retry or bytes export, even after prefix completion. Shutdown closes
+capture before drains. Layer destruction uses the successful joined/checked-idle
+terminal retirement rather than flushing a cached current tick after worker join.
+Candidate/fixed deterministic paths and controls pass; three real Windows COFF
+units compile without diagnostics, with construction/borrow/AA/source/fallback/
+shutdown regressions. See [scope and next audit](M4_P2_APPLET_CONTENT_READBACK.md)
+and [results/commands](M4_P2_APPLET_CONTENT_READBACK_RESULTS.json). Current-run
+artifacts cleaned; issue branch pushed; main untouched. Next: partial raw resource
+publication/recreation, while preserving failed applet quarantine. No target-device
+pixel or whole-lifecycle acceptance; HostMemory high risk, M4 incomplete, F2/F3
+open and admission Unknown.
+
 ## 2026-10-24: applet Frame publication after complete construction
 
 From `2a3a0f4a70`, ten old partial-publication/retry/readback witnesses reproduce.

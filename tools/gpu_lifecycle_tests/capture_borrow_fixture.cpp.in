@@ -112,7 +112,8 @@ static void TransitionImageLayout(vk::CommandBuffer&,VkImage,VkImageLayout,VkIma
 constexpr VkExtent3D CaptureImageExtent{2,2,1};
 struct RendererVulkan {
     MemoryAllocator memory_allocator;Device device;Blit blit_capture;Scheduler scheduler;int rasterizer{};Frame applet_frame;
-    RendererVulkan(){applet_frame.image.live=mode!="empty";}
+    @CONTENT_STATE@
+    RendererVulkan(){applet_frame.image.live=mode!="empty";@INIT_CONTENT_STATE@}
     vk::Buffer RenderToBuffer(std::span<const Tegra::FramebufferConfig>,const Layout::FramebufferLayout&,VkFormat,VkDeviceSize);
     std::vector<u8> GetAppletCaptureBuffer();
 };

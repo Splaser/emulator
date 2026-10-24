@@ -3,6 +3,11 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [applet content/readback follow-up](M4_P2_APPLET_CONTENT_READBACK.md) quarantines
+failed prefixes and closes applet ingress before terminal drain. Confirmed native
+retirement permits Layer disposal without submitting a stale current tick after
+worker join. Device content evidence and partial raw recreation remain separate.
+
 The [applet Frame publication follow-up](M4_P2_APPLET_FRAME_PUBLICATION.md) keeps
 creation prefixes local and commits a complete native tuple without throwing.
 Failed creation leaves empty state for retry/readback refusal. Pixel readiness,

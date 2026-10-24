@@ -136,3 +136,8 @@ or whole-renderer lifecycle acceptance.
 
 HostMemory remap/protection remains high risk. M4 phases remain incomplete,
 F2/F3 open, GuestBackingAdmission Unknown.
+
+Follow-up: [failed-Draw content/readback and terminal release](M4_P2_APPLET_CONTENT_READBACK.md)
+now quarantines partial applet recording/submission, refuses export/retry and closes
+before shutdown drains. Normal Recorded state still needs checked readback; it is
+not target-device pixel validation. Partial raw recreation remains open.

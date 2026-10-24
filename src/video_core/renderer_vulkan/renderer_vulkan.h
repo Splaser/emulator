@@ -97,6 +97,9 @@ private:
     VideoCore::FrameSkipping frame_skipping;
 
     Frame applet_frame;
+    enum class AppletCaptureState { Empty, Recording, Recorded, Failed, Closed };
+    // Owning GPU thread, then terminal teardown after outer producer join.
+    AppletCaptureState applet_capture_state{AppletCaptureState::Empty};
     std::unique_ptr<GuestChunkImportDiagnostics> chunk_import_diagnostics;
     Common::GuestChunkLease diagnostic_chunk; // one candidate per backing generation, GPU thread only
     std::chrono::steady_clock::time_point next_chunk_diagnostic{};

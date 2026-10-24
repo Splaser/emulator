@@ -362,6 +362,10 @@ int main(int argc,char** argv) {
     } catch(const std::exception& e) {std::cerr<<"FAIL "<<e.what()<<"\n"; return 1;}
 }
 '''
+renderer_header_path='src/video_core/renderer_vulkan/renderer_vulkan.h'
+renderer_state=extract(renderer_header_path,'    enum class AppletCaptureState')
+if renderer_state:
+    orchestration=orchestration.replace('struct RendererVulkan {','struct RendererVulkan {\n'+renderer_state+';\n    AppletCaptureState applet_capture_state{AppletCaptureState::Empty};')
 cpp=out/'renderer_workers.cpp'
 turbo_destructor=turbo_destructor.replace('m_thread.request_stop();','m_thread.request_stop(); if(drain_entered) {drain_entered->Set();}',1)
 master_shutdown=master_shutdown.replace('debug_thread.request_stop();','debug_thread.request_stop(); if(drain_entered) {drain_entered->Set();}',1)
@@ -374,7 +378,7 @@ if args.sanitize:
     flags+=['-fsanitize='+('address,undefined' if args.sanitize=='address' else 'thread'),'-fno-omit-frame-pointer']
 subprocess.run(flags+[str(cpp),'-o',str(exe)],check=True)
 (out/'renderer-extraction.json').write_text(json.dumps({
-    'source_sha256':{path:hashlib.sha256((root/path).read_bytes()).hexdigest() for path in [scheduler_path,present_path,renderer_path,fence_path]},
+    'source_sha256':{path:hashlib.sha256((root/path).read_bytes()).hexdigest() for path in [scheduler_path,present_path,renderer_path,renderer_header_path,fence_path]},
     'fixtures':['Vulkan commands and hardware','renderer orchestration collaborators','fence/cache/device objects'],
     'production':['worker loops','WaitWorker/WaitPresent','Shutdown implementations','renderer destructor'],
     'instrumentation':['signal on entry to wait/drain'],

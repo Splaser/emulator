@@ -114,12 +114,14 @@ static vk::Buffer CreateWrappedBuffer(MemoryAllocator&,size_t,MemoryUsage){retur
 static void DownloadColorImage(vk::CommandBuffer&,VkImage image,VkBuffer,VkExtent3D){check(image!=VK_NULL_HANDLE,"readback image missing");++downloads;}
 struct RendererVulkan{
     Device device;MemoryAllocator memory_allocator;BlitScreen blit_applet;Scheduler scheduler;int rasterizer{};Frame applet_frame{};
+    @CONTENT_STATE@
     u64 GetMainApplicationAruid()const{return 42;}
     void RenderAppletCaptureLayer(std::span<const Tegra::FramebufferConfig>);
     std::vector<u8> GetAppletCaptureBuffer();
 };
 @RENDERER@
 }
+constexpr bool has_content_state = @HAS_CONTENT_STATE@;
 static bool empty(const Vulkan::Frame&frame){return !frame.width&&!frame.height&&!frame.image&&!frame.image_view&&!frame.framebuffer;}
 int main(int argc,char**argv){
     if(argc!=2)return 2;
@@ -155,6 +157,13 @@ int main(int argc,char**argv){
             }else check(attempt(),"missing injected failure");
             if(mode=="draw"||mode=="host-draw"){
                 check(renderer.applet_frame.image&&renderer.applet_frame.image_view&&renderer.applet_frame.framebuffer,"draw failure lost published frame");
+                if constexpr(has_content_state){
+                    const auto before=creates;const int old_draws=draws;fault.clear();
+                    check(renderer.GetAppletCaptureBuffer().empty(),"failed draw readback admitted");
+                    renderer.RenderAppletCaptureLayer(layers);
+                    check(creates==before&&draws==old_draws,"failed draw replayed");
+                    std::fprintf(stderr,"PASS %s\n",argv[1]);return 0;
+                }
             }else if(mode.starts_with("retry-")){
                 fault.clear();renderer.RenderAppletCaptureLayer(layers);
                 check(renderer.applet_frame.image&&renderer.applet_frame.image_view&&renderer.applet_frame.framebuffer,"retry left partial frame");

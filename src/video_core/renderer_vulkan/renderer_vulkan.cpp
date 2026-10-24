@@ -165,6 +165,7 @@ void RendererVulkan::Shutdown() {
         Common::TerminalFailStop("renderer.entry", "reentrant_shutdown");
     }
     terminal_shutdown_started = true;
+    applet_capture_state = AppletCaptureState::Closed;
     const char* stage = "renderer.rasterizer_shutdown";
     try {
         // GPU emulation and CompositeState callbacks have already stopped. Keep every
@@ -393,6 +394,9 @@ void RendererVulkan::RenderScreenshot(std::span<const Tegra::FramebufferConfig> 
 }
 
 std::vector<u8> RendererVulkan::GetAppletCaptureBuffer() {
+    if (applet_capture_state == AppletCaptureState::Recording ||
+        applet_capture_state == AppletCaptureState::Failed ||
+        applet_capture_state == AppletCaptureState::Closed) return {};
     scheduler.RequireNativeBorrowAdmission();
     using namespace VideoCore::Capture;
 
@@ -402,6 +406,7 @@ std::vector<u8> RendererVulkan::GetAppletCaptureBuffer() {
     if (!applet_frame.image) {
         return out;
     }
+    if (applet_capture_state != AppletCaptureState::Recorded) return {};
 
     const auto dst_buffer =
         CreateWrappedBuffer(memory_allocator, out_size, MemoryUsage::Download);
@@ -430,6 +435,9 @@ std::vector<u8> RendererVulkan::GetAppletCaptureBuffer() {
 
 void RendererVulkan::RenderAppletCaptureLayer(
     std::span<const Tegra::FramebufferConfig> framebuffers) {
+    if (applet_capture_state == AppletCaptureState::Recording ||
+        applet_capture_state == AppletCaptureState::Failed ||
+        applet_capture_state == AppletCaptureState::Closed) return;
     // Filter layers that belong to applets (non-zero owner_aruid and not main application)
     const u64 main_aruid = GetMainApplicationAruid();
     std::vector<Tegra::FramebufferConfig> applet_layers;
@@ -462,8 +470,18 @@ void RendererVulkan::RenderAppletCaptureLayer(
         applet_frame = std::move(candidate);
     }
 
-    blit_applet.DrawToFrame(rasterizer, &applet_frame, applet_layers, VideoCore::Capture::Layout, 1,
-                            CaptureFormat);
+    // Recorded only admits a checked readback; it is not native/content completion.
+    applet_capture_state = AppletCaptureState::Recording;
+    try {
+        blit_applet.DrawToFrame(rasterizer, &applet_frame, applet_layers,
+                               VideoCore::Capture::Layout, 1, CaptureFormat);
+        applet_capture_state = AppletCaptureState::Recorded;
+    } catch (...) {
+        // A prefix may already be recorded/submitted. Retain all owners and never
+        // retry/replay this applet path or expose a possibly partial image.
+        applet_capture_state = AppletCaptureState::Failed;
+        throw;
+    }
 }
 
 } // namespace Vulkan

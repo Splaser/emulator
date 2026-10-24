@@ -255,7 +255,7 @@ void Layer::ClearRawImages() {
 
 void Layer::ReleaseRawImages() {
     for (const u64 tick : resource_ticks) {
-        scheduler.Wait(tick);
+        scheduler.WaitForResourceRelease(tick);
     }
     ClearRawImages();
 }

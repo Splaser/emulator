@@ -20,6 +20,7 @@ def block(t,m):
     while depth:depth+=(t[end]=='{')-(t[end]=='}');end+=1
     return t[start:end]
 renderer=read('src/video_core/renderer_vulkan/renderer_vulkan.cpp')
+renderer_header=read('src/video_core/renderer_vulkan/renderer_vulkan.h')
 util=read('src/video_core/renderer_vulkan/present/util.cpp')
 scheduler=read('src/video_core/renderer_vulkan/vk_scheduler.cpp')
 read('src/video_core/renderer_vulkan/vk_scheduler.h')
@@ -37,7 +38,8 @@ elif a.baseline:checked='void Scheduler::RequireNativeBorrowAdmission()const{}\n
 else:checked='\n'.join(block(scheduler,m) for m in ['void Scheduler::RequireNativeBorrowAdmission(', 'void Scheduler::FinishNativeBorrow('])
 checked+='\n'+block(scheduler,'void Scheduler::Finish(')
 fixture=read('tools/gpu_lifecycle_tests/capture_borrow_fixture.cpp.in')
-source=fixture.replace('@CHECKED_METHODS@',checked).replace('@CAPTURE_METHODS@',methods).replace('@UPLOAD_METHOD@',upload)
+state=block(renderer_header,'    enum class AppletCaptureState')+';\n    AppletCaptureState applet_capture_state{AppletCaptureState::Empty};' if 'enum class AppletCaptureState' in renderer_header else ''
+source=fixture.replace('@CHECKED_METHODS@',checked).replace('@CAPTURE_METHODS@',methods).replace('@UPLOAD_METHOD@',upload).replace('@CONTENT_STATE@',state).replace('@INIT_CONTENT_STATE@','applet_capture_state=mode=="empty"?AppletCaptureState::Empty:AppletCaptureState::Recorded;' if state else '')
 failure=out/'terminal.cpp';failure.write_text(read('src/common/terminal_fail_stop.cpp'),encoding='utf-8');read('src/common/terminal_fail_stop.h')
 flags=[a.cxx,'-std=c++23','-O1','-pthread','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-unused-function','-I',str(root/'src'),'-isystem',str(root/'externals/Vulkan-Headers/include')]
 def build(name,text):

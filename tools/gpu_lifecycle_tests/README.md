@@ -467,3 +467,13 @@ inspect publication before commit, failed prefixes release children first, and
 retry/reuse/readback follow the original serialized owner route. Resource/driver,
 Draw/recording/native progress and bytes are fixtures. See
 [scope and Windows results](../../docs/M4_P2_APPLET_FRAME_PUBLICATION.md).
+
+`run_applet_content_tests.py --repeat 3` distinguishes applet Empty/Recording/
+Recorded/Failed/Closed state. It extracts the actual renderer draw/readback/shutdown,
+Scheduler completion and terminal retirement/release methods, and Layer destructor.
+Partial recording, submitted/internal-Finish prefixes, failed retries, previous
+good content, native readback and shutdown gates are controlled. Failed applet
+work stays quarantined; terminal release requires the existing joined checked-idle
+boundary and never flushes a cached current tick after worker join. Native jobs,
+bytes and driver/worker collaborators are fixtures. See
+[protocol and Windows validation](../../docs/M4_P2_APPLET_CONTENT_READBACK.md).

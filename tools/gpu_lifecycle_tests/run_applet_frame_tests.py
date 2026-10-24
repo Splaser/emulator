@@ -44,7 +44,7 @@ def block(text, marker):
 
 
 renderer = read('src/video_core/renderer_vulkan/renderer_vulkan.cpp')
-read('src/video_core/renderer_vulkan/renderer_vulkan.h')
+renderer_header = read('src/video_core/renderer_vulkan/renderer_vulkan.h')
 read('src/video_core/vulkan_common/vulkan_wrapper.h')
 candidate = json.loads(read('tools/gpu_lifecycle_tests/applet_frame_candidate.json'))
 if a.candidate:
@@ -58,7 +58,8 @@ blit = '\n'.join(block(blit, marker) for marker in [
     'vk::Framebuffer BlitScreen::CreateFramebuffer(const VkImageView&'])
 frame = block(read('src/video_core/renderer_vulkan/vk_present_manager.h'), 'struct Frame {') + ';'
 source = read('tools/gpu_lifecycle_tests/applet_frame_fixture.cpp.in')
-source = source.replace('@FRAME@', frame).replace('@BLIT@', blit).replace('@RENDERER@', methods)
+state = block(renderer_header, '    enum class AppletCaptureState') + ';\n    AppletCaptureState applet_capture_state{AppletCaptureState::Empty};' if 'enum class AppletCaptureState' in renderer_header else ''
+source = source.replace('@FRAME@', frame).replace('@BLIT@', blit).replace('@RENDERER@', methods).replace('@CONTENT_STATE@', state).replace('@HAS_CONTENT_STATE@', 'true' if state else 'false')
 terminal = out / 'terminal.cpp'
 terminal.write_text(read('src/common/terminal_fail_stop.cpp'), encoding='utf-8')
 read('src/common/terminal_fail_stop.h')
