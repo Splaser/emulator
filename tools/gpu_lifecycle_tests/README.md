@@ -448,3 +448,13 @@ partial native effects, checked completion and post-completion invalidation erro
 Native driver work and Scheduler collaborators are fixtures; a semaphore-gated
 worker models an entered callback before its delayed read. See
 [scope, audit and Windows results](../../docs/M4_P2_CAPTURE_NATIVE_BORROW.md).
+
+`run_aa_retirement_tests.py --repeat 3` extracts actual Layer refresh/AA replacement,
+clear/wait helpers, ConfigureDraw through AA Draw and its scope-exit tick update,
+plus Scheduler Finish/native-borrow methods. Pinned `--baseline` and `--candidate`
+modes retain the old late-final-use witness and the pre-production candidate.
+Three slots, internal Finish, later final composite, paused native/host boundaries,
+partial failed waits, checked failures and constructor retry are controlled.
+Ten exact controls must fail at their named runtime assertions. Native helpers,
+recording/native progress and constructor allocation are fixtures. See
+[scope and Windows validation](../../docs/M4_P2_AA_HELPER_RETIREMENT.md).

@@ -1,5 +1,21 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-24: AA helper replacement waits for the complete old-use prefix
+
+From `bdd1977472`, eight old-owner retirement witnesses reproduce, including a
+final composite after internal Finish that outlives all cached slot ticks.
+Candidate then production pass three-slot use, paused native/host boundaries,
+partial/split failed waits, closed/unknown completion and constructor retry.
+Refresh/AA replacement completes the graphics prefix and host recording before
+resetting old owners; cold and unchanged paths skip this new boundary. AA setting
+publication follows successful construction. Three real Windows production COFF
+units compile with zero diagnostics; source/mapping/capture/fallback/shutdown
+regressions are recorded. See [audit and next scope](M4_P2_AA_HELPER_RETIREMENT.md)
+and [results/commands](M4_P2_AA_HELPER_RETIREMENT_RESULTS.json). Current-run temporary
+artifacts cleaned; issue branch pushed; main untouched. Next: partial applet_frame
+construction/publication and raw recreation failure. HostMemory high risk;
+M4 incomplete, F2/F3 open and admission Unknown.
+
 ## 2026-10-24: capture output and local upload exception retention
 
 From `ce2007b440`, fourteen historical local-owner unwind witnesses reproduce in

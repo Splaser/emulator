@@ -6,6 +6,7 @@
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 #include "common/settings.h"
+#include "common/terminal_fail_stop.h"
 #include "video_core/framebuffer_config.h"
 #include "video_core/renderer_vulkan/present/fsr.h"
 #include "video_core/renderer_vulkan/present/fsr2.h"
@@ -188,12 +189,13 @@ void Layer::RefreshResources(const Tegra::FramebufferConfig& framebuffer) {
         return;
     }
 
+    WaitForResourceUses();
     raw_width = framebuffer.width;
     raw_height = framebuffer.height;
     pixel_format = framebuffer.pixel_format;
     anti_alias.reset();
 
-    ReleaseRawImages();
+    ClearRawImages();
     CreateStagingBuffer(framebuffer);
     CreateRawImages(framebuffer);
 }
@@ -207,14 +209,14 @@ void Layer::SetAntiAliasPass() {
         return;
     }
 
-    anti_alias_setting = effective_aa;
+    if (anti_alias) WaitForResourceUses();
 
     const VkExtent2D render_area{
         .width = Settings::values.resolution_info.ScaleUp(raw_width),
         .height = Settings::values.resolution_info.ScaleUp(raw_height),
     };
 
-    switch (anti_alias_setting) {
+    switch (effective_aa) {
     case Settings::AntiAliasing::Fxaa:
         anti_alias = std::make_unique<FXAA>(device, memory_allocator, image_count, render_area);
         break;
@@ -228,14 +230,34 @@ void Layer::SetAntiAliasPass() {
         anti_alias = std::make_unique<NoAA>();
         break;
     }
+    anti_alias_setting = effective_aa;
+}
+
+void Layer::WaitForResourceUses() {
+    if (!anti_alias && raw_images.empty() && !buffer) return;
+    try {
+        // Slot ticks can precede the final composite after an internal Finish.
+        // Seal and complete the entire graphics prefix while old owners still live.
+        scheduler.FinishNativeBorrow();
+    } catch (const vk::Exception& error) {
+        Common::TerminalFailStop("layer.resource_retirement", "vulkan_exception",
+                                 static_cast<int>(error.GetResult()));
+    } catch (...) {
+        Common::TerminalFailStop("layer.resource_retirement", "host_exception");
+    }
+}
+
+void Layer::ClearRawImages() {
+    raw_image_views.clear();
+    raw_images.clear();
+    buffer.reset();
 }
 
 void Layer::ReleaseRawImages() {
     for (const u64 tick : resource_ticks) {
         scheduler.Wait(tick);
     }
-    raw_images.clear();
-    buffer.reset();
+    ClearRawImages();
 }
 
 u64 Layer::CalculateBufferSize(const Tegra::FramebufferConfig& framebuffer) const {

@@ -155,3 +155,8 @@ source packet as ownership of these helpers or output frame resources.
 
 HostMemory remap/protection remains high risk. All M4 phases are incomplete,
 F2/F3 remain open, and GuestBackingAdmission remains Unknown.
+
+Follow-up: [AA helper replacement retirement](M4_P2_AA_HELPER_RETIREMENT.md) now
+covers RefreshResources/SetAntiAliasPass old-use completion, including late final
+sampling beyond cached slot ticks. Partial applet/raw frame publication remains
+open as recorded there.

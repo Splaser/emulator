@@ -3,6 +3,11 @@
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 
+The [AA helper retirement follow-up](M4_P2_AA_HELPER_RETIREMENT.md) completes the
+already-recorded graphics prefix and host recording before warm AA/raw replacement.
+It covers later final sampling after internal Finish and failed wait retention;
+partial applet/raw publication and other helper lifetimes remain separate.
+
 The [capture/native helper follow-up](M4_P2_CAPTURE_NATIVE_BORROW.md) repairs local
 capture/download and upload staging unwind while asynchronous users may survive.
 Normal paths retain actual completion/host drain semantics; uncertain failures
