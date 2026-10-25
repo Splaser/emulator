@@ -82,6 +82,7 @@ opening = block(cc, 'SessionId Container::OpenSession(')
 opening = opening[:opening.index('    // Optimization')] + opening[opening.rindex('\n    return '):]
 container_methods += opening
 ctrl_methods = ctrl[ctrl.index('namespace Service::Nvidia::Devices {'):]
+ctrl_methods = ctrl_methods.replace('    event.wait_handle =', '    ObserveRegisterOwner(this);\n    event.wait_handle =', 1)
 ctrl_methods = ctrl_methods.replace('    for (auto& event : events) {',
                                     '    for (auto& event : events) {', 1)
 ctrl_methods = ctrl_methods.replace('nvhost_ctrl::~nvhost_ctrl() {',
@@ -125,13 +126,16 @@ flags = [a.cxx, '-std=c++23', '-O1', '-pthread', '-Wall', '-Wextra', '-Werror',
          str(root / 'externals/dynarmic/externals/fmt/include')]
 
 
+observations = []
+
+
 def execute(name, text, cases, expected=None, code=0):
     cpp = out / (name + '.cpp'); cpp.write_text(text)
     exe = out / (name + ('.exe' if os.name == 'nt' else ''))
     r = subprocess.run(flags + [str(cpp), str(terminal), '-o', str(exe)], capture_output=True, text=True)
     (out / (name + '-compile.log')).write_text(r.stdout + r.stderr)
     if r.returncode:
-        raise RuntimeError(r.stderr)
+        raise RuntimeError('Compilation failed; see ' + str(out / (name + '-compile.log')))
     for case in cases:
         for i in range(a.repeat):
             r = subprocess.run([str(exe), case], capture_output=True, text=True, timeout=20)
@@ -140,20 +144,25 @@ def execute(name, text, cases, expected=None, code=0):
             assert r.returncode == code and (expected or 'PASS nvhost-owner ' + case) in log, (name, case, r.returncode, log)
             if code == 86:
                 assert not any(s in log for s in ['MODULE_DESTROYED', 'CONTEXT_DESTROYED', 'ATEXIT']), log
+            observations.append({'variant': name, 'case': case, 'repeat': i,
+                                 'exit_code': r.returncode, 'log': log,
+                                 'generated_sha256': hashlib.sha256(text.encode()).hexdigest()})
     print('PASS ' + name, flush=True)
 
 
 if a.baseline:
     execute('historical-queued', source, ['queued'], 'FAIL queued callback used retired target', 91)
     execute('historical-active', source, ['active'], 'FAIL event freed during active Host1x callback', 91)
+    execute('historical-clear-active', source, ['clear-active'], 'FAIL clear overtook active callback', 91)
 else:
-    cases = ['queued', 'active', 'completed', 'closed-deferred', 'multiple', 'callback-failure', 'fd-close']
+    cases = ['queued', 'active', 'multi-events-active', 'clear-active', 'immediate', 'completed', 'closed-deferred', 'multiple', 'callback-failure', 'fd-close']
     execute('production', source, cases)
     execute('cancel-failure', source, ['cancel-failure'], 'stage=nvhost_ctrl.callback_join', 86)
     controls = [
-        ('omit-cancel', '                host_syncpoints.DeregisterHostAction(event.assigned_syncpt, event.wait_handle);', '', 'queued', 'queued callback used retired target'),
+        ('omit-cancel', '                host_syncpoints.DeregisterHostAction(event.assigned_syncpt, event.wait_handle);', '                (void)host_syncpoints;', 'queued', 'queued callback used retired target'),
         ('free-before-cancel', '        // A queued action captures this.', '        for (auto& event : events) if (event.registered) events_interface.FreeEvent(event.kevent);\n        // A queued action captures this.', 'active', 'event freed during active Host1x callback'),
         ('borrow-retirement-module', 'owner = shared_from_this()', 'owner = std::shared_ptr<Module>(this, [](Module*){})', 'closed-deferred', 'deferred retirement lost Module owner'),
+        ('omit-clear-join', patch['src/core/hle/service/nvdrv/devices/nvhost_ctrl.cpp'][2][1], patch['src/core/hle/service/nvdrv/devices/nvhost_ctrl.cpp'][2][0], 'clear-active', 'clear overtook active callback'),
     ]
     for name, old, new, case, why in controls:
         assert old in source, name
@@ -165,6 +174,7 @@ inputs.update(['src/video_core/host1x/syncpoint_manager.h', 'src/common/owned_re
 (out / 'extraction.json').write_text(json.dumps({
     'baseline': a.baseline, 'candidate': a.candidate, 'revision': a.revision if a.baseline or a.candidate else None,
     'repeat': a.repeat, 'cases': [] if a.baseline else cases,
+    'observations': observations,
     'controls': [] if a.baseline else [c[0] for c in controls],
     'sha256': {n: hashlib.sha256(raw(n)).hexdigest() for n in sorted(inputs)},
     'actual': ['Complete Module/Container/Session/SessionLifetime/nvhost_ctrl declarations, actual Module constructor/builders/destructor/dispatch/retirement factories',

@@ -1,5 +1,23 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-25: nvhost_ctrl callback lifetime repair validated on Windows
+
+Resumed from `31b25c128f` on `codex/issue-372-fixes`. Three historical
+assertion witnesses reproduce queued callback use after device destruction,
+KEvent release during Signal, and Clear overtaking an active Signal (each x5).
+Only `nvhost_ctrl.cpp` changes in production: cancel/join every registered
+Host1x action before freeing any event, and join Signalling callbacks before
+Clear publishes Cancelled. Existing queue guard and Module/session owners stay
+unchanged. Candidate 10 normal cases/one terminal case/four controls pass x5;
+fixed source passes x10. Syncpoint, NVDRV retirement and dispatch regressions
+pass x5; seven real Windows x64 production objects compile successfully.
+See [repair and evidence limits](M4_P2_NVHOST_CTRL_CALLBACK_LIFETIME.md) and
+[retained results](M4_P2_NVHOST_CTRL_CALLBACK_RESULTS.json). This supersedes the
+unvalidated status below. Main and dependency pins remain untouched; no workflow
+was changed or manually dispatched. Native kernel/Android runtime and complete
+P2 owner closure are not established; GuestBackingAdmission remains Unknown,
+F2/F3 Open. Keep subsequent work within separately authorized scope.
+
 ## 2026-10-25: STOP checkpoint - nvhost_ctrl owner tests are unvalidated drafts
 
 User requested saving progress and stopping after repeated Daybreak warnings.

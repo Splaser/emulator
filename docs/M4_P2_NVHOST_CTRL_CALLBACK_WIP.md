@@ -1,5 +1,10 @@
 # P2 nvhost_ctrl callback owner checkpoint - UNVALIDATED WIP
 
+Historical checkpoint, superseded by the completed Windows
+[callback lifetime repair](M4_P2_NVHOST_CTRL_CALLBACK_LIFETIME.md) and
+[results](M4_P2_NVHOST_CTRL_CALLBACK_RESULTS.json). The statements below describe
+the saved state before resumption, not the current validation status.
+
 Saved 2026-10-25 (Asia/Taipei) at the user's explicit request to stop development
 and resume later. No further implementation, compilation, tests or CI dispatch
 were performed while making this checkpoint.

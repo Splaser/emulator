@@ -6,6 +6,15 @@ coverage ledger, not a certificate that all producers are closed. Existing
 per-feature reports provide controlled evidence; the owner chain below defines
 what must remain held together. GuestBackingAdmission stays Unknown in code.
 
+The [nvhost_ctrl lifetime repair](M4_P2_NVHOST_CTRL_CALLBACK_LIFETIME.md) now
+tests the actual Module/session retirement -> raw Host1x callback chain with
+controlled KEvent/kernel collaborators. Device destruction cancels/joins all its
+handles before freeing events; Clear also joins an active Signalling callback.
+Ten schedules pass x10 with four assertion controls and an injected terminal
+join failure. This closes the named raw-target lifetime window only; native
+KEvent runtime, escaped direct device owners and whole Host1x/P2 closure remain
+unproven. Dispatch drainage alone still does not drain the Host1x action queue.
+
 The [actual Audio service target drain](M4_P2_AUDIO_SERVICE_TARGET_DRAIN.md) now
 reproduces and repairs last-owner release during raw AudioIn/Out callbacks.
 The Audio server joins IPC work, retains factories/sessions, drains/joins Audio,
