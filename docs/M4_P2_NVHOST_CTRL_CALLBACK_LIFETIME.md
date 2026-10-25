@@ -6,6 +6,12 @@ Validated 2026-10-25 (Asia/Taipei), resuming PR #375 from `31b25c128f` on
 Machine-readable commands, source/object hashes, observations and cleanup are in
 [the results record](M4_P2_NVHOST_CTRL_CALLBACK_RESULTS.json).
 
+Follow-up: the [lock/cancellation/final-owner review](M4_P2_NVHOST_CTRL_OWNER_COMPOSITION.md)
+adds six deterministic schedules and five controls without production changes.
+Sixteen normal cases/one terminal case/nine controls pass x10; actual retirement
+counting must span final Module destruction and callback joins. A drained NVDRV
+counter with a live Host1x callback remains a negative admission witness.
+
 ## 2026-10-25 local revalidation at 4a66873eb6
 
 Source `4a66873eb6aaa01c70b86ce04baeda346d5b8f6a` was revalidated on

@@ -1,5 +1,13 @@
 # M4 P2: joint callback, Memory and GPU owner closure
 
+Follow-up: [nvhost_ctrl review and named owner composition](M4_P2_NVHOST_CTRL_OWNER_COMPOSITION.md)
+now exercises the actual Module/session/retirement queue and Host1x callbacks
+while their final-owner release is counted or deferred. It also records a live
+callback after dispatch DrainedSubset. These are separate named schedules;
+the idle NVDRV/Host1x domains in the joint fixture below are not upgraded to
+active participants by this follow-up. Joining both owner graphs in one actual
+cohort-close scenario remains pending, without widening guest admission.
+
 Follow-up: [actual Audio service target drain](M4_P2_AUDIO_SERVICE_TARGET_DRAIN.md)
 now supplies separate terminal raw-target owner evidence and repairs the reproduced
 service-release gap. The prepared-packet evidence below keeps its original limits.

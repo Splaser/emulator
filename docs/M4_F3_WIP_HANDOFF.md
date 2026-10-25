@@ -1,5 +1,27 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-25: nvhost_ctrl review and active final-owner composition
+
+Reviewed `44c6fbdccc`: no new production defect found in lock order, repeated
+cancellation or final-owner release. Tests now cover repeated Clear/rearm,
+concurrent Clear, final facade capture release after Host1x completion/cancel,
+and real retirement-entry counting through blocked final Module destruction.
+Sixteen normal cases, one terminal case and nine exact controls pass x10;
+the three historical failures still reproduce x3. No production source changes.
+Previous seven Windows production-unit hashes remain identical; no new object
+build is asserted. See [review, schedules and next boundary](M4_P2_NVHOST_CTRL_OWNER_COMPOSITION.md)
+and `owner_review_44c6fbdccc` in the
+[results record](M4_P2_NVHOST_CTRL_CALLBACK_RESULTS.json).
+
+M4 P2 now has a separately active actual NVDRV/session/retirement -> Host1x
+callback -> KEvent owner graph. A drained dispatch counter with a live Host1x
+callback is an explicit counterexample, not admission. Next: combine this graph
+with actual ProcessCohortStop and GPU ThreadManager in one restricted session;
+retain downstream-callback and escaped-alias negative controls. Native KProcess/
+KEvent scheduling, sustained System ownership, mapping freeze and native completion
+remain open. Main untouched, CI deferred, P2 incomplete, F2/F3 Open and
+GuestBackingAdmission Unknown.
+
 ## 2026-10-25: nvhost_ctrl local revalidation recorded; CI deferred
 
 Revalidated exact source `4a66873eb6aaa01c70b86ce04baeda346d5b8f6a` on

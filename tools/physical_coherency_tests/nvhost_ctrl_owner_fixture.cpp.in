@@ -43,6 +43,9 @@ struct Gate {std::mutex m;std::condition_variable cv;bool ready{};
 static Gate signal_entered,signal_release,cancel_entered;
 static std::string mode;
 static std::atomic<unsigned> active_signals{},signals{},freed_events{},module_ends{};
+static std::atomic<unsigned> nonzero_cancels{};
+static thread_local unsigned host_guard_depth{};
+struct ObservedHostGuard {ObservedHostGuard(){++host_guard_depth;}~ObservedHostGuard(){--host_guard_depth;}};
 static std::mutex observation_mutex;
 static std::set<void*> destroyed_devices;
 static std::map<u64,void*> queued_actions;
@@ -54,8 +57,8 @@ static void ObserveRemoved(u64 id){std::scoped_lock l{observation_mutex};queued_
 static void ObserveDeviceDestruction(void*){}
 static void ObserveDeviceDestroyed(void*p){std::scoped_lock l{observation_mutex};destroyed_devices.insert(p);}
 static void ObserveRawCallback(void*p){std::scoped_lock l{observation_mutex};Require(!destroyed_devices.contains(p),"queued callback used retired target");}
-static void BeforeDeregister(u64 id){if(id){cancel_entered.Set();if(mode=="cancel-failure")throw std::runtime_error("injected cancel failure");}}
-static void ModuleDestructionBegin(){}
+static void BeforeDeregister(u64 id){if(id){++nonzero_cancels;cancel_entered.Set();if(mode=="cancel-failure")throw std::runtime_error("injected cancel failure");}}
+static void ModuleDestructionBegin(){Require(host_guard_depth==0,"final Module owner released under Host1x guard");}
 static void ModuleDestructionEnd(){++module_ends;std::cerr<<"MODULE_DESTROYED\n";}
 namespace Common {namespace Literals{}
 class HostMemory {public:
@@ -74,7 +77,7 @@ template<class T>class KScopedAutoObject {T*p{};public:
  T*GetPointerUnsafe()const{return p;}T*ReleasePointerUnsafe(){return std::exchange(p,nullptr);}};
 class KEvent {public:bool live=true;void* owner{};
  void Signal(){Require(live,"callback signalled freed event");++active_signals;
-  if(mode=="active"||mode=="clear-active"||mode=="multi-events-active"){signal_entered.Set();signal_release.Wait();}
+  if(mode=="active"||mode=="clear-active"||mode=="concurrent-clear-active"||mode=="multi-events-active"||mode=="retirement-close-active"||mode=="closed-active"){signal_entered.Set();signal_release.Wait();}
   if(mode=="callback-failure"){--active_signals;throw 7;}
   ++signals;--active_signals;}
  void Clear(){Require(active_signals==0,"clear overtook active callback");Require(live,"clear freed event");}};
@@ -167,6 +170,8 @@ static void Queue(Module&m,int fd,u32 slot,u32 sync=2,u32 threshold=1){
  struct Wait{Service::Nvidia::NvFence fence;u32 timeout,value;}wait{{static_cast<s32>(sync),threshold},100,slot};
  Require(IoctlCall(m,fd,0x1e,wait)==NvResult::Timeout,"queued wait reported completion");
 }
+static void Clear(Module&m,int fd,u32 slot=0){struct Params{u32 slot;}params{slot};
+ Require(IoctlCall(m,fd,0x1c,params)==NvResult::Success,"event clear failed");}
 template<class T>static T Ready(std::future<T>&f){Require(f.wait_for(5s)==std::future_status::ready,"operation timeout");return f.get();}
 int main(int argc,char**argv){
  Require(argc==2,"expected case");mode=argv[1];std::atexit([]{std::cerr<<"ATEXIT\n";});
@@ -185,13 +190,57 @@ int main(int argc,char**argv){
  auto&sync=system.Host1x().GetSyncpointManager();
  if(mode=="completed")sync.IncrementHost(2);
  if(mode=="callback-failure"){bool failed=false;try{sync.IncrementHost(2);}catch(...){failed=true;}Require(failed,"callback did not expose failure");}
- if(mode=="closed-deferred"){
+ if(mode=="repeat-clear-rearm"){
+  Clear(*module,fd);Clear(*module,fd);
+  Require(nonzero_cancels==1,"repeated clear retained cancelled handle");
+  Queue(*module,fd,0,2,2);
+  sync.IncrementHost(2);Require(signals==0,"cancelled callback affected rearmed event");
+  sync.IncrementHost(2);Require(signals==1,"rearmed callback did not run exactly once");
+  Clear(*module,fd);Clear(*module,fd);
+  Require(nonzero_cancels==2,"completed clear retained stale handle");
+  module.reset();facade.reset();Require(freed_events==2,"rearmed KEvent retired other than once");
+ }else if(mode=="last-owner-complete"||mode=="last-owner-cancel"){
+  auto held=std::shared_ptr<NVDRV>(facade.release());
+  auto handle=sync.RegisterHostAction(3,1,[held]{});held.reset();module.reset();
+  Require(!weak.expired(),"queue capture lost final facade owner");
+  if(mode=="last-owner-complete")sync.IncrementHost(3);
+  else {sync.DeregisterHostAction(3,handle);sync.DeregisterHostAction(3,handle);}
+ }else if(mode=="closed-active"){
+  auto increment=std::async(std::launch::async,[&]{sync.IncrementHost(2);});signal_entered.Wait();
+  auto closed=domain->TryClose(64);
+  Require(closed&&closed->Poll()==Common::ProducerDrain::Result::DrainedSubset&&active_signals==1,
+   "missing active Host1x callback subset counterexample");
+  Require(Common::ProducerDrain::GuestBackingAdmission()==Common::ProducerDrain::Result::Unknown,
+   "untracked Host1x callback granted guest admission");
+  module.reset();facade.reset();
+  Require(!weak.expired()&&freed_events==0&&process.refs>1&&!backing.expired(),
+   "closed active callback lost deferred owner graph");
+  std::cout<<"WITNESS dispatch DrainedSubset with active Host1x callback; admission Unknown\n";
+  // Reopen only this fixture's managed subset, not whole-guest/native exclusion.
+  Require(closed->ResumeNoEffects(),"subset fixture resume failed");
+  auto retiring=std::async(std::launch::async,[&]{Require(queue->Drain(),"active deferred retirement failed");});
+  cancel_entered.Wait();auto joined=domain->TryClose(64);
+  Require(joined&&joined->Poll()==Common::ProducerDrain::Result::Pending,
+   "deferred final release escaped dispatch closure");
+  signal_release.Set();Ready(increment);Ready(retiring);
+  Require(joined->Poll()==Common::ProducerDrain::Result::DrainedSubset&&weak.expired()&&active_signals==0,
+   "deferred final release did not drain its owner graph");
+  Require(joined->ResumeNoEffects(),"joined fixture subset resume failed");
+ }else if(mode=="closed-deferred"){
   auto closed=domain->TryClose(64);Require(bool(closed)&&closed->Poll()==Common::ProducerDrain::Result::DrainedSubset,"dispatch subset did not close");
   {std::scoped_lock l{observation_mutex};Require(!queued_actions.empty(),"closed dispatch hid queued Host1x work");}
   module.reset();facade.reset();Require(!weak.expired(),"deferred retirement lost Module owner");
   Require(process.refs>1&&!backing.expired(),"deferred retirement lost session/backing");
   // Managed dispatch gate only; no callback or native effect ran during this hold.
   Require(closed->ResumeNoEffects(),"managed dispatch resume failed");Require(queue->Drain(),"deferred retirement did not drain");
+ }else if(mode=="concurrent-clear-active"){
+  auto increment=std::async(std::launch::async,[&]{sync.IncrementHost(2);});signal_entered.Wait();
+  auto first=std::async(std::launch::async,[&]{Clear(*module,fd);});cancel_entered.Wait();
+  auto second_clear=std::async(std::launch::async,[&]{Clear(*module,fd);});
+  signal_release.Set();Ready(increment);Ready(first);Ready(second_clear);
+  Require(nonzero_cancels==1&&signals==1&&freed_events==0,
+   "concurrent clears reused a callback or freed its event");
+  module.reset();facade.reset();Require(freed_events==1,"concurrent clear event not retired once");
  }else if(mode=="clear-active"){
   auto increment=std::async(std::launch::async,[&]{sync.IncrementHost(2);});signal_entered.Wait();
   auto clearing=std::async(std::launch::async,[&]{struct Clear{u32 id;}params{0};
@@ -200,11 +249,19 @@ int main(int argc,char**argv){
   signal_release.Set();Ready(increment);Ready(clearing);
   Require(module->Close(fd)==NvResult::Success,"clear fd close failed");
   module.reset();facade.reset();
- }else if(mode=="active"||mode=="multi-events-active"){
+ }else if(mode=="active"||mode=="multi-events-active"||mode=="retirement-close-active"){
   auto increment=std::async(std::launch::async,[&]{sync.IncrementHost(2);});signal_entered.Wait();
   module.reset();auto retiring=std::async(std::launch::async,[&]{facade.reset();});
   cancel_entered.Wait();Require(freed_events==0&&process.refs>1&&!backing.expired(),"active callback lost owner graph before join");
+  auto closing=mode=="retirement-close-active"?domain->TryClose(64):std::nullopt;
+  if(mode=="retirement-close-active"){
+   Require(closing&&closing->Poll()==Common::ProducerDrain::Result::Pending,
+    "final retirement release escaped dispatch closure");
+  }
   signal_release.Set();Ready(increment);Ready(retiring);
+  if(closing){Require(closing->Poll()==Common::ProducerDrain::Result::DrainedSubset&&weak.expired(),
+   "final owner release did not finish before dispatch drain");
+   Require(closing->ResumeNoEffects(),"final owner fixture subset resume failed");}
  }else if(mode=="multiple"){
   Require(module->Close(fd)==NvResult::Success,"first fd close failed");sync.IncrementHost(2);
   Require(signals==1,"device cancellation removed another device's action");module.reset();facade.reset();

@@ -6,6 +6,15 @@ coverage ledger, not a certificate that all producers are closed. Existing
 per-feature reports provide controlled evidence; the owner chain below defines
 what must remain held together. GuestBackingAdmission stays Unknown in code.
 
+The [nvhost_ctrl review and named owner composition](M4_P2_NVHOST_CTRL_OWNER_COMPOSITION.md)
+adds repeated/concurrent cancellation, final facade capture release on Host1x
+completion/cancellation, and dispatch closure during final owner destruction.
+Sixteen schedules/one terminal case/nine exact controls pass x10. The active
+callback with an otherwise drained dispatch domain remains an explicit
+counterexample; GuestBackingAdmission stays Unknown. This is an active named
+NVDRV/Host1x owner graph, separate from the earlier Audio/Memory/GPU fixture;
+a single joint actual cohort/service/GPU graph is still the next boundary.
+
 The [nvhost_ctrl lifetime repair](M4_P2_NVHOST_CTRL_CALLBACK_LIFETIME.md) now
 tests the actual Module/session retirement -> raw Host1x callback chain with
 controlled KEvent/kernel collaborators. Device destruction cancels/joins all its
@@ -53,6 +62,7 @@ proof and blocks admission. None of the following rows alone grants permission.
 | Process: KernelCore::Impl process_owners, KProcess, PhysicalCore; ProcessCohortStop owns retained roster and requester | creation/init/publication gates remain closed; ProcessExecutionStop polls actual backend stop, KernelCore::TryCloseGuestExecution holds core entry closures | KScopedAutoObject requester/roster, RetainedBackingStorage, System/Kernel facade and PageTable identity | BackendsStopped is a subset result; fastmem/NCE/host continuations and all independent services need joint proof. ManagedSubset / whole-guest Unknown |
 | Memory: KProcess::m_memory and shared KernelCore::ManagedGuestWriteDomain | non-NCE ManagedGuestWrites entries span 21 real facade write bodies; cohort drains only after backend stop | Process + Memory/PageTable + backing, not just ProducerDrain state | GetPointer/GetSpan, direct PreparedCpuPage/physical pointers and stores after return escape the body; HAS_NCE explicitly unsupported. ManagedSubset / aliases Unknown |
 | NVDRV: shared Nvidia::Module owns dispatch_domain, Container, open_files and OwnedRetirementQueue | common Open/Ioctl/Close/QueryEvent and Initialize count; ProcessCohortStop drains outer NVDRV before inner host1x/Memory | Module/session lifetimes, process backing, retained GraphicBuffer/session retirement records | GetContainer/direct device access, deferred operations and raw exports require their own owners through last use; a domain counter does not retain Module/System. ManagedSubset |
+| Host1x syncpoint callbacks: Module-owned nvhost_ctrl plus System-owned SyncpointManager | guarded handle removal or join before KEvent release; actual retirement entry spans final Module destruction; closed retirement keeps the owner record | nvhost_ctrl internal events, KEvents, EventInterface/ServiceContext, Module/Container sessions and Process/backing through join | Raw Host1x callbacks are outside the NVDRV counter; active callback with DrainedSubset remains witnessed. Native scheduler/System lifetime and joint cohort/GPU composition are open. Named owner composition / whole set Unknown |
 | Host1x: Module-owned nvhost_nvdec_common and System-owned Host1x/device graph | Submit/MapBuffer/UnmapBuffer enter KernelCore::Host1xSubmitDomain; cohort waits for admitted ioctl bodies | device/decoder/channel, mapping source/backing, any queued owner packet | direct PushEntries/device/GMMU access and native decoder work are not implied drained by ioctl exit. ManagedSubset / device completion Unknown |
 | Audio: System AudioCore graph, AudioManager::callbacks and renderer::SystemManager::rendering | ManagedHostProducer pauses before cycle publication; cohort drains render then callback domains; terminal owners request_stop/join their jthreads | managers, sessions and callback buffers; caller retains System while paused | sink/backend callbacks, Opus, direct service and independent queued work outside the two cycles. ManagedSubset |
 | GPU: GPU-owned GPUThread::ThreadManager and channel/scheduler graph | Stop closes direct_invalidations and accepting, joins GPU thread, cancels queued captures without inventing completion, then joins invalidations | GPU Impl/destructor keeps schedulers/caches/renderer until actual joins; acknowledged requests own captures | terminal order does not create reversible full GPU pause; queued shaders/transfers, suspended continuations and external producers need joint closure. TerminalOnly |

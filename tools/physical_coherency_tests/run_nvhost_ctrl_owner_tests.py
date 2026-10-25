@@ -93,6 +93,8 @@ ctrl_methods = ctrl_methods.replace(destructor, destructor[:-1] + '    ObserveDe
 ctrl_methods = ctrl_methods.replace('[this, slot]() {', '[this, slot]() {\n            ObserveRawCallback(this);')
 sync = read('src/video_core/host1x/syncpoint_manager.cpp')
 sync = sync[sync.index('namespace Tegra {'):]
+sync = sync.replace('    std::unique_lock lk(guard);',
+                    '    std::unique_lock lk(guard);\n    ObservedHostGuard observed_guard;')
 sync = sync.replace('    action_storage.insert(it, RegisteredAction{id, expected_value, std::move(action)});',
                     '    action_storage.insert(it, RegisteredAction{id, expected_value, std::move(action)});\n    ObserveQueued(id);')
 sync = sync.replace('void SyncpointManager::DeregisterHostAction(u32 syncpoint_id, ActionHandle handle) {',
@@ -129,10 +131,18 @@ flags = [a.cxx, '-std=c++23', '-O1', '-pthread', '-Wall', '-Wextra', '-Werror',
 observations = []
 
 
-def execute(name, text, cases, expected=None, code=0):
+def execute(name, text, cases, expected=None, code=0, headers=None):
     cpp = out / (name + '.cpp'); cpp.write_text(text)
     exe = out / (name + ('.exe' if os.name == 'nt' else ''))
-    r = subprocess.run(flags + [str(cpp), str(terminal), '-o', str(exe)], capture_output=True, text=True)
+    build_flags = flags
+    if headers:
+        include = out / (name + '-headers')
+        for path, content in headers.items():
+            target = include / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+        build_flags = flags[:1] + ['-I', str(include)] + flags[1:]
+    r = subprocess.run(build_flags + [str(cpp), str(terminal), '-o', str(exe)], capture_output=True, text=True)
     (out / (name + '-compile.log')).write_text(r.stdout + r.stderr)
     if r.returncode:
         raise RuntimeError('Compilation failed; see ' + str(out / (name + '-compile.log')))
@@ -146,7 +156,9 @@ def execute(name, text, cases, expected=None, code=0):
                 assert not any(s in log for s in ['MODULE_DESTROYED', 'CONTEXT_DESTROYED', 'ATEXIT']), log
             observations.append({'variant': name, 'case': case, 'repeat': i,
                                  'exit_code': r.returncode, 'log': log,
-                                 'generated_sha256': hashlib.sha256(text.encode()).hexdigest()})
+                                 'generated_sha256': hashlib.sha256(text.encode()).hexdigest(),
+                                 'generated_headers_sha256': {p: hashlib.sha256(v.encode()).hexdigest()
+                                                              for p, v in (headers or {}).items()}})
     print('PASS ' + name, flush=True)
 
 
@@ -155,7 +167,8 @@ if a.baseline:
     execute('historical-active', source, ['active'], 'FAIL event freed during active Host1x callback', 91)
     execute('historical-clear-active', source, ['clear-active'], 'FAIL clear overtook active callback', 91)
 else:
-    cases = ['queued', 'active', 'multi-events-active', 'clear-active', 'immediate', 'completed', 'closed-deferred', 'multiple', 'callback-failure', 'fd-close']
+    cases = ['queued', 'active', 'multi-events-active', 'clear-active', 'immediate', 'completed', 'closed-deferred', 'multiple', 'callback-failure', 'fd-close',
+             'repeat-clear-rearm', 'concurrent-clear-active', 'last-owner-complete', 'last-owner-cancel', 'retirement-close-active', 'closed-active']
     execute('production', source, cases)
     execute('cancel-failure', source, ['cancel-failure'], 'stage=nvhost_ctrl.callback_join', 86)
     controls = [
@@ -163,10 +176,31 @@ else:
         ('free-before-cancel', '        // A queued action captures this.', '        for (auto& event : events) if (event.registered) events_interface.FreeEvent(event.kevent);\n        // A queued action captures this.', 'active', 'event freed during active Host1x callback'),
         ('borrow-retirement-module', 'owner = shared_from_this()', 'owner = std::shared_ptr<Module>(this, [](Module*){})', 'closed-deferred', 'deferred retirement lost Module owner'),
         ('omit-clear-join', patch['src/core/hle/service/nvdrv/devices/nvhost_ctrl.cpp'][2][1], patch['src/core/hle/service/nvdrv/devices/nvhost_ctrl.cpp'][2][0], 'clear-active', 'clear overtook active callback'),
+        ('retain-cancelled-handle', '    event.wait_handle = {};', '', 'repeat-clear-rearm', 'repeated clear retained cancelled handle'),
+        ('release-final-completed-under-guard', '        retired_actions.push_back(std::move(it->action));', '        it->action = {};', 'last-owner-complete', 'final Module owner released under Host1x guard'),
+        ('release-final-cancelled-under-guard', '        retired_action = std::move(it->action);', '        it->action = {};', 'last-owner-cancel', 'final Module owner released under Host1x guard'),
     ]
     for name, old, new, case, why in controls:
         assert old in source, name
         execute(name, source.replace(old, new), [case], 'FAIL ' + why, 91)
+    retirement = read('src/common/owned_retirement.h')
+    owner_controls = [
+        ('release-retire-entry-first', '        record.reset(); // Release captures before the counted entry leaves.',
+         '        ReleaseObservedEntry(entry);\n        record.reset(); // Release captures before the counted entry leaves.',
+         'retirement-close-active', 'final retirement release escaped dispatch closure'),
+        ('release-drain-entry-first', '            record.reset(); // Final owner destruction is part of this entry.',
+         '            ReleaseObservedEntry(entry);\n            record.reset(); // Final owner destruction is part of this entry.',
+         'closed-active', 'deferred final release escaped dispatch closure'),
+    ]
+    for name, old, new, case, why in owner_controls:
+        assert retirement.count(old) == 1, name
+        # Keep the deliberately early optional reset out of line: GCC 13 at O1
+        # otherwise emits a maybe-uninitialized diagnostic in the mutant's
+        # inlined optional destructor. Production and all controls keep -Werror.
+        changed = retirement.replace('class OwnedRetirementQueue {',
+            '[[gnu::noinline]] inline void ReleaseObservedEntry(std::optional<ProducerDrain::Entry>& entry) { entry.reset(); }\nclass OwnedRetirementQueue {')
+        execute(name, source, [case], 'FAIL ' + why, 91,
+                headers={'common/owned_retirement.h': changed.replace(old, new)})
 inputs.update(['src/video_core/host1x/syncpoint_manager.h', 'src/common/owned_retirement.h',
                'src/common/producer_drain.h', 'src/common/retained_backing_storage.h',
                'src/common/terminal_fail_stop.h', 'src/core/hle/service/nvdrv/nvdata.h',
@@ -174,8 +208,12 @@ inputs.update(['src/video_core/host1x/syncpoint_manager.h', 'src/common/owned_re
 (out / 'extraction.json').write_text(json.dumps({
     'baseline': a.baseline, 'candidate': a.candidate, 'revision': a.revision if a.baseline or a.candidate else None,
     'repeat': a.repeat, 'cases': [] if a.baseline else cases,
+    'compiler': subprocess.check_output([a.cxx, '--version'], text=True).splitlines()[0],
+    'instrumentation': ['ObservedHostGuard scope inside each actual unique_lock; no replacement mutex or changed callback locking',
+                        'Module destruction asserts guard is not held on that thread before possible reentry',
+                        'Two owner controls shadow only the real OwnedRetirementQueue header with early-entry-release mutations'],
     'observations': observations,
-    'controls': [] if a.baseline else [c[0] for c in controls],
+    'controls': [] if a.baseline else [c[0] for c in controls + owner_controls],
     'sha256': {n: hashlib.sha256(raw(n)).hexdigest() for n in sorted(inputs)},
     'actual': ['Complete Module/Container/Session/SessionLifetime/nvhost_ctrl declarations, actual Module constructor/builders/destructor/dispatch/retirement factories',
                'Actual Container session lifecycle excluding optional application-heap optimization; actual NVDRV destructor',
