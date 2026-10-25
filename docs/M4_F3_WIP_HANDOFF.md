@@ -1,5 +1,30 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-25: actual Audio service raw-target terminal closure
+
+From `7fc738baf7`, real AudioIn/Out service constructors/default destructors and
+unique impl ownership reproduce target retirement during active raw callbacks
+(each x3), plus late setter success after close. Cold Audio server setup now
+installs a pre-owner-release drain. ServerManager requests IPC stop and joins its
+workers first, keeps ports/factories/sessions alive, joins Audio through the hook,
+then releases targets. Service work holding the actual target mutex demonstrates
+why Audio cannot join before service work drains. No System/member reorder.
+Audio close shares the registration lock, releases it before join, supports
+sequential repeats, and refuses unwinding on failed join/hook. Candidate/fixed
+13 normal/four terminal/five controls pass x3; nine real Windows production COFF
+units compile with zero diagnostics. Opus initialized at its existing pinned
+gitlink only. Audio/owner-composition/terminal regressions pass.
+See [actual owner proof and limits](M4_P2_AUDIO_SERVICE_TARGET_DRAIN.md) and
+[results/commands/cleanup](M4_P2_AUDIO_SERVICE_TARGET_DRAIN_RESULTS.json).
+
+Next: bounded NVDRV Module/session/OwnedRetirementQueue owner composition through
+dispatch and downstream Host1x queued/callback last use. Local repair scope stays
+frozen. Audio terminal target safety does not certify native sink/DSP, escaped
+service/client references, arbitrary Kernel teardown or whole-service reversible
+quiescence. P2 incomplete, HostMemory high risk, admission Unknown, F2/F3 open.
+Keep main untouched; cleanup current temporary binaries, retain results and push
+the issue branch for continuation.
+
 ## 2026-10-25: joint P2 callback / Memory / GPU owner closure evidence
 
 From `d7c6489ead`, local repair scope stays frozen. No production source changes.

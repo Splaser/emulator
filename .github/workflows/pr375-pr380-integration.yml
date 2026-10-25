@@ -132,6 +132,7 @@ jobs:
           python tools/physical_coherency_tests/run_managed_guest_write_tests.py --repeat 3
           python tools/physical_coherency_tests/run_audio_render_drain_tests.py --repeat 3
           python tools/physical_coherency_tests/run_audio_callback_drain_tests.py --repeat 3
+          python tools/physical_coherency_tests/run_audio_service_owner_tests.py --repeat 3
           python tools/physical_coherency_tests/run_host1x_submit_drain_tests.py --repeat 3
           python tools/physical_coherency_tests/run_nvdrv_dispatch_drain_tests.py --repeat 3
           python tools/physical_coherency_tests/run_surface_composition_drain_tests.py --repeat 3

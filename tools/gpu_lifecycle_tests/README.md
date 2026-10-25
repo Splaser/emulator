@@ -1,5 +1,12 @@
 # GPU lifecycle correctness: F4/F5
 
+Actual Audio service target closure runs
+`../physical_coherency_tests/run_audio_service_owner_tests.py --repeat 3`.
+Actual service/target declarations, unique impls, raw callback binds, factory
+ownership and server/Audio joins cover 13 normal/four terminal paths and five
+exact controls x3. Service work drains before Audio joins while target owners stay
+alive. See [owner proof and limits](../../docs/M4_P2_AUDIO_SERVICE_TARGET_DRAIN.md).
+
 Joint P2 owner composition runs
 `../physical_coherency_tests/run_owner_closure_composition_tests.py --repeat 3`.
 Full AudioManager and ThreadManager declarations join actual cohort/Memory address

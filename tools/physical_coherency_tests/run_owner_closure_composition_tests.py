@@ -81,7 +81,7 @@ process = read('src/core/hle/kernel/k_process.cpp')
 source += '\nnamespace Kernel {\n' + block(process,
     'std::optional<ProcessCohortStop> KProcess::TryStopProcessCohort(') + '\n}\n'
 # Full production owner declaration, registration, worker loop and Shutdown.
-source += '\n#include <ranges>\n#include "audio_core/audio_manager.h"\n'
+source += '\n#include <ranges>\n#include "audio_core/audio_manager.h"\n#include "common/terminal_fail_stop.h"\n'
 source += '#undef LOG_ERROR\n#include "core/hle/service/audio/errors.h"\n'
 source += 'void ObserveAudioWait();\n#undef UNREACHABLE\n#define UNREACHABLE() std::abort()\n'
 event = read('src/audio_core/audio_event.cpp')
@@ -126,7 +126,7 @@ def execute(name, text, cases, expected=None, override=None):
         local.mkdir(parents=True, exist_ok=True)
         (local / 'retained_backing_storage.h').write_text(override)
         extra = ['-I', str(local.parent)]
-    result = subprocess.run(flags[:1] + extra + flags[1:] + [str(cpp), '-o', str(exe)],
+    result = subprocess.run(flags[:1] + extra + flags[1:] + [str(cpp), str(root / 'src/common/terminal_fail_stop.cpp'), '-o', str(exe)],
                             capture_output=True, text=True)
     (out / (name + '-compile.log')).write_text(result.stdout + result.stderr)
     if result.returncode:
@@ -173,6 +173,7 @@ paths = [
     'src/core/hle/kernel/physical_core.cpp', 'src/core/hle/kernel/kernel.cpp',
     'src/video_core/gpu_thread.h', 'src/video_core/gpu_thread.cpp',
     'src/common/terminal_ingress.h', 'src/video_core/acknowledged_callback.h',
+    'src/common/terminal_fail_stop.cpp', 'src/common/terminal_fail_stop.h',
     'src/common/bounded_threadsafe_queue.h', 'src/common/polyfill_thread.h',
     'src/common/scope_exit.h', 'src/common/typed_address.h',
     'src/core/core.cpp', 'src/video_core/gpu.cpp', 'src/core/gpu_dirty_memory_manager.h',

@@ -6,13 +6,21 @@ coverage ledger, not a certificate that all producers are closed. Existing
 per-feature reports provide controlled evidence; the owner chain below defines
 what must remain held together. GuestBackingAdmission stays Unknown in code.
 
+The [actual Audio service target drain](M4_P2_AUDIO_SERVICE_TARGET_DRAIN.md) now
+reproduces and repairs last-owner release during raw AudioIn/Out callbacks.
+The Audio server joins IPC work, retains factories/sessions, drains/joins Audio,
+then releases service targets. Actual service unique impl ownership and raw binds
+participate; candidate/fixed 13 normal/four terminal/five controls pass x3, with
+nine real Windows production units. This is a terminal named-target closure,
+not whole Audio/service/native-device or reversible guest closure.
+
 The [joint Audio/Memory/GPU owner-chain test](M4_P2_OWNER_CLOSURE_COMPOSITION.md)
 now combines nine schedules with six exact controls. Full AudioManager and
 ThreadManager declarations and actual cohort/Memory translation bodies participate;
 System/KProcess/backend/PTE/native collaborators remain fixtures. This upgrades
 the prepared callback packet's composition evidence, not whole-family coverage.
-Production AudioOut/In registers raw-this targets owned by service-side unique
-impls; their joint owner teardown is still unproven. A live escaped-pointer store
+Production AudioOut/In raw-target teardown now has the separate terminal owner
+proof linked above. A live escaped-pointer store
 after managed closure remains a mandatory negative witness, not admission success.
 NVDRV/Host1x active device ownership, complete service graphs and real KProcess
 runtime composition remain pending. No production scheduling code changes.

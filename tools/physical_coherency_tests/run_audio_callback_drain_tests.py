@@ -48,6 +48,7 @@ source = r'''
 #include <ranges>
 #include "audio_core/audio_event.h"
 #include "core/managed_host_producer.h"
+#include "common/terminal_fail_stop.h"
 using namespace std::chrono_literals;
 void Require(bool value,const char* why) {if(!value) {std::cerr<<"FAIL "<<why<<"\n";std::cerr.flush();std::_Exit(91);}}
 #define UNREACHABLE() std::abort()
@@ -60,6 +61,7 @@ struct AudioManager {
     Event events;
     std::array<std::function<void()>,3> buffer_events{};
     std::jthread thread;
+    std::mutex lock;
 ''' + constructor + '\n' + cycle + '\n' + shutdown + r'''
 };
 }
@@ -127,7 +129,7 @@ def build(name, text):
     cpp = out / (name + '.cpp')
     cpp.write_text(text)
     exe = out / (name + ('.exe' if os.name == 'nt' else ''))
-    subprocess.run(flags + [str(cpp), '-o', str(exe)], check=True)
+    subprocess.run(flags + [str(cpp), str(root / 'src/common/terminal_fail_stop.cpp'), '-o', str(exe)], check=True)
     return exe
 
 
@@ -160,6 +162,7 @@ for name, changed, expected in controls:
     assert result.returncode != 0 and 'FAIL ' + expected in log, (name, log)
     print('PASS audio callback control: ' + name, flush=True)
 paths = ['src/audio_core/audio_manager.cpp', 'src/audio_core/audio_manager.h',
+         'src/common/terminal_fail_stop.cpp', 'src/common/terminal_fail_stop.h',
          'src/audio_core/audio_event.cpp', 'src/audio_core/audio_event.h',
          'src/audio_core/audio_core.cpp', 'src/core/managed_host_producer.h',
          'src/common/producer_drain.h', 'tools/physical_coherency_tests/run_audio_callback_drain_tests.py']

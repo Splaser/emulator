@@ -50,6 +50,8 @@ struct TurboMode {
 struct RendererVulkan {
     Owner lifetime{"DESTROY Renderer"};
     bool is_shut_down{}, terminal_shutdown_started{};
+    enum class AppletCaptureState {Empty,Closed};
+    AppletCaptureState applet_capture_state=AppletCaptureState::Empty;
     struct Rasterizer {
         Owner lifetime{"DESTROY Rasterizer"};
         void Shutdown() { Step("renderer.rasterizer_shutdown"); }
@@ -64,6 +66,7 @@ struct RendererVulkan {
         void WaitWorker() { Step("renderer.recording_drain"); }
         void Shutdown() { Step("renderer.scheduler_join"); }
         void RegisterOnSubmit(std::function<void()>) { Step("renderer.detach_submit"); }
+        bool RetirePresentationSourcesAfterDeviceIdle() { Step("renderer.native_sources");return true; }
         struct Master { void Shutdown() { Step("renderer.completion_join"); } } master;
         Master& GetMasterSemaphore() { return master; }
     } scheduler;

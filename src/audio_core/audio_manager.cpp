@@ -3,6 +3,7 @@
 
 #include "audio_core/audio_manager.h"
 #include "common/thread.h"
+#include "common/terminal_fail_stop.h"
 #include "core/core.h"
 #include "core/hle/service/audio/errors.h"
 
@@ -47,18 +48,30 @@ void AudioManager::ThreadFunc(std::stop_token stop_token) {
 }
 
 void AudioManager::Shutdown() {
-    running = false;
-    thread.request_stop();
-    events.SetAudioEvent(Event::Type::Max, true);
-    thread.join();
+    // The owning System teardown serializes Shutdown calls. Closing registration
+    // shares its lock with SetIn/OutManager; never hold it across the worker join.
+    try {
+        {
+            std::scoped_lock l{lock};
+            running = false;
+            thread.request_stop();
+        }
+        events.SetAudioEvent(Event::Type::Max, true);
+        // AudioCore destruction repeats this after the earlier service-owner drain.
+        if (thread.joinable()) {
+            thread.join();
+        }
+    } catch (...) {
+        // Uncertain join cannot unwind the service targets or native context.
+        Common::TerminalFailStop("audio.callback_join", "host_exception");
+    }
 }
 
 Result AudioManager::SetOutManager(BufferEventFunc buffer_func) {
+    std::scoped_lock l{lock};
     if (!running) {
         return Service::Audio::ResultOperationFailed;
     }
-
-    std::scoped_lock l{lock};
 
     const auto index{events.GetManagerIndex(Event::Type::AudioOutManager)};
     if (buffer_events[index] == nullptr) {
@@ -70,11 +83,10 @@ Result AudioManager::SetOutManager(BufferEventFunc buffer_func) {
 }
 
 Result AudioManager::SetInManager(BufferEventFunc buffer_func) {
+    std::scoped_lock l{lock};
     if (!running) {
         return Service::Audio::ResultOperationFailed;
     }
-
-    std::scoped_lock l{lock};
 
     const auto index{events.GetManagerIndex(Event::Type::AudioInManager)};
     if (buffer_events[index] == nullptr) {

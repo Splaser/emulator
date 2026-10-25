@@ -70,11 +70,21 @@ flags = [a.cxx, '-std=c++23', '-O1', '-DNDEBUG', '-DARCHITECTURE_x86_64',
 # Include real pinned renderer dependencies; no generated fixture headers.
 for name in ('Vulkan-Headers/include', 'VulkanMemoryAllocator/include',
              'Vulkan-Utility-Libraries/include', 'SPIRV-Headers/include',
-             'sirit/include', 'unordered_dense/include', 'dynarmic/src', 'tz', 'renderdoc'):
+             'sirit/include', 'unordered_dense/include', 'dynarmic/src', 'tz', 'renderdoc', 'opus/include'):
     path = root / 'externals' / name
     if path.is_dir():
         flags += ['-isystem', str(path)]
 records = []
+opus_evidence = None
+if 'src/core/hle/service/audio/audio.cpp' in (a.source or DEFAULT_SOURCES):
+    opus = root / 'externals/opus'
+    pinned = subprocess.check_output(['git', 'ls-tree', 'HEAD', 'externals/opus'], cwd=root, text=True).split()[2]
+    actual = subprocess.check_output(['git', '-C', str(opus), 'rev-parse', 'HEAD'], text=True).strip()
+    if actual != pinned or not (opus / 'include/opus.h').is_file():
+        p.error('Initialize the pinned externals/opus submodule before checking Audio service registration')
+    opus_evidence = {'pinned_commit': pinned, 'actual_commit': actual,
+                     'headers_sha256': {f.name: hashlib.sha256(f.read_bytes()).hexdigest()
+                                        for f in sorted((opus / 'include').glob('*.h'))}}
 shader_evidence = None
 if 'src/video_core/renderer_vulkan/vk_turbo_mode.cpp' in (a.source or DEFAULT_SOURCES):
     shader = root / 'src/video_core/host_shaders/vulkan_turbo_mode.comp'
@@ -144,6 +154,7 @@ inputs = set(a.source or DEFAULT_SOURCES) | {
     'src/video_core/renderer_vulkan/vk_blit_screen.h',
 }
 manifest = {'platform': platform.platform(), 'python': sys.version,
+            'opus_evidence': opus_evidence,
             'compiler': subprocess.check_output([a.cxx, '--version'], text=True).splitlines()[0],
             'boost_root': str(boost), 'boost_version_header': (boost / 'boost/version.hpp').read_text(),
             'boost_official_archive_sha256': BOOST_SHA256 if a.fetch_boost else None,

@@ -1,5 +1,9 @@
 # M4 P2: joint callback, Memory and GPU owner closure
 
+Follow-up: [actual Audio service target drain](M4_P2_AUDIO_SERVICE_TARGET_DRAIN.md)
+now supplies separate terminal raw-target owner evidence and repairs the reproduced
+service-release gap. The prepared-packet evidence below keeps its original limits.
+
 Date: 2026-10-25 (Asia/Taipei). Baseline: `d7c6489eadc00cbff9cb89c2fbd1712f2a850d1d`.
 
 ## Outcome and scope freeze
