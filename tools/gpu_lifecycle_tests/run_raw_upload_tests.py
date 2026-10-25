@@ -27,7 +27,8 @@ state='' if a.baseline else block(h,'    enum class RawUploadState')+';'
 bundle=block(h,'    struct RawResources')+';'
 # vk::ImageView is a controlled native handle wrapper in this fixture.
 bundle=bundle.replace('vk::ImageView','vk::View')
-configure=block(s,'bool Layer::ConfigureDraw(');configure=configure[:configure.index('    auto crop_rect =')]+'\n    return true;\n}'
+configure=block(s,'bool Layer::ConfigureDraw(');configure_tail = configure[configure.rindex('    } catch (...) {'):] if 'post_upload_failed = true;' in configure else '}'
+configure = configure[:configure.index('    auto crop_rect =')] + '\n    return true;\n' + configure_tail
 methods='\n'.join(block(s,m) for m in ['bool Layer::UpdateRawImage(', 'u64 Layer::GetRawImageOffset(', 'void Layer::RefreshResources(', 'void Layer::WaitForResourceUses(', 'Layer::~Layer()', 'void Layer::ReleaseRawImages(', 'void Layer::ClearRawImages('])+ '\n'+configure
 source=read('tools/gpu_lifecycle_tests/raw_upload_fixture.cpp.in')
 for k,v in {'STATE':state,'BUNDLE':bundle,'STATE_MEMBER':'' if a.baseline else 'std::vector<RawUploadState>raw_upload_states=std::vector<RawUploadState>(3);','NEW_STATES':'' if a.baseline else 'r.uploads.resize(3);','CHECK_RECORDING':'' if a.baseline else 'check(l.raw_upload_states[slot]==Vulkan::Layer::RawUploadState::Recording,"enqueue published Recorded too early");','METHODS':methods}.items():source=source.replace('@'+k+'@',v)

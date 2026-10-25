@@ -500,3 +500,17 @@ from one queue fixture control. Source copy, unswizzle, native queues,
 pixels and candidate allocation are controlled collaborators; applet quarantine
 and actual renderer shutdown are separate regressions. See
 [scope and Windows results](../../docs/M4_P2_RAW_UPLOAD_RETRY.md).
+
+
+`run_post_upload_tests.py --repeat 3` extracts complete Layer ConfigureDraw/raw
+upload/descriptor/retirement bodies and complete FXAA/FSR/FSR2 Draw/UploadImages.
+It preserves `--baseline` and saved `--candidate` modes. Shared initialization,
+internal Finish, partial enqueue/submission effects, all slots, sticky Layer
+quarantine, output publication and active-worker shutdown use deterministic gates.
+The actual applet Draw handler and readback refusal prefix are connected to the
+actual Layer exception, then tested with a fresh healthy Layer. Ten named controls
+reject weakened ownership, admission, output and applet isolation. Native wrappers,
+queues, pixels, math, source copy and helper descriptor allocations are fixtures.
+Descriptor API update itself is noexcept void; before/after host injections never
+claim a recoverable native failure receipt. See
+[scope and Windows results](../../docs/M4_P2_POST_UPLOAD_HELPER_QUARANTINE.md).

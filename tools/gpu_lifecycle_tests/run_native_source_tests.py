@@ -22,8 +22,9 @@ view_store=next(line for line in texture_cpp.splitlines() if 'image_views[static
 null_ctor=texture_cpp[texture_cpp.index('ImageView::ImageView(TextureCacheRuntime& runtime, const VideoCommon::NullImageViewParams&'):texture_cpp.index('ImageView::~ImageView()')]
 null_capture=null_ctor[null_ctor.index('    image_owner = null_image;'):null_ctor.index('    for (u32')]
 layer=block(read('src/video_core/renderer_vulkan/present/layer.cpp'),'bool Layer::ConfigureDraw(')
-layer=layer[:layer.index('    auto crop_rect =')]+ '\n    return true;\n}'
-methods='\n'.join(block(scheduler,m) for m in ['void Scheduler::RetainPresentationSource(',
+layer_tail = layer[layer.rindex('    } catch (...) {'):] if 'post_upload_failed = true;' in layer else '}'
+layer = layer[:layer.index('    auto crop_rect =')] + '\n    return true;\n' + layer_tail
+methods='\n'.join(block(scheduler,m) for m in ['void Scheduler::RequireNativeBorrowAdmission(', 'void Scheduler::RetainPresentationSource(',
     'void Scheduler::TrackPresentationSources(', 'void Scheduler::CollectPresentationSources(',
     'bool Scheduler::RetirePresentationSourcesAfterDeviceIdle(', 'u64 Scheduler::SubmitExecution('])
 master=read('src/video_core/renderer_vulkan/vk_master_semaphore.h')

@@ -1,5 +1,25 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-25: post-upload helper/descriptor failure and Layer quarantine
+
+From `e96ea25637`, 27 controlled retry/output witnesses reproduce. Shared AA/FSR
+initialization and temporal helper state prevent a slot-local recovery claim.
+ConfigureDraw now closes its post-upload path across the whole Layer after a
+propagated helper/boundary exception, keeps owners and latest tick through drain,
+and leaves raw-generation replacement unable to reopen it. A fresh Layer can
+resume; applet Failed remains separately sticky even after swapping in that
+healthy Layer. Push constants/descriptor handle publish only on successful
+Configure return. The noexcept void Vulkan descriptor update has no recoverable
+failure receipt; synthetic boundary faults are labeled separately. Normal
+submission counts are preserved. Candidate/fixed deterministic gates and controls,
+raw/helper/source/applet/shutdown regressions and three real Windows COFF objects
+pass; see [audit and next boundary](M4_P2_POST_UPLOAD_HELPER_QUARANTINE.md) and
+[results/commands](M4_P2_POST_UPLOAD_HELPER_QUARANTINE_RESULTS.json). Main untouched;
+current-run temporary artifacts are cleaned after hash verification. Next: final
+WindowAdaptPass composition recording and BlitScreen destination Frame ownership
+on failure after ConfigureDraw has succeeded. HostMemory high risk; M4 incomplete,
+F2/F3 open and GuestBackingAdmission Unknown.
+
 ## 2026-10-25: raw upload recording eligibility and failed-prefix quarantine
 
 From `3165ece04d`, nine uncertain first/warm upload retry witnesses reproduce.

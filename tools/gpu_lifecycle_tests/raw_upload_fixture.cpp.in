@@ -81,6 +81,7 @@ struct AA{void Draw(Scheduler&s,size_t i,VkImage*,VkImageView*){++s.draws;if(fau
 static u32 GetBytesPerPixel(const Tegra::FramebufferConfig&){return 4;}
 static size_t GetSizeInBytes(const Tegra::FramebufferConfig&f){return size_t(f.stride)*f.height*4;}
 struct Layer {
+    bool post_upload_failed{};
     Scheduler&scheduler;Tegra::Memory device_memory;size_t image_count=3;
     vk::Buffer buffer;std::vector<vk::Image>raw_images{{0},{1},{2}};std::vector<vk::View>raw_image_views{{0},{1},{2}};
     std::vector<u64>resource_ticks{0,0,0};

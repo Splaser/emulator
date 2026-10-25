@@ -58,7 +58,8 @@ if not a.baseline:
     methods += '\n' + '\n'.join(block(layer, marker) for marker in [
         'void Layer::WaitForResourceUses(', 'void Layer::ClearRawImages('])
 configure = block(layer, 'bool Layer::ConfigureDraw(')
-configure = configure[:configure.index('    auto crop_rect =')] + '\n    return true;\n}'
+configure_tail = configure[configure.rindex('    } catch (...) {'):] if 'post_upload_failed = true;' in configure else '}'
+configure = configure[:configure.index('    auto crop_rect =')] + '\n    return true;\n' + configure_tail
 scheduler = read('src/video_core/renderer_vulkan/vk_scheduler.cpp')
 read('src/video_core/renderer_vulkan/vk_scheduler.h')
 sched = '\n'.join(block(scheduler, marker) for marker in [

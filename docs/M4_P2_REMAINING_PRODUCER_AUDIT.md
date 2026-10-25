@@ -1,5 +1,12 @@
 # M4 P2: remaining actual producer and ownership boundaries
 
+The [post-upload helper follow-up](M4_P2_POST_UPLOAD_HELPER_QUARANTINE.md) adds
+sticky whole-Layer isolation after uncertain helper/descriptor-boundary failure,
+with retained owners and transactional output parameters. Raw generations cannot
+reset shared helper failure; applet Failed remains independent. Descriptor API
+update is noexcept void and has no recoverable native status. Final composition
+recording and destination Frame failure are the next separate boundary.
+
 The [raw upload follow-up](M4_P2_RAW_UPLOAD_RETRY.md) bounds pre-record retries,
 per-slot uncertain-prefix quarantine, native callback failure and generation
 replacement after old-use completion. It preserves applet Failed isolation and

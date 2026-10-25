@@ -79,6 +79,9 @@ bool Layer::ConfigureDraw(PresentPushConstants* out_push_constants,
                           VkSampler sampler, size_t image_index,
                           const Tegra::FramebufferConfig& framebuffer,
                           const Layout::FramebufferLayout& layout) {
+    scheduler.RequireNativeBorrowAdmission();
+    if (post_upload_failed) return false;
+
     const auto texture_info = rasterizer.AccelerateDisplay(
         framebuffer, framebuffer.address + framebuffer.offset, framebuffer.stride);
     const u32 texture_width = texture_info ? texture_info->width : framebuffer.width;
@@ -101,43 +104,54 @@ bool Layer::ConfigureDraw(PresentPushConstants* out_push_constants,
         if (!UpdateRawImage(framebuffer, image_index)) return false;
     }
 
-    if (texture_info) scheduler.RetainPresentationSource(texture_info->native_owner);
-    VkImage source_image = texture_info ? texture_info->image : *raw_images[image_index];
-    VkImageView source_image_view =
-        texture_info ? texture_info->image_view : *raw_image_views[image_index];
+    // Helpers can initialize every slot or split submissions internally. Retain
+    // the whole Layer on an uncertain prefix; raw-generation reset cannot repair
+    // shared helper state. Only a new Layer may resume this draw path.
+    try {
+        if (texture_info) scheduler.RetainPresentationSource(texture_info->native_owner);
+        VkImage source_image = texture_info ? texture_info->image : *raw_images[image_index];
+        VkImageView source_image_view =
+            texture_info ? texture_info->image_view : *raw_image_views[image_index];
 
-    anti_alias->Draw(scheduler, image_index, &source_image, &source_image_view);
+        anti_alias->Draw(scheduler, image_index, &source_image, &source_image_view);
 
-    auto crop_rect = Tegra::NormalizeCrop(framebuffer, texture_width, texture_height);
-    const VkExtent2D render_extent{
-        .width = scaled_width,
-        .height = scaled_height,
-    };
+        auto crop_rect = Tegra::NormalizeCrop(framebuffer, texture_width, texture_height);
+        const VkExtent2D render_extent{
+            .width = scaled_width,
+            .height = scaled_height,
+        };
 
-    if (fsr) {
-        float sharpening = 0.0f;
-        if (filters.get_scaling_filter() == Settings::ScalingFilter::Fsr) {
-            sharpening =
-                static_cast<float>(Settings::values.fsr_sharpening_slider.GetValue()) / 100.0f;
-        } else if (filters.get_scaling_filter() == Settings::ScalingFilter::Cas) {
-            sharpening =
-                static_cast<float>(Settings::values.cas_sharpening_slider.GetValue()) / 100.0f;
+        if (fsr) {
+            float sharpening = 0.0f;
+            if (filters.get_scaling_filter() == Settings::ScalingFilter::Fsr) {
+                sharpening =
+                    static_cast<float>(Settings::values.fsr_sharpening_slider.GetValue()) / 100.0f;
+            } else if (filters.get_scaling_filter() == Settings::ScalingFilter::Cas) {
+                sharpening =
+                    static_cast<float>(Settings::values.cas_sharpening_slider.GetValue()) / 100.0f;
+            }
+            source_image_view = fsr->Draw(scheduler, image_index, source_image, source_image_view,
+                                          render_extent, crop_rect, sharpening);
+            crop_rect = {0, 0, 1, 1};
         }
-        source_image_view = fsr->Draw(scheduler, image_index, source_image, source_image_view,
-                                      render_extent, crop_rect, sharpening);
-        crop_rect = {0, 0, 1, 1};
-    }
-    if (fsr2) {
-        source_image_view = fsr2->Draw(scheduler, image_index, source_image, source_image_view,
-                                       render_extent, crop_rect);
-        crop_rect = {0, 0, 1, 1};
-    }
-    SetMatrixData(*out_push_constants, layout);
-    SetVertexData(*out_push_constants, layout, crop_rect);
+        if (fsr2) {
+            source_image_view = fsr2->Draw(scheduler, image_index, source_image, source_image_view,
+                                           render_extent, crop_rect);
+            crop_rect = {0, 0, 1, 1};
+        }
+        PresentPushConstants candidate_push_constants{};
+        SetMatrixData(candidate_push_constants, layout);
+        SetVertexData(candidate_push_constants, layout, crop_rect);
 
-    UpdateDescriptorSet(source_image_view, sampler, image_index);
-    *out_descriptor_set = descriptor_sets[image_index];
-    return true;
+        UpdateDescriptorSet(source_image_view, sampler, image_index);
+        static_assert(std::is_nothrow_copy_assignable_v<PresentPushConstants>);
+        *out_push_constants = candidate_push_constants;
+        *out_descriptor_set = descriptor_sets[image_index];
+        return true;
+    } catch (...) {
+        post_upload_failed = true;
+        throw;
+    }
 }
 
 void Layer::CreateDescriptorPool() {

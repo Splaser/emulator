@@ -82,6 +82,7 @@ struct Scheduler{
     struct Chunk{void MarkSubmit(){}}chunk_value;Chunk* chunk=&chunk_value;
     NativeSourceRetainer<Submission>::Scope BeginPresentationSources();
     ~Scheduler();
+    void RequireNativeBorrowAdmission()const;
     void RetainPresentationSource(std::shared_ptr<const void>);void TrackPresentationSources();
     void CollectPresentationSources();bool RetirePresentationSourcesAfterDeviceIdle();
     u64 SubmitExecution(void* =nullptr,void* =nullptr,Submission={});
@@ -132,6 +133,7 @@ struct RasterizerVulkan{
 @ACCELERATE@
 struct PresentPushConstants{};
 struct Layer{
+    bool post_upload_failed{};
     Scheduler& scheduler;
     struct Raw{u64 value{};u64 operator*()const{return value;}};
     std::array<Raw,1>raw_images{},raw_image_views{};std::array<u64,1>resource_ticks{};

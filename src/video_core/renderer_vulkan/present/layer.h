@@ -110,6 +110,8 @@ private:
     std::unique_ptr<FSR2> fsr2{};
     std::vector<u64> resource_ticks{};
     std::vector<RawUploadState> raw_upload_states{};
+    // Shared helper/descriptor failure is sticky across slots and raw generations.
+    bool post_upload_failed{};
 };
 
 } // namespace Vulkan

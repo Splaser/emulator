@@ -147,3 +147,9 @@ returned, without converting enqueue eligibility into content readiness. Keep
 applet Failed isolation. This does not close arbitrary native escapes or guest
 producers. HostMemory remap/protection remains high risk; M4 incomplete, F2/F3
 open and GuestBackingAdmission Unknown.
+
+
+Follow-up: [post-upload helper failure](M4_P2_POST_UPLOAD_HELPER_QUARANTINE.md)
+retains a failed shared helper graph and closes ConfigureDraw for that whole Layer.
+Its sticky state survives raw-generation replacement. The raw-only failure state
+and pre-record retry policy above remain independent; applet Failed is preserved.
