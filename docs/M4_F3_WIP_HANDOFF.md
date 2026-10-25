@@ -1,5 +1,24 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-25: nvhost_ctrl local revalidation recorded; CI deferred
+
+Revalidated exact source `4a66873eb6aaa01c70b86ce04baeda346d5b8f6a` on
+Windows: ten normal schedules x20, one injected terminal cancellation case x20,
+and four exact assertion controls x20 pass. Syncpoint, NVDRV retirement/dispatch
+and OwnedRetirementQueue positive suites pass x10, with their required controls
+(syncpoint controls x10; other regression controls x1). Seven real production
+AMD64 objects compile. No new lifecycle defect was reproduced. The first fixture compile
+failed on generated source path handling, then the unchanged command passed after
+output directories existed; preserve that as infrastructure evidence only.
+All 148 generated exe/object/fixture source files were removed after hash/path
+checks. See [local evidence and limits](M4_P2_NVHOST_CTRL_CALLBACK_LIFETIME.md)
+and `local_revalidation_4a66873eb6` in the
+[results record](M4_P2_NVHOST_CTRL_CALLBACK_RESULTS.json).
+This update changes documentation only. CI is deferred by explicit user request;
+do not trigger a workflow or change Actions settings as part of this update.
+Main remains untouched; native/Android runtime is unvalidated, P2 incomplete,
+F2/F3 Open and GuestBackingAdmission Unknown.
+
 ## 2026-10-25: nvhost_ctrl callback lifetime repair validated on Windows
 
 Resumed from `31b25c128f` on `codex/issue-372-fixes`. Three historical

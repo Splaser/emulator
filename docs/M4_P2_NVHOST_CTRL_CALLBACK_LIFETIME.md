@@ -6,6 +6,42 @@ Validated 2026-10-25 (Asia/Taipei), resuming PR #375 from `31b25c128f` on
 Machine-readable commands, source/object hashes, observations and cleanup are in
 [the results record](M4_P2_NVHOST_CTRL_CALLBACK_RESULTS.json).
 
+## 2026-10-25 local revalidation at 4a66873eb6
+
+Source `4a66873eb6aaa01c70b86ce04baeda346d5b8f6a` was revalidated on
+Windows without changing source, workflow or main. No new nvhost_ctrl lifecycle
+defect was reproduced in the named checks:
+
+- Ten normal callback/owner schedules each pass x20 (200 runs).
+- Injected cancellation failure passes x20 with exit 86 before dependent owner
+  unwinding; four negative controls each produce their exact exit-91 assertion
+  x20 (80 required failures).
+- Eight syncpoint retirement schedules and seven controls pass x10. NVDRV session
+  retirement, dispatch and OwnedRetirementQueue positive suites pass x10; their
+  existing mutation controls each pass once, as implemented by those runners.
+- The same seven real Windows production units compile to AMD64 COFF objects.
+  Manifest inputs and object hashes were checked; all 148 generated exe, object
+  and fixture source files from this revalidation were removed. Logs and manifests
+  remain locally, and their manifests, observations, log contents deduplicated
+  by hash, commands and cleanup records are embedded under
+  `local_revalidation_4a66873eb6` in the results record.
+
+The first owner-suite compilation failed before C++ test execution: the output
+path had a Windows extended-path prefix and GCC could not find the generated
+production.cpp/terminal.cpp paths. The unchanged command passed after the output
+directories existed. The initial compiler log is retained as an infrastructure
+failure, not a lifecycle witness; the precise path-conversion mechanism remains
+unproven. No source fix was made for this observation.
+
+This remains controlled Windows concurrency testing and production-object
+compilation, without application linking, native KEvent scheduler/runtime,
+Linux/Android, device/game or sanitizer validation. CI is deferred at the user's
+request; no workflow is dispatched or Actions setting changed by this
+documentation update. The earlier follow-up `4a66873eb6` only connected the named
+suite and evidence upload to the integration workflow; no successful remote
+validation is claimed. Global P2 remains incomplete; F2/F3 Open and
+GuestBackingAdmission Unknown.
+
 ## Reproduced failures and repair
 
 Historical production source `33ca3eb2ad540b669deed958eedb751be9cafb20`
@@ -91,6 +127,7 @@ destruction of its C++ owner, and System/Host1x/Kernel must remain alive. Escape
 raw/direct owners and arbitrarily late operations after System destruction are
 not covered. Current production GetDevice call sites do not export nvhost_ctrl.
 No Module/session/queue/KEvent implementation changes were needed for the
-reproduced failures. No other teardown subsystem, dependency pin, main branch,
-or workflow is modified. No Android build or device/game run is claimed.
+reproduced failures. The original production repair did not modify another
+teardown subsystem, dependency pin, main branch or workflow. The later CI-only
+test wiring is described above. No Android build or device/game run is claimed.
 Global P2 remains incomplete, F2/F3 Open and GuestBackingAdmission Unknown.
