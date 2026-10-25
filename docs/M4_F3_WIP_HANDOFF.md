@@ -1,5 +1,33 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-25: joint P2 callback / Memory / GPU owner closure evidence
+
+From `d7c6489ead`, local repair scope stays frozen. No production source changes.
+New tests assemble actual full AudioManager and ThreadManager owners with actual
+cohort/core/roster and Write8/GetPointerImpl/PageInfo bodies in one fixture System.
+Nine schedules x3 cover backend UnlockThread, pre-resolved ordinary store,
+active GPU stop, queued cancellation, partial callback failure, timeout and late
+seal. Six exact controls x3 reject missing drain/admission/strong owner/failure
+seal. Session survives active operations and worker join via registered callback;
+cohort then retains backing/process owners after Session release. Real KProcess,
+backend, HostMemory remap and native Vulkan remain unproven collaborators, not
+certified by these green tests. Eight real Windows production COFF units compile
+with zero diagnostics; related cohort/Memory/Audio/GPU regressions pass.
+See [scope and next owner chain](M4_P2_OWNER_CLOSURE_COMPOSITION.md) and
+[results/commands/cleanup](M4_P2_OWNER_CLOSURE_COMPOSITION_RESULTS.json).
+
+The tested Session is a prepared shared packet. Actual AudioOut/In registered
+callbacks bind raw this to service-owned unique impls; that lifetime composition
+is still Unknown. The escaped-alias case deliberately stores after managed close
+and requires continued global refusal. Before claiming the Audio row covered,
+join its actual service target ownership with Audio worker/closure lifetime.
+Next device target: actual NVDRV Module/session/retirement owners through an
+actual dispatch and downstream Host1x queued device/callback lifetime. Keep direct
+exports and unaccounted aliases Unknown. Do not turn idle domain drainage,
+completed ioctl, shutdown wake or terminal worker join into global reversible
+closure. P2 remains incomplete; HostMemory high risk, M4 admission Unknown and
+F2/F3 open. No main merge; preserve logs/results and push this issue branch.
+
 ## 2026-10-25: bounded Presentation Pool complete; local repair scope frozen
 
 From `c3fa0f0d4b`, three historical acquire/index, failed-idle and parent-surface

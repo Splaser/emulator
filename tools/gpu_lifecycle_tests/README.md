@@ -1,5 +1,12 @@
 # GPU lifecycle correctness: F4/F5
 
+Joint P2 owner composition runs
+`../physical_coherency_tests/run_owner_closure_composition_tests.py --repeat 3`.
+Full AudioManager and ThreadManager declarations join actual cohort/Memory address
+translation bodies across nine schedules and six exact ownership/drain controls.
+Kernel/process/backend/PTE/native collaborators remain explicit fixtures. See
+[owner-chain evidence and limits](../../docs/M4_P2_OWNER_CLOSURE_COMPOSITION.md).
+
 `run_presentation_pool_tests.py --repeat 3` exercises the fixed-address Frame pool
 across swapchain shrink/grow, active presentation, fence reuse and shutdown.
 Eight regular paths, seven terminal boundaries and five exact negative controls
