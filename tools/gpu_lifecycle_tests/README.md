@@ -514,3 +514,17 @@ queues, pixels, math, source copy and helper descriptor allocations are fixtures
 Descriptor API update itself is noexcept void; before/after host injections never
 claim a recoverable native failure receipt. See
 [scope and Windows results](../../docs/M4_P2_POST_UPLOAD_HELPER_QUARANTINE.md).
+
+
+`run_composition_tests.py --repeat 3` extracts complete WindowAdaptPass Draw,
+BlitScreen DrawToFrame, Frame/PresentPushConstants declarations, the actual
+FinishNativeBorrow adapter, Composite's draw/flush/present guard and applet
+failure/refusal bodies. Historical `--baseline` and saved `--candidate` modes
+retain the low-level borrowed-Frame witness. Host enqueue errors retire the checked
+prefix before unwinding; callback/uncertain retirement and dequeued presentation
+errors are terminal. Original applet Failed isolation remains effective even after
+composition retirement succeeds. Three slots, internal Finish splits, command and
+join gates, partial native effects and eleven exact controls are deterministic.
+Resources, source ConfigureDraw, native queues/progress and preparation/presentation
+collaborators are controlled fixtures. See
+[scope and Windows results](../../docs/M4_P2_COMPOSITION_FRAME_RETIREMENT.md).

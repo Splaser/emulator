@@ -155,6 +155,7 @@ jobs:
             python tools/gpu_lifecycle_tests/run_raw_resources_tests.py --repeat 3
             python tools/gpu_lifecycle_tests/run_raw_upload_tests.py --repeat 3
             python tools/gpu_lifecycle_tests/run_post_upload_tests.py --repeat 3
+            python tools/gpu_lifecycle_tests/run_composition_tests.py --repeat 3
           python tools/physical_coherency_tests/run_owned_retirement_tests.py --repeat 3
           python tools/physical_coherency_tests/run_nvdrv_retirement_tests.py --repeat 3
           python tools/gpu_lifecycle_tests/run_unmap_ownership_tests.py --repeat 3
@@ -378,6 +379,8 @@ jobs:
             .diagnostics/m4-raw-upload/*.log
             .diagnostics/m4-post-upload/*.json
             .diagnostics/m4-post-upload/*.log
+            .diagnostics/m4-composition/*.json
+            .diagnostics/m4-composition/*.log
             .diagnostics/gpu-lifecycle/linux/thread-extraction.json
             .diagnostics/gpu-lifecycle/linux/thread-*.log
             .diagnostics/gpu-lifecycle/linux/direct-*.log

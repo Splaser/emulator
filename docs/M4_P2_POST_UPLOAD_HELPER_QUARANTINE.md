@@ -164,3 +164,9 @@ ownership when failure happens after every ConfigureDraw succeeded. The Layer
 handler cannot govern that later output stage. Preserve independent applet
 quarantine, raw state and native completion contracts. HostMemory remap/protection
 remains high risk; M4 incomplete, F2/F3 open and GuestBackingAdmission Unknown.
+
+
+Follow-up: [final composition and target Frame](M4_P2_COMPOSITION_FRAME_RETIREMENT.md)
+adds checked retirement for final enqueue errors and closes the reset-fence
+presentation error boundary. Helper isolation above remains independently sticky;
+a successful error drain never turns failed applet content into readable pixels.

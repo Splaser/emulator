@@ -1,5 +1,26 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-25: final composition and borrowed target Frame retirement
+
+From `7b2225e854`, twelve low-level Frame-borrow witnesses reproduce. Final
+WindowAdaptPass enqueue errors now keep Frame/pass/source scope alive through
+actual checked FinishNativeBorrow before rethrowing. Failed retirement and worker
+callback errors remain no-unwind terminal boundaries. Applet retains its existing
+Failed quarantine even when composition completed during error retirement; no
+readback or replay. A dequeued presentation Frame has a reset fence and no proven
+cancel/recycle receipt: Composite terminates on draw/flush/present error instead of
+continuing with an unsettled pool slot. Blit and direct Window entry preflight
+closed admission before metadata/source access. Normal submissions/index behavior
+are unchanged; no Frame member reordering or completion registry. Candidate/fixed
+84 return paths, 114 terminal paths and eleven controls pass three repeats, with
+helper/capture/applet/source/idle/shutdown regressions and three zero-diagnostic
+Windows COFF units. See [scope and continuation](M4_P2_COMPOSITION_FRAME_RETIREMENT.md)
+and [results/commands](M4_P2_COMPOSITION_FRAME_RETIREMENT_RESULTS.json). Current-run
+artifacts are cleaned; main untouched. Next: pre-ConfigureDraw Blit resource-change
+publication and PresentManager::RecreateFrame image/view/framebuffer replacement,
+metadata/index shrink and allocation failure. HostMemory high risk; M4 incomplete,
+F2/F3 open and GuestBackingAdmission Unknown.
+
 ## 2026-10-25: post-upload helper/descriptor failure and Layer quarantine
 
 From `e96ea25637`, 27 controlled retry/output witnesses reproduce. Shared AA/FSR

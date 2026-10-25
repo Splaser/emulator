@@ -246,11 +246,20 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
 
     RenderScreenshot(framebuffers);
     Frame* frame = present_manager.GetRenderFrame();
-    blit_swapchain.DrawToFrame(rasterizer, frame, framebuffers,
-                               render_window.GetFramebufferLayout(), swapchain.GetImageCount(),
-                               swapchain.GetImageViewFormat());
-    scheduler.Flush(*frame->render_ready);
-    present_manager.Present(frame);
+    // GetRenderFrame has removed this Frame from the pool and reset its fence.
+    // No cancellation/recycle receipt exists for a failed draw/flush/present.
+    try {
+        blit_swapchain.DrawToFrame(rasterizer, frame, framebuffers,
+                                   render_window.GetFramebufferLayout(), swapchain.GetImageCount(),
+                                   swapchain.GetImageViewFormat());
+        scheduler.Flush(*frame->render_ready);
+        present_manager.Present(frame);
+    } catch (const vk::Exception& error) {
+        Common::TerminalFailStop("present.composition", "vulkan_exception",
+                                 static_cast<int>(error.GetResult()));
+    } catch (...) {
+        Common::TerminalFailStop("present.composition", "host_exception");
+    }
     CITRON_PROFILE_FRAME_MARK();
 
     // Update frame timing for frame skipping

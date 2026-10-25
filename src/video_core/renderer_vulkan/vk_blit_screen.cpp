@@ -96,6 +96,7 @@ void BlitScreen::DrawToFrame(RasterizerVulkan& rasterizer, Frame* frame,
                              const Layout::FramebufferLayout& layout,
                              size_t current_swapchain_image_count,
                              VkFormat current_swapchain_view_format) {
+    scheduler.RequireNativeBorrowAdmission();
     bool resource_update_required = false;
     bool presentation_recreate_required = false;
 

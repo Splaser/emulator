@@ -1,5 +1,12 @@
 # M4 P2: remaining actual producer and ownership boundaries
 
+The [final composition follow-up](M4_P2_COMPOSITION_FRAME_RETIREMENT.md) retires a
+failed enqueue's checked prefix before target/source owners may unwind, preserves
+applet Failed, and prevents an unsettled dequeued presentation Frame from being
+reused as a cancellation success. Callback/unknown retirement stays terminal.
+Pre-ConfigureDraw resource-change publication and in-place RecreateFrame failure
+remain separate; a complete final composition is not a certificate for them.
+
 The [post-upload helper follow-up](M4_P2_POST_UPLOAD_HELPER_QUARANTINE.md) adds
 sticky whole-Layer isolation after uncertain helper/descriptor-boundary failure,
 with retained owners and transactional output parameters. Raw generations cannot
