@@ -1,5 +1,20 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-25: STOP checkpoint - nvhost_ctrl owner tests are unvalidated drafts
+
+User requested saving progress and stopping after repeated Daybreak warnings.
+Last validated production head remains `33ca3eb2ad540b669deed958eedb751be9cafb20`.
+Only draft tests/fixture/unapplied candidate were added for Module/session/
+OwnedRetirementQueue -> NVDRV dispatch -> Host1x queued raw callback lifetime.
+They have not been compiled or run; no new runtime witness or fix is accepted.
+No production source/workflow/main changes or new temporary exe in this work.
+See [exact checkpoint and resume commands](M4_P2_NVHOST_CTRL_CALLBACK_WIP.md).
+Resume by inspecting/fixing the test integration, then historical/candidate
+deterministic tests before any production patch or Windows validation. Scope
+stays strictly nvhost_ctrl/callback/KEvent/Module/session; global P2 and admission
+remain Unknown. This checkpoint supersedes any implication that this new repair
+has already been verified.
+
 ## 2026-10-25: actual Audio service raw-target terminal closure
 
 From `7fc738baf7`, real AudioIn/Out service constructors/default destructors and
