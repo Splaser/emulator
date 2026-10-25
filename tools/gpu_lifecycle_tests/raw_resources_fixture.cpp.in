@@ -80,7 +80,9 @@ struct Layer{
     vk::Buffer buffer;std::vector<vk::Image> raw_images;std::vector<vk::ImageView> raw_image_views;std::vector<u64> resource_ticks;
     u32 raw_width{},raw_height{},raw_stride{};Service::android::PixelFormat pixel_format{};
     std::unique_ptr<AA> anti_alias;
+    @UPLOAD_STATE@
     @BUNDLE@
+    @UPLOAD_MEMBER@
     explicit Layer(Scheduler&s):scheduler{s}{}
     ~Layer();void RefreshResources(const Tegra::FramebufferConfig&);void ClearRawImages();void ReleaseRawImages();void WaitForResourceUses();
     @FACTORY_DECLS@

@@ -1,5 +1,25 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-25: raw upload recording eligibility and failed-prefix quarantine
+
+From `3165ece04d`, nine uncertain first/warm upload retry witnesses reproduce.
+Candidate tests pass before production mutation. Each raw slot now tracks
+Empty/Recording/Recorded/Failed on the serialized GPU owner: source preparation
+can retry, but Record failure quarantines the slot and propagates the exception.
+Its staging cannot be rewritten or image sampled via another raw attempt. Other
+slots progress; a complete new raw generation can recover only after old-use
+completion. A same-key refresh does not silently clear failure. Recorded means
+enqueue returned, never native/pixel completion. Worker callback errors take the
+existing no-unwind terminal boundary. Applet Failed remains sticky; raw generation
+replacement does not grant permission to retry that applet. New slot/shutdown
+gates, existing raw tuple, AA, mapping, applet and renderer regressions plus three
+real Windows COFF units are recorded in [scope/continuation](M4_P2_RAW_UPLOAD_RETRY.md)
+and [results](M4_P2_RAW_UPLOAD_RETRY_RESULTS.json). Main untouched; current-run
+executables, objects and generated fixtures are cleaned after hash verification.
+Next: remaining helper/descriptor and output failures after raw upload returned,
+without treating upload scheduling as content readiness. HostMemory high risk;
+M4 incomplete, F2/F3 open, GuestBackingAdmission Unknown.
+
 ## 2026-10-24: raw resource candidate publication and retry
 
 From `3ca2af23f6`, sixteen raw partial-publication/retry/stride witnesses reproduce.

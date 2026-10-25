@@ -169,6 +169,7 @@ Layer::RawResources Layer::CreateRawImages(const Tegra::FramebufferConfig& frame
     RawResources candidate{};
     candidate.buffer = CreateStagingBuffer(framebuffer);
     candidate.ticks.resize(image_count);
+    candidate.uploads.resize(image_count);
     candidate.images.resize(image_count);
     candidate.views.resize(image_count);
     const auto format = GetFormat(framebuffer);
@@ -206,10 +207,12 @@ void Layer::RefreshResources(const Tegra::FramebufferConfig& framebuffer) {
     static_assert(noexcept(raw_images.swap(candidate.images)));
     static_assert(noexcept(raw_image_views.swap(candidate.views)));
     static_assert(noexcept(resource_ticks.swap(candidate.ticks)));
+    static_assert(noexcept(raw_upload_states.swap(candidate.uploads)));
     std::swap(buffer, candidate.buffer);
     raw_images.swap(candidate.images);
     raw_image_views.swap(candidate.views);
     resource_ticks.swap(candidate.ticks);
+    raw_upload_states.swap(candidate.uploads);
     raw_width = framebuffer.width;
     raw_height = framebuffer.height;
     raw_stride = framebuffer.stride;
@@ -330,6 +333,12 @@ void Layer::UpdateDescriptorSet(VkImageView image_view, VkSampler sampler, size_
 }
 
 bool Layer::UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t image_index) {
+    scheduler.RequireNativeBorrowAdmission();
+    if (image_index >= raw_upload_states.size() ||
+        raw_upload_states[image_index] == RawUploadState::Recording ||
+        raw_upload_states[image_index] == RawUploadState::Failed) {
+        return false;
+    }
     const std::span<u8> mapped_span = buffer.Mapped();
 
     const u64 image_offset = GetRawImageOffset(framebuffer, image_index);
@@ -375,45 +384,63 @@ bool Layer::UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t i
                 .depth = 1,
             },
     };
-    scheduler.Record([this, copy, index = image_index](vk::CommandBuffer cmdbuf) {
-        const VkImage image = *raw_images[index];
-        const VkImageMemoryBarrier base_barrier{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = 0,
-            .dstAccessMask = 0,
-            .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = image,
-            .subresourceRange{
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            },
-        };
-        VkImageMemoryBarrier read_barrier = base_barrier;
-        read_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        read_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        read_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    // Once Record starts, an exception cannot prove that nothing was enqueued.
+    // Preserve this slot until replacement drains old uses; other slots stay usable.
+    raw_upload_states[image_index] = RawUploadState::Recording;
+    try {
+        scheduler.Record([this, copy, index = image_index](vk::CommandBuffer cmdbuf) {
+            try {
+                const VkImage image = *raw_images[index];
+                const VkImageMemoryBarrier base_barrier{
+                    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    .pNext = nullptr,
+                    .srcAccessMask = 0,
+                    .dstAccessMask = 0,
+                    .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+                    .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .image = image,
+                    .subresourceRange{
+                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .baseMipLevel = 0,
+                        .levelCount = 1,
+                        .baseArrayLayer = 0,
+                        .layerCount = 1,
+                    },
+                };
+                VkImageMemoryBarrier read_barrier = base_barrier;
+                read_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                read_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                read_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
-        VkImageMemoryBarrier write_barrier = base_barrier;
-        write_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        write_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        write_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        write_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                VkImageMemoryBarrier write_barrier = base_barrier;
+                write_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                write_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                write_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                write_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-        cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-                               read_barrier);
-        cmdbuf.CopyBufferToImage(*buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, copy);
-        cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                               VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
-                                   VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                               0, write_barrier);
-    });
+                cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                                       read_barrier);
+                cmdbuf.CopyBufferToImage(*buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, copy);
+                cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                       0, write_barrier);
+            } catch (const vk::Exception& error) {
+                Common::TerminalFailStop("layer.raw_upload.recording", "vulkan_exception",
+                                         static_cast<int>(error.GetResult()));
+            } catch (...) {
+                Common::TerminalFailStop("layer.raw_upload.recording", "host_exception");
+            }
+        });
+    } catch (...) {
+        raw_upload_states[image_index] = RawUploadState::Failed;
+        throw;
+    }
+    // The callback may still be queued. Same-queue ordering and the existing slot
+    // wait govern consumption/reuse; this is not a host/native completion receipt.
+    raw_upload_states[image_index] = RawUploadState::Recorded;
     return true;
 }
 

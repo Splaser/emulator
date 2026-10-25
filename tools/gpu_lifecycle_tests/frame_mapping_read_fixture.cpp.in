@@ -105,11 +105,14 @@ u32 GetBytesPerPixel(const Tegra::FramebufferConfig&) { return 4; }
 u64 GetSizeInBytes(const Tegra::FramebufferConfig&) { return 8; }
 struct Layer {
     Core::DeviceMemoryManager<int>& device_memory;
+    enum class RawUploadState { Empty, Recording, Recorded, Failed };
     struct Buffer {
         std::array<u8,32> bytes{}; int flushes{};
         std::span<u8> Mapped() { return bytes; }
         void Flush() { ++flushes; }
-    } buffer;
+    } buffer{};
+    std::vector<RawUploadState>raw_upload_states=std::vector<RawUploadState>(3);
+    struct Scheduler{void RequireNativeBorrowAdmission(){}}scheduler{};
     u64 GetRawImageOffset(const Tegra::FramebufferConfig&, size_t) { return 0; }
 #if @BASELINE@
     void UpdateRawImage(const Tegra::FramebufferConfig&, size_t);

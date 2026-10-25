@@ -44,7 +44,7 @@ def block(text, marker):
 
 
 layer = read('src/video_core/renderer_vulkan/present/layer.cpp')
-read('src/video_core/renderer_vulkan/present/layer.h')
+header=read('src/video_core/renderer_vulkan/present/layer.h')
 candidate = json.loads(read('tools/gpu_lifecycle_tests/aa_retirement_candidate.json'))
 if a.candidate:
     for old, new in candidate['replacements']:
@@ -70,6 +70,9 @@ stubs = '''void CreateStagingBuffer(const Tegra::FramebufferConfig&){buffer=std:
 if 'Layer::RawResources Layer::CreateRawImages(' in layer:
     stubs = '''struct RawResources{vk::Buffer buffer;std::vector<Resource> images,views;std::vector<u64> ticks;};
     RawResources CreateRawImages(const Tegra::FramebufferConfig&){RawResources r;r.buffer=std::make_unique<Resource>();r.images=std::vector<Resource>(image_count);r.views=std::vector<Resource>(image_count);r.ticks.resize(image_count);return r;}'''
+if 'enum class RawUploadState' in header:
+    state=block(header,'    enum class RawUploadState')+';'
+    stubs=state+'std::vector<RawUploadState> raw_upload_states=std::vector<RawUploadState>(3);'+stubs.replace('std::vector<u64> ticks;', 'std::vector<u64> ticks;std::vector<RawUploadState> uploads;').replace('r.ticks.resize(image_count);', 'r.ticks.resize(image_count);r.uploads.resize(image_count);')
 source = source.replace('@SCHEDULER@', sched).replace('@LAYER@', methods + '\n' + configure).replace('@RAW_CREATION_STUBS@', stubs)
 terminal = out / 'terminal.cpp'
 terminal.write_text(read('src/common/terminal_fail_stop.cpp'), encoding='utf-8')

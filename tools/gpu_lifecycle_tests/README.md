@@ -486,3 +486,17 @@ semaphore factory gates, checked retirement and shutdown are controlled. Native
 allocation, pending users and mapped bytes are fixtures; real Windows compilation
 checks the actual no-throw commit. See
 [scope and results](../../docs/M4_P2_RAW_RESOURCE_PUBLICATION.md).
+
+
+`run_raw_upload_tests.py --repeat 3` extracts the full UpdateRawImage callback,
+ConfigureDraw through AA Draw, raw recording state/bundle declarations and actual
+refresh/wait/release methods. Historical `--baseline` witnesses and a saved
+`--candidate` transformation precede production changes. Each of three slots
+covers first and warm upload enqueue/partial submission faults, pre-record retry,
+failed-slot quarantine, independent-slot progress, checked generation replacement,
+internal Finish and semaphore recording/worker/shutdown gates. Recorded does not
+mean native completion. Eight named controls distinguish seven production mutations
+from one queue fixture control. Source copy, unswizzle, native queues,
+pixels and candidate allocation are controlled collaborators; applet quarantine
+and actual renderer shutdown are separate regressions. See
+[scope and Windows results](../../docs/M4_P2_RAW_UPLOAD_RETRY.md).

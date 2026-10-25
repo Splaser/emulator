@@ -1,5 +1,11 @@
 # M4 P2: remaining actual producer and ownership boundaries
 
+The [raw upload follow-up](M4_P2_RAW_UPLOAD_RETRY.md) bounds pre-record retries,
+per-slot uncertain-prefix quarantine, native callback failure and generation
+replacement after old-use completion. It preserves applet Failed isolation and
+never treats Recorded/enqueue as native content completion. Remaining helper,
+descriptor and output failures after upload return still require independent audit.
+
 Source audit: 2026-10-23 (Asia/Singapore), following the NVDRV dispatch update.
 This is an acceptance inventory, not a certificate that all writers are known.
 

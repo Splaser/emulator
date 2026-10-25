@@ -152,3 +152,9 @@ are not closed by a complete raw tuple. Preserve the failed applet quarantine.
 
 HostMemory remap/protection remains high risk. M4 incomplete, F2/F3 open and
 GuestBackingAdmission Unknown.
+
+
+Follow-up: [raw upload recording eligibility and retry](M4_P2_RAW_UPLOAD_RETRY.md)
+adds per-slot failed-prefix quarantine and generation-scoped reset after the old
+use boundary. Allocation completeness and Recorded remain distinct from initialized
+pixels or checked native completion; applet Failed isolation is preserved.

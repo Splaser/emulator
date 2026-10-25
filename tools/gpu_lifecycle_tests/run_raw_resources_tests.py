@@ -29,6 +29,8 @@ names+=['void Layer::CreateStagingBuffer(', 'void Layer::CreateRawImages('] if a
 methods='\n'.join(block(layer,m) for m in names)
 decls='void CreateStagingBuffer(const Tegra::FramebufferConfig&);void CreateRawImages(const Tegra::FramebufferConfig&);' if a.baseline else 'vk::Buffer CreateStagingBuffer(const Tegra::FramebufferConfig&);RawResources CreateRawImages(const Tegra::FramebufferConfig&);'
 source=read('tools/gpu_lifecycle_tests/raw_resources_fixture.cpp.in').replace('@BUNDLE@',bundle).replace('@FACTORY_DECLS@',decls).replace('@METHODS@',methods)
+state=block(header,'    enum class RawUploadState')+';' if 'enum class RawUploadState' in header else ''
+source=source.replace('@UPLOAD_STATE@',state).replace('@UPLOAD_MEMBER@','std::vector<RawUploadState> raw_upload_states;' if state else '')
 terminal=out/'terminal.cpp';terminal.write_text(read('src/common/terminal_fail_stop.cpp'),encoding='utf-8');read('src/common/terminal_fail_stop.h')
 flags=[a.cxx,'-std=c++23','-O1','-pthread','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-misleading-indentation','-I',str(root/'src'),'-isystem',str(root/'externals/Vulkan-Headers/include')]
 def build(name,text):

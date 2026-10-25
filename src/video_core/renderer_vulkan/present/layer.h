@@ -56,11 +56,14 @@ public:
 private:
     void CreateDescriptorPool();
     void CreateDescriptorSets(VkDescriptorSetLayout layout);
+    // Owner-thread recording eligibility only; Recorded is not native completion.
+    enum class RawUploadState { Empty, Recording, Recorded, Failed };
     struct RawResources {
         vk::Buffer buffer;
         std::vector<vk::Image> images;
         std::vector<vk::ImageView> views;
         std::vector<u64> ticks;
+        std::vector<RawUploadState> uploads;
     };
     vk::Buffer CreateStagingBuffer(const Tegra::FramebufferConfig& framebuffer);
     RawResources CreateRawImages(const Tegra::FramebufferConfig& framebuffer);
@@ -106,6 +109,7 @@ private:
     std::unique_ptr<FSR> fsr{};
     std::unique_ptr<FSR2> fsr2{};
     std::vector<u64> resource_ticks{};
+    std::vector<RawUploadState> raw_upload_states{};
 };
 
 } // namespace Vulkan
