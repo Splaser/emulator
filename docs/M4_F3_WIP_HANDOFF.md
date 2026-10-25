@@ -1,5 +1,29 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-25: bounded Presentation Pool complete; local repair scope frozen
+
+From `c3fa0f0d4b`, three historical acquire/index, failed-idle and parent-surface
+owner witnesses reproduce before edits. Fixed-address pool remains stable across
+swapchain count changes; no pool resize is introduced. Acquisition must have a
+valid success receipt before indexing; old swapchain release requires checked
+idle; replacement surface outlives old child retirement. Surface loss retries
+only before copy starts, never replaying an already consumed Frame semaphore.
+Candidate/fixed suites: eight regular, seven terminal, five controls x3. Five
+related regression suites pass; four real Windows COFF units compile with zero
+diagnostics. See [bounded audit](M4_P2_PRESENTATION_POOL.md) and
+[results/commands/cleanup](M4_P2_PRESENTATION_POOL_RESULTS.json).
+
+Next: follow the [consolidated owner coverage and four-step admission ledger](M4_PRODUCER_COVERAGE_AND_ADMISSION.md).
+New local repairs now require a reproduced critical owner failure. Concentrate
+on actual Process/Memory/NVDRV/Host1x/Audio/GPU/Rasterizer/Presentation close,
+acknowledgement and sustained retention together. Persistent WSI retry progress,
+external getter synchronization, escaped aliases, independent services,
+HostMemory remap/protection and native NCE remain explicit Unknown obligations.
+Whole-guest quiescence stays the first route; no signal-handler waiting or new
+per-access policy. No guest-backed admission, F2 authority or main merge is enabled.
+The first future integration target remains one restricted real KProcess-backed
+Vulkan Copy, with real native completion and safe refusal/Unknown retention.
+
 ## 2026-10-25: transactional Frame recreation, Blit publication and slot shrink
 
 From `7e8c2d1b8c`, eight old Frame/Blit publication/parent-order/shrink witnesses

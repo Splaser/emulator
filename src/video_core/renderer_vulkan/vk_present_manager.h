@@ -62,7 +62,7 @@ private:
 
     void CopyToSwapchain(Frame* frame);
 
-    void CopyToSwapchainImpl(Frame* frame);
+    void CopyToSwapchainImpl(Frame* frame, bool& copy_started);
 
     void RecreateSwapchain(Frame* frame);
 

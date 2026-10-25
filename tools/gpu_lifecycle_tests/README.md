@@ -1,5 +1,15 @@
 # GPU lifecycle correctness: F4/F5
 
+`run_presentation_pool_tests.py --repeat 3` exercises the fixed-address Frame pool
+across swapchain shrink/grow, active presentation, fence reuse and shutdown.
+Eight regular paths, seven terminal boundaries and five exact negative controls
+use actual pool/worker/acquire/submit bodies with controlled native collaborators.
+`--baseline` reproduces three historical failures; `--candidate` checks the patch
+against that baseline before production edits. See
+[bounded audit and limits](../../docs/M4_P2_PRESENTATION_POOL.md) and
+[owner coverage / scope freeze](../../docs/M4_PRODUCER_COVERAGE_AND_ADMISSION.md).
+Fixtures are not native Vulkan or whole-guest admission evidence.
+
 Accelerated cache-native ownership runs `run_native_source_tests.py`; checked
 presentation reuse runs `run_present_completion_tests.py`. See
 [native handoff, split submissions and fallback/teardown limits](../../docs/M4_P2_ACCELERATED_NATIVE_SOURCE.md).

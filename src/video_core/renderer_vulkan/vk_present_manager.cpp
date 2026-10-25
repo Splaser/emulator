@@ -332,7 +332,9 @@ void PresentManager::PresentThread(std::stop_token token) {
 }
 
 void PresentManager::RecreateSwapchain(Frame* frame) {
-    swapchain.Create(*surface, frame->width, frame->height);
+    if (!swapchain.Create(*surface, frame->width, frame->height)) {
+        Common::TerminalFailStop("present.recreate", "surface_unavailable");
+    }
     UpdateFramePipelineLimit();
 }
 
@@ -366,28 +368,37 @@ void PresentManager::ReleaseRenderFrame(Frame* frame) {
 
 void PresentManager::CopyToSwapchain(Frame* frame) {
     bool requires_recreation = false;
+    bool copy_started = false;
 
     while (true) {
         try {
             // Recreate surface and swapchain if needed.
             if (requires_recreation) {
-                surface = CreateSurface(instance, render_window.GetWindowInfo());
-                RecreateSwapchain(frame);
+                auto candidate = CreateSurface(instance, render_window.GetWindowInfo());
+                if (!swapchain.Create(*candidate, frame->width, frame->height)) {
+                    Common::TerminalFailStop("present.recreate", "surface_unavailable");
+                }
+                // Create retired the old child swapchain before its surface owner.
+                surface = std::move(candidate);
+                UpdateFramePipelineLimit();
             }
 
             // Draw to swapchain.
-            return CopyToSwapchainImpl(frame);
+            return CopyToSwapchainImpl(frame, copy_started);
         } catch (const vk::Exception& except) {
-            if (except.GetResult() != VK_ERROR_SURFACE_LOST_KHR) {
-                throw;
+            if (except.GetResult() != VK_ERROR_SURFACE_LOST_KHR || copy_started) {
+                Common::TerminalFailStop("present.copy", "vulkan_exception",
+                                         static_cast<int>(except.GetResult()));
             }
 
             requires_recreation = true;
+        } catch (...) {
+            Common::TerminalFailStop("present.copy", "host_exception");
         }
     }
 }
 
-void PresentManager::CopyToSwapchainImpl(Frame* frame) {
+void PresentManager::CopyToSwapchainImpl(Frame* frame, bool& copy_started) {
 
     // If the size of the incoming frames has changed, recreate the swapchain
     // to account for that.
@@ -402,6 +413,8 @@ void PresentManager::CopyToSwapchainImpl(Frame* frame) {
         RecreateSwapchain(frame);
     }
 
+    // Never replay after recording starts: render_ready/fence effects may survive.
+    copy_started = true;
     const vk::CommandBuffer cmdbuf{frame->cmdbuf};
     cmdbuf.Begin({
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
