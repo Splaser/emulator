@@ -140,11 +140,12 @@ struct BlitScreen{
     std::unique_ptr<WindowAdaptPass>window_adapt=std::make_unique<WindowAdaptPass>();std::list<Layer>layers;
     explicit BlitScreen(Scheduler&s):scheduler{s}{}
     void WaitIdle(){scheduler.Finish();}
+    std::unique_ptr<WindowAdaptPass>CreateWindowAdaptPass(Settings::ScalingFilter,VkFormat){++passes_changed;return std::make_unique<WindowAdaptPass>();}
     void SetWindowAdaptPass(){++passes_changed;layers.clear();window_adapt=std::make_unique<WindowAdaptPass>();scaling_filter=filters.get_scaling_filter();}
     void DrawToFrame(RasterizerVulkan&,Frame*,std::span<const Tegra::FramebufferConfig>,const Layout::FramebufferLayout&,size_t,VkFormat);
 };
 @BLIT@
-static Frame MakeFrame(){Frame f{};f.width=4;f.height=4;auto r=std::make_shared<Root>();f.image=vk::Image{r};f.image_view=vk::ImageView{r};f.framebuffer=vk::Framebuffer{r};return f;}
+static Frame MakeFrame(){Frame f{};f.width=4;f.height=4;@FRAME_FORMAT@auto r=std::make_shared<Root>();f.image=vk::Image{r};f.image_view=vk::ImageView{r};f.framebuffer=vk::Framebuffer{r};return f;}
 static constexpr VkExtent2D CaptureImageSize{4,4};static constexpr VkFormat CaptureFormat=VK_FORMAT_R8G8B8A8_UNORM;
 static vk::Image CreateWrappedImage(MemoryAllocator&,VkExtent2D,VkFormat){return vk::Image{std::make_shared<Root>()};}
 static vk::ImageView CreateWrappedImageView(const Device&,vk::Image&i,VkFormat){return vk::ImageView{i.root};}
@@ -207,9 +208,9 @@ int main(int argc,char**argv){
             draw();s.Finish();check(frame.framebuffer.root->ended==2,"completed Frame retry failed");
         }else if(mode.starts_with("present-")){
             Vulkan::RendererVulkan r{s,&blit};fault=mode.substr(8);r.PresentFrame(&frame,configs);check(false,"failed dequeued Frame returned");
-        }else if(mode=="closed"||mode=="closed-direct"||mode=="closed-recreate"){
+        }else if(mode=="closed"||mode=="closed-direct"||mode=="closed-recreate"||mode=="closed-fastpath"){
             s.closed=true;
-            if(mode=="closed-recreate")s.closed_observer=[&]{check(blit.image_count==3&&blit.swapchain_view_format==VK_FORMAT_R8G8B8A8_UNORM&&blit.layers.empty(),"closed Blit mutated metadata before admission");};
+            if(mode=="closed-recreate"||mode=="closed-fastpath")s.closed_observer=[&]{check(blit.image_count==3&&blit.swapchain_view_format==VK_FORMAT_R8G8B8A8_UNORM&&blit.layers.empty(),"closed Blit mutated metadata before admission");};
             if(mode!="closed-direct")draw();else {for(int i=0;i<2;++i)blit.layers.emplace_back(blit.device,blit.memory_allocator,s,blit.device_memory);blit.window_adapt->Draw(raster,s,slot,blit.layers,configs,Layout::FramebufferLayout{},&frame);}
             check(false,"closed composition entry admitted");
         }else if(mode=="gate"||mode=="shutdown-active"||mode=="idle-failure"){

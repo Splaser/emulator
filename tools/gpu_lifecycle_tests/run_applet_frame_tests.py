@@ -59,6 +59,7 @@ blit = '\n'.join(block(blit, marker) for marker in [
 frame = block(read('src/video_core/renderer_vulkan/vk_present_manager.h'), 'struct Frame {') + ';'
 source = read('tools/gpu_lifecycle_tests/applet_frame_fixture.cpp.in')
 state = block(renderer_header, '    enum class AppletCaptureState') + ';\n    AppletCaptureState applet_capture_state{AppletCaptureState::Empty};' if 'enum class AppletCaptureState' in renderer_header else ''
+source=source.replace('@TRANSACTIONAL_PASS@','true' if 'CreateWindowAdaptPass(' in blit else 'false')
 source = source.replace('@FRAME@', frame).replace('@BLIT@', blit).replace('@RENDERER@', methods).replace('@CONTENT_STATE@', state).replace('@HAS_CONTENT_STATE@', 'true' if state else 'false')
 terminal = out / 'terminal.cpp'
 terminal.write_text(read('src/common/terminal_fail_stop.cpp'), encoding='utf-8')

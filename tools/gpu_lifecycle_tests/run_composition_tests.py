@@ -34,6 +34,7 @@ guard_start=renderer.rfind('    try {',renderer.index('void RendererVulkan::Comp
 guard=renderer[guard_start:guard_end]
 source=source.replace('@FIXED@',str(not a.baseline).lower()).replace('@PRESENT_GUARD@',guard).replace('@NATIVE_BORROW@',block(read('src/video_core/renderer_vulkan/vk_scheduler.cpp'),'void Scheduler::FinishNativeBorrow('))
 source=source.replace('@WINDOW@',window).replace('@BLIT@',block(b,'void BlitScreen::DrawToFrame(')).replace('@FRAME@',block(read('src/video_core/renderer_vulkan/vk_present_manager.h'),'struct Frame {')+';')
+source=source.replace('@FRAME_FORMAT@','f.image_view_format=VK_FORMAT_R8G8B8A8_UNORM;' if 'image_view_format{' in read('src/video_core/renderer_vulkan/vk_present_manager.h') else '')
 terminal=out/'terminal.cpp';terminal.write_text(read('src/common/terminal_fail_stop.cpp'),encoding='utf-8');read('src/common/terminal_fail_stop.h')
 flags=[a.cxx,'-std=c++23','-O1','-pthread','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-misleading-indentation','-I',str(root/'src'),'-isystem',str(root/'externals/Vulkan-Headers/include')]
 def build(name,text):
@@ -50,7 +51,7 @@ def run(exe,name,case,slot,code=0,marker='PASS composition'):
   if 'composition.retirement' in marker or 'native_borrow.completion' in marker:assert 'source_scope.end' not in log,(name,log)
 exe=build('production',source);controls=[]
 normal=['multi-slot','multi-slot-partial','applet-configure-failure','applet-composition-failure','normal','lanczos','crt','gate','shutdown-active','capture','record-before','record-enqueued','submit-partial','submit-full']
-failures=['retire-before','retire-partial','retire-worker','retire-poll-pending','retire-poll-error','present-record-enqueued','present-flush','present-present','closed-recreate','worker-begin','worker-clear','worker-pipeline','worker-push','worker-bind','worker-draw','worker-end','idle-failure','closed','closed-direct']
+failures=['retire-before','retire-partial','retire-worker','retire-poll-pending','retire-poll-error','present-record-enqueued','present-flush','present-present','closed-recreate','closed-fastpath','worker-begin','worker-clear','worker-pipeline','worker-push','worker-bind','worker-draw','worker-end','idle-failure','closed','closed-direct']
 if a.baseline:
  for i in range(a.repeat):
   for slot in range(3):
@@ -77,7 +78,7 @@ else:
  control('unwind-worker-vulkan','Common::TerminalFailStop("composition.recording", "vulkan_exception",\n                                         static_cast<int>(error.GetResult()));','throw;','worker-end','FAIL Frame owner unwound with uncertain composition')
  control('extra-normal-finish','    // Advance to next image','    scheduler.Finish();\n    // Advance to next image','normal','FAIL composition added normal submission')
  control('advance-before-record','    // Perform the draw','    ++image_index;\n    // Perform the draw','gate','FAIL queued composition lost owner or advanced slot')
- control('omit-blit-admission','                             VkFormat current_swapchain_view_format) {\n    scheduler.RequireNativeBorrowAdmission();','                             VkFormat current_swapchain_view_format) {','closed-recreate','FAIL closed Blit mutated metadata before admission')
+ control('omit-blit-admission','                             VkFormat current_swapchain_view_format) {\n    scheduler.RequireNativeBorrowAdmission();','                             VkFormat current_swapchain_view_format) {','closed-fastpath' if 'CreateWindowAdaptPass(' in b else 'closed-recreate','FAIL closed Blit mutated metadata before admission')
  control('omit-applet-isolation',applet[:applet.index('    // Filter')],applet[:applet.index('    // Filter')].replace('applet_capture_state == AppletCaptureState::Failed','false'),'applet-configure-failure','FAIL healthy composition reopened failed applet')
  control('omit-direct-admission','    scheduler.RequireNativeBorrowAdmission();\n    auto source_scope','    auto source_scope','closed-direct','FAIL closed composition entry admitted')
  print('PASS composition slots, callback/owner gates, terminal boundaries and eleven controls',flush=True)

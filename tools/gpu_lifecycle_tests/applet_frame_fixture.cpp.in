@@ -9,6 +9,7 @@
 #include <functional>
 #include <iterator>
 #include <memory>
+#include <list>
 #include <optional>
 #include <semaphore>
 #include <span>
@@ -97,6 +98,8 @@ struct Filters{int value=1;int get_scaling_filter()const{return value;}};
 struct Pass{VkRenderPass GetRenderPass()const{return reinterpret_cast<VkRenderPass>(123);}};
 struct BlitScreen{
     Device device;Filters filters;int scaling_filter=1;VkFormat swapchain_view_format=CaptureFormat;std::unique_ptr<Pass> window_adapt;
+    Scheduler scheduler;std::list<int>layers;
+    std::unique_ptr<Pass>CreateWindowAdaptPass(int,VkFormat){++pass_creates;factory_gate("pass");maybe_fail("pass");return std::make_unique<Pass>();}
     void WaitIdle(){++idle_calls;}
     void SetWindowAdaptPass(){++pass_creates;factory_gate("pass");maybe_fail("pass");window_adapt=std::make_unique<Pass>();}
     vk::Framebuffer CreateFramebuffer(const Layout::FramebufferLayout&,VkImageView,VkFormat);
@@ -122,6 +125,7 @@ struct RendererVulkan{
 @RENDERER@
 }
 constexpr bool has_content_state = @HAS_CONTENT_STATE@;
+constexpr bool transactional_pass = @TRANSACTIONAL_PASS@;
 static bool empty(const Vulkan::Frame&frame){return !frame.width&&!frame.height&&!frame.image&&!frame.image_view&&!frame.framebuffer;}
 int main(int argc,char**argv){
     if(argc!=2)return 2;
@@ -179,7 +183,7 @@ int main(int argc,char**argv){
         if(!draws)renderer.RenderAppletCaptureLayer(layers);
         check(renderer.applet_frame.image&&renderer.applet_frame.image_view&&renderer.applet_frame.framebuffer,"successful creation not published");
         check(last_layers==std::vector<int>({2,1}),"applet filtering or order changed");
-        const int expected_passes=(mode=="pass"||mode=="host-pass"||mode=="gate-pass")?2:1;
+        const int expected_passes=(mode=="pass"||mode=="host-pass"||mode=="gate-pass"||(transactional_pass&&(mode.find("framebuffer")!=std::string::npos||mode=="sequence")))?2:1;
         check(pass_creates==expected_passes&&idle_calls==expected_passes,"helper retry side effects changed");
         const auto before=creates;const int old_draws=draws;auto image=renderer.applet_frame.image.state;
         renderer.RenderAppletCaptureLayer(layers);

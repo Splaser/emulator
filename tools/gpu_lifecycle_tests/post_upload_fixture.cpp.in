@@ -181,7 +181,7 @@ struct Layer {
     bool Draw(size_t i,PresentPushConstants&p,VkDescriptorSet&d,bool accelerated=false){RasterizerVulkan r{accelerated};return ConfigureDraw(&p,&d,r,{},i,Tegra::FramebufferConfig{},Layout::FramebufferLayout{});}
 };
 @METHODS@
-struct Frame{u32 width=2,height=1;vk::Handle image{1},image_view{2},framebuffer{3};};
+struct Frame{u32 width=2,height=1;VkFormat image_view_format=VK_FORMAT_UNDEFINED;vk::Handle image{1},image_view{2},framebuffer{3};};
 static constexpr VkExtent2D CaptureImageSize{2,1};static constexpr VkFormat CaptureFormat=VK_FORMAT_R8G8B8A8_UNORM;
 static vk::Handle CreateWrappedImage(int&,VkExtent2D,VkFormat){return {1};}
 static vk::Handle CreateWrappedImageView(const Device&,vk::Handle&,VkFormat){return {2};}

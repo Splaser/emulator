@@ -528,3 +528,16 @@ join gates, partial native effects and eleven exact controls are deterministic.
 Resources, source ConfigureDraw, native queues/progress and preparation/presentation
 collaborators are controlled fixtures. See
 [scope and Windows results](../../docs/M4_P2_COMPOSITION_FRAME_RETIREMENT.md).
+
+
+`run_frame_recreation_tests.py --repeat 3` extracts actual PresentManager
+RecreateFrame, the Frame declaration, complete Blit pass factory/DrawToFrame/both
+CreateFramebuffer overloads and checked WaitIdle, plus actual applet failure/
+refusal bodies. Pinned `--baseline` and `--candidate` retain publication, parent
+order and shrink witnesses. Complete tuples and cached metadata publish only
+after candidate creation; sync object identities remain unchanged. Six shrink
+combinations, three pooled Frame formats and reverse reuse, zero count, native/
+host allocation faults, semaphore observation, retries, shutdown and eleven exact
+controls are covered. Native factories/use graphs and Layer/Window Draw are
+collaborators; no native Vulkan/game/content-readiness acceptance. See
+[scope and Windows results](../../docs/M4_P2_FRAME_RECREATION_PUBLICATION.md).

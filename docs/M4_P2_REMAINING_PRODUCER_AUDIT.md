@@ -1,5 +1,13 @@
 # M4 P2: remaining actual producer and ownership boundaries
 
+The [Frame recreation follow-up](M4_P2_FRAME_RECREATION_PUBLICATION.md) prepares
+complete image/view/framebuffer and Blit pass candidates before publication,
+retains old parents/children and metadata on failure, preserves synchronization
+identities, records per-Frame view format and bounds shrunk slot indices. Applet
+Failed is independent. Fixed pool versus recreated swapchain count,
+free/in-flight bookkeeping and presentation-worker failure remain separate from
+this selected-Frame transaction; no runtime pool resizing is inferred.
+
 The [final composition follow-up](M4_P2_COMPOSITION_FRAME_RETIREMENT.md) retires a
 failed enqueue's checked prefix before target/source owners may unwind, preserves
 applet Failed, and prevents an unsettled dequeued presentation Frame from being

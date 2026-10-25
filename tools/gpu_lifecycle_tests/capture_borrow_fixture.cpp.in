@@ -99,7 +99,7 @@ struct Scheduler {
     std::unique_ptr<Master> master_semaphore{std::make_unique<Master>()};
 };
 @CHECKED_METHODS@
-struct Frame {unsigned width{},height{};vk::Image image;vk::Child image_view{"view.destroy"};vk::Child framebuffer{"framebuffer.destroy"};};
+struct Frame {unsigned width{},height{};VkFormat image_view_format=VK_FORMAT_UNDEFINED;vk::Image image;vk::Child image_view{"view.destroy"};vk::Child framebuffer{"framebuffer.destroy"};};
 struct Blit {
     vk::Child CreateFramebuffer(const Layout::FramebufferLayout&,VkImageView,VkFormat){inject("framebuffer-create");return {"framebuffer.destroy"};}
     void DrawToFrame(int&,Frame*,std::span<const Tegra::FramebufferConfig>,const Layout::FramebufferLayout&,int,VkFormat){event("borrow.begin");borrowed=true;inject("draw");if(mode=="internal-finish"){native_pending=true;throw std::runtime_error("split");}}

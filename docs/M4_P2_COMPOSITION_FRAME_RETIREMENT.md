@@ -170,3 +170,9 @@ here; resource preparation itself is a collaborator.
 HostMemory remap/protection remains high risk. M4 incomplete, F2/F3 open and
 GuestBackingAdmission Unknown. Failed output never becomes readable merely because
 its native prefix was drained, a scope ended or a slot index stayed unchanged.
+
+
+Follow-up: [Frame recreation publication](M4_P2_FRAME_RECREATION_PUBLICATION.md)
+closes the selected-Frame construction/replacement and Blit metadata/shrink
+boundary. Per-Frame format repair is independent of the global pass key. The
+borrowed-output retirement and presentation failure policies above are preserved.

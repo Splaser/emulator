@@ -42,8 +42,11 @@ blit_path = 'src/video_core/renderer_vulkan/vk_blit_screen.cpp'
 present_path = 'src/video_core/renderer_vulkan/vk_present_manager.cpp'
 blit = read(blit_path)
 idle = block(blit, 'void BlitScreen::WaitIdle()')
-assert 'WaitIdle();\n\n        // Update window adapt pass' in blit
-assert 'WaitIdle();\n        SetWindowAdaptPass();' in blit
+if 'CreateWindowAdaptPass(' in blit:
+    assert blit.count('WaitIdle();\n        auto candidate = CreateWindowAdaptPass(')==2
+else:
+    assert 'WaitIdle();\n\n        // Update window adapt pass' in blit
+    assert 'WaitIdle();\n        SetWindowAdaptPass();' in blit
 present = read(present_path)
 methods = '\n'.join(block(present, marker) for marker in [
     'void PresentManager::Present(', 'void PresentManager::WaitPresent()',

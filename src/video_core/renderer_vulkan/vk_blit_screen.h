@@ -64,7 +64,8 @@ public:
 
 private:
     void WaitIdle();
-    void SetWindowAdaptPass();
+    std::unique_ptr<WindowAdaptPass> CreateWindowAdaptPass(Settings::ScalingFilter requested_filter,
+                                                           VkFormat requested_format);
     vk::Framebuffer CreateFramebuffer(const VkImageView& image_view, VkExtent2D extent,
                                       VkRenderPass render_pass);
 

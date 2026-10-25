@@ -1,5 +1,27 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-25: transactional Frame recreation, Blit publication and slot shrink
+
+From `7e8c2d1b8c`, eight old Frame/Blit publication/parent-order/shrink witnesses
+reproduce. RecreateFrame now prepares image/view/framebuffer locally and swaps
+only those resources after success; old children retire before parents and
+cmdbuf/render_ready/present_done identities remain unchanged. Blit prepares its
+pass and requested Frame before committing filter/format/count/layers/index;
+failed creation preserves the previous publication. CreateFramebuffer shares the
+same boundary. New per-Frame image_view_format prevents same-size pooled slots
+from skipping format repair, including reverse reuse against a differently keyed
+Blit pass. Six shrink combinations normalize image_index after commit; zero count
+refuses before effects. Applet construction can retry, while Failed Draw remains
+sticky. Candidate/fixed 38 normal/five terminal/eleven controls pass three repeats,
+with composition/helper/capture/applet/idle/shutdown/native-source regressions and
+four zero-diagnostic Windows COFF units. See [scope/next audit](M4_P2_FRAME_RECREATION_PUBLICATION.md)
+and [results/commands](M4_P2_FRAME_RECREATION_PUBLICATION_RESULTS.json). Current-run
+artifacts are cleaned; main untouched. Next: fixed presentation pool versus
+recreated swapchain count, free/in-flight bookkeeping, and CopyToSwapchain/
+PresentThread failure while a Frame remains borrowed. SetImageCount currently
+runs at construction; RecreateSwapchain does not resize the Frame pool. HostMemory high risk; M4
+incomplete, F2/F3 open and GuestBackingAdmission Unknown.
+
 ## 2026-10-25: final composition and borrowed target Frame retirement
 
 From `7b2225e854`, twelve low-level Frame-borrow witnesses reproduce. Final

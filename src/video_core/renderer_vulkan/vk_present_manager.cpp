@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <type_traits>
+#include <utility>
+
 #include "common/settings.h"
 #include "common/terminal_fail_stop.h"
 #include "common/thread.h"
@@ -202,12 +205,15 @@ void PresentManager::Present(Frame* frame) {
 
 void PresentManager::RecreateFrame(Frame* frame, u32 width, u32 height, VkFormat image_view_format,
                                    VkRenderPass rd) {
+    scheduler.RequireNativeBorrowAdmission();
     auto& dld = device.GetLogical();
+    Frame candidate{};
 
-    frame->width = width;
-    frame->height = height;
+    candidate.width = width;
+    candidate.height = height;
+    candidate.image_view_format = image_view_format;
 
-    frame->image = memory_allocator.CreateImage({
+    candidate.image = memory_allocator.CreateImage({
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext = nullptr,
         .flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT,
@@ -230,11 +236,11 @@ void PresentManager::RecreateFrame(Frame* frame, u32 width, u32 height, VkFormat
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     });
 
-    frame->image_view = dld.CreateImageView({
+    candidate.image_view = dld.CreateImageView({
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
-        .image = *frame->image,
+        .image = *candidate.image,
         .viewType = VK_IMAGE_VIEW_TYPE_2D,
         .format = image_view_format,
         .components =
@@ -254,8 +260,8 @@ void PresentManager::RecreateFrame(Frame* frame, u32 width, u32 height, VkFormat
             },
     });
 
-    const VkImageView image_view{*frame->image_view};
-    frame->framebuffer = dld.CreateFramebuffer({
+    const VkImageView image_view{*candidate.image_view};
+    candidate.framebuffer = dld.CreateFramebuffer({
         .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
@@ -266,6 +272,19 @@ void PresentManager::RecreateFrame(Frame* frame, u32 width, u32 height, VkFormat
         .height = height,
         .layers = 1,
     });
+    // No work records this candidate. Swap only the resource tuple after every
+    // child exists; leave command buffer, semaphores and fence identities intact.
+    static_assert(std::is_nothrow_swappable_v<vk::Image>);
+    static_assert(std::is_nothrow_swappable_v<vk::ImageView>);
+    static_assert(std::is_nothrow_swappable_v<vk::Framebuffer>);
+    std::swap(frame->image, candidate.image);
+    std::swap(frame->image_view, candidate.image_view);
+    std::swap(frame->framebuffer, candidate.framebuffer);
+    frame->width = candidate.width;
+    frame->height = candidate.height;
+    frame->image_view_format = candidate.image_view_format;
+    // candidate now retires old framebuffer, view, image in that order. The
+    // owning caller must already have completed old host/presentation/native use.
 }
 
 void PresentManager::WaitPresent() {

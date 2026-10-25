@@ -25,6 +25,7 @@ class Swapchain;
 struct Frame {
     u32 width;
     u32 height;
+    VkFormat image_view_format{VK_FORMAT_UNDEFINED};
     vk::Image image;
     vk::ImageView image_view;
     vk::Framebuffer framebuffer;
