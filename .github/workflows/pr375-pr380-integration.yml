@@ -118,6 +118,8 @@ jobs:
         run: python tools/physical_coherency_tests/run_device_cache_owner_tests.py
       - name: Verify terminal direct rasterizer ingress and owner join
         run: python tools/gpu_lifecycle_tests/run_thread_tests.py --repeat 3 --handoff-controls
+      - name: Verify nvhost_ctrl callback cancellation, drain and final-owner lifetime
+        run: python tools/physical_coherency_tests/run_nvhost_ctrl_owner_tests.py --repeat 5
       - name: Verify retained GPU address-space and channel owner publication
         run: |
           python tools/gpu_lifecycle_tests/run_owner_publication_tests.py --repeat 3
@@ -328,6 +330,8 @@ jobs:
           name: pr375-pr380-validation-${{ github.sha }}
           path: |
             .diagnostics/pr375-pr380/*.txt
+            .diagnostics/m4-nvhost-owner/*.json
+            .diagnostics/m4-nvhost-owner/*.log
             .diagnostics/m3b-first-registration/extraction.json
             .diagnostics/m3b-first-registration/*.cpp
             .diagnostics/m3b-registration-pipeline/extraction.json
