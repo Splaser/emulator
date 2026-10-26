@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstring>
+#include <new>
 
 #include "common/algorithm.h"
 #include "common/assert.h"
@@ -23,7 +24,17 @@ void State::BindRasterizer(VideoCore::RasterizerInterface* rasterizer_) {
 }
 
 void State::ProcessExec(const bool is_linear_) {
-    accumulator.Begin(static_cast<size_t>(regs.line_length_in) * regs.line_count);
+    const size_t upload_size = static_cast<size_t>(regs.line_length_in) * regs.line_count;
+    try {
+        accumulator.Begin(upload_size);
+    } catch (const std::bad_alloc&) {
+        LOG_ERROR(HW_GPU,
+                  "Inline upload allocation failed: bytes={}, line_length={}, line_count={}, "
+                  "destination=0x{:016x}, pitch={}, linear={}",
+                  upload_size, regs.line_length_in, regs.line_count, regs.dest.Address(),
+                  regs.dest.pitch, is_linear_);
+        throw;
+    }
     is_linear = is_linear_;
 }
 

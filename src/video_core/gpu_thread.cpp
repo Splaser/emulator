@@ -122,6 +122,10 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
                 }
                 request_failure_shutdown(exception.what());
             } catch (const std::bad_alloc& exception) {
+                const auto* submit = std::get_if<SubmitListCommand>(&next.data);
+                LOG_ERROR(HW_GPU,
+                          "GPU command allocation failed: command_type={}, fence={}, channel={}",
+                          next.data.index(), next.fence, submit ? submit->channel : -1);
                 request_failure_shutdown(exception.what());
             }
         }
