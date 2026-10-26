@@ -830,6 +830,9 @@ std::pair<typename P::ImageView*, bool> TextureCache<P>::TryFindFramebufferImage
     }();
 
     const auto GetImageViewForFramebuffer = [&](ImageId image_id) {
+        // Presentation reads the image just like texture sampling: CPU writes and newer
+        // overlapping render targets must be made visible before taking its view.
+        PrepareImage(image_id, false, false);
         ImageViewInfo info{ImageViewType::e2D, view_format};
         if (config.blending == Tegra::BlendMode::Opaque) {
             info.x_source = static_cast<u8>(SwizzleSource::R);
