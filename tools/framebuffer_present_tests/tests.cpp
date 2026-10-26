@@ -41,6 +41,8 @@ struct ImageCopy { std::size_t src, dst, size; };
 struct AliasedImage { std::vector<ImageCopy> copies; ImageId id; };
 struct Image {
     DAddr cpu_addr{};
+    DAddr gpu_addr{};
+    std::size_t guest_size_bytes = 16;
     std::vector<unsigned> pixels{10, 10, 10, 10};
     std::vector<unsigned> cpu_pixels{20, 20, 20, 20};
     std::vector<std::size_t> image_view_ids{1};
@@ -51,6 +53,14 @@ struct Image {
     bool IsRescaled() const { return True(flags & Rescaled); }
 };
 using ImageBase = Image;
+enum class ShadowKind { Texture };
+struct PhysicalShadow {
+    unsigned reads{}, writes{};
+    void Observe(int&, DAddr, std::size_t, ShadowKind, bool write, DAddr) {
+        if (write) ++writes; else ++reads;
+    }
+};
+#include "framebuffer_present_config.inc"
 struct ImageMapView { ImageId image_id{}; };
 struct ImageView { ImageId image_id{}; ImageViewInfo info{}; };
 struct Params { using ImageView = ::ImageView; };
@@ -84,7 +94,7 @@ template<class P> struct TextureCache {
         ++uploads;
     }
     void TrackImage(Image& image, ImageId) { image.flags |= Tracked; ++tracks; }
-    void MarkModification(Image&) { ++modifications; }
+    void MarkModification(Image&, ShadowKind = ShadowKind::Texture) { ++modifications; }
     bool ImageCanRescale(Image&) { return allow_rescale; }
     void ScaleUp(Image& image) { image.flags |= Rescaled; image.image_view_ids.clear(); ++scales; }
     void ScaleDown(Image& image) { image.flags &= ~Rescaled; image.image_view_ids.clear(); ++scales; }
@@ -96,7 +106,13 @@ template<class P> struct TextureCache {
     }
     std::pair<typename P::ImageView*, bool> TryFindFramebufferImageView(const Tegra::FramebufferConfig&, DAddr);
     void SynchronizeAliases(ImageId);
+#if FRAMEBUFFER_PRESENT_HAS_SHADOW
+    PhysicalShadow* physical_shadow{};
+    int* gpu_memory{};
+    void PrepareImage(ImageId, bool, bool, ShadowKind = ShadowKind::Texture);
+#else
     void PrepareImage(ImageId, bool, bool);
+#endif
 };
 #include "framebuffer_present.inc"
 void require(bool ok, const char* message) {
@@ -165,6 +181,16 @@ int main() try {
     clean.slot_images[1].image_view_ids.clear(); clean.slot_images[2].image_view_ids.clear();
     require(!clean.TryFindFramebufferImageView(config, address).first,
             "image without display views must fall back");
+#if FRAMEBUFFER_PRESENT_HAS_SHADOW
+    TextureCache<Params> shadow_cache;
+    PhysicalShadow shadow;
+    int memory = 0;
+    shadow_cache.Add(1, address, 1);
+    shadow_cache.physical_shadow = &shadow;
+    shadow_cache.gpu_memory = &memory;
+    shadow_cache.TryFindFramebufferImageView(config, address);
+    require(shadow.reads == 1 && shadow.writes == 0, "presentation changed shadow observation into a write");
+#endif
     std::cout << "PASS: partial aliases, refresh, later writes, ordering, rescale, selection and fallback controls\n";
     return 0;
 } catch (const std::exception& e) {

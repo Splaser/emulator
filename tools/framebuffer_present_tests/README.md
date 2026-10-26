@@ -22,3 +22,8 @@ result only validates this missing preparation path under controlled dependencie
 acceptance still requires a stable save UI on both alternating buffers, plus regression
 checks for normal rendering and resolution scaling. It does not explain or fix the earlier
 invalid compute address / bad_alloc sequence, and does not change ATOM_cas.
+
+The fixture also accepts personal-main's existing optional `ShadowKind` argument and
+physical-shadow read observation. The generator detects that signature without changing
+production hooks. A control verifies that presentation observes a read, not a new write;
+this does not validate the physical-shadow subsystem or GPU completion.

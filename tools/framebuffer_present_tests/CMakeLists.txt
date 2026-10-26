@@ -8,10 +8,11 @@ if(PRESENT_SOURCE_REVISION)
     list(APPEND revision_args --revision "${PRESENT_SOURCE_REVISION}")
 endif()
 set(generated "${CMAKE_CURRENT_BINARY_DIR}/framebuffer_present.inc")
-add_custom_command(OUTPUT "${generated}"
+set(generated_config "${CMAKE_CURRENT_BINARY_DIR}/framebuffer_present_config.inc")
+add_custom_command(OUTPUT "${generated}" "${generated_config}"
     COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/generate.py" "${generated}" ${revision_args}
     DEPENDS generate.py ../../src/video_core/texture_cache/texture_cache.h)
-add_executable(framebuffer_present_tests tests.cpp "${generated}")
+add_executable(framebuffer_present_tests tests.cpp "${generated}" "${generated_config}")
 target_compile_features(framebuffer_present_tests PRIVATE cxx_std_20)
 target_include_directories(framebuffer_present_tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 enable_testing()

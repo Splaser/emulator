@@ -26,3 +26,6 @@ methods = []
 for signature in ["std::pair<typename P::ImageView*, bool> TextureCache<P>::TryFindFramebufferImageView(", "void TextureCache<P>::SynchronizeAliases(", "void TextureCache<P>::PrepareImage("]:
     methods.append("template <class P>\n" + definition(source, signature))
 args.output.write_text("\n\n".join(methods) + "\n")
+
+args.output.with_name("framebuffer_present_config.inc").write_text(
+    "#define FRAMEBUFFER_PRESENT_HAS_SHADOW " + str(int("ShadowKind shadow_kind" in methods[-1])) + "\n")
