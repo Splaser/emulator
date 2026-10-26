@@ -23,13 +23,17 @@ struct FakeHostSyncpoints {
     u32 value = 39388;
     u64 next = 0;
     std::map<u64, std::pair<u32, std::function<void()>>> actions;
+    std::function<void()> finish_active_callback;
     template<class F> u64 RegisterHostAction(u32 id, u32 target, F action) {
         if (id != 1) throw std::runtime_error("unexpected syncpoint");
         if (value >= target) { action(); return 0; }
         actions.emplace(++next, std::pair{target, std::function<void()>{action}});
         return next;
     }
-    void DeregisterHostAction(u32, u64 handle) { actions.erase(handle); }
+    void DeregisterHostAction(u32, u64 handle) {
+        if (auto finish = std::move(finish_active_callback)) finish();
+        actions.erase(handle);
+    }
     void Increment() {
         ++value;
         for (auto it = actions.begin(); it != actions.end();) {
@@ -103,7 +107,32 @@ int main() try {
     ctrl.system.host.manager.Increment();
     require(event.signalled, "allocation event did not signal");
     require(wait(100, false, 39400, MaxNvEvents) == NvResult::BadParameter, "invalid slot accepted");
+    require(wait(100, false, 39400) == NvResult::Timeout, "active callback setup failed");
+    // Model a callback paused inside Signal after Waiting became Signalling.
+    // Deregistration must join that tail before Clear or slot reuse can proceed.
+    e.status = EventState::Signalling;
+    bool joined = false;
+    ctrl.system.host.manager.finish_active_callback = [&] {
+        require(e.status == EventState::Cancelling, "cancel did not claim event before join");
+        require(e.wait_handle != 0, "callback handle cleared before join");
+        event.Signal();
+        e.status = EventState::Signalled;
+        joined = true;
+    };
+    require(ctrl.IocCtrlClearEventWait(clear) == NvResult::Success, "active callback cancel failed");
+    require(joined, "cancel skipped active callback join");
+    require(!event.signalled && e.status == EventState::Cancelled && e.wait_handle == 0,
+            "callback tail escaped cancellation");
+    require(ctrl.system.host.manager.actions.empty(), "active callback handle retained");
+    require(wait(100, false, 39401) == NvResult::Timeout, "slot reuse after join failed");
+    ctrl.system.host.manager.Increment();
+    require(!event.signalled, "cancelled threshold signalled reused slot");
+    ctrl.system.host.manager.Increment();
+    require(event.signalled, "reused slot did not complete at new threshold");
+    require(ctrl.IocCtrlClearEventWait(clear) == NvResult::Success, "completed clear failed");
+    require(ctrl.IocCtrlClearEventWait(clear) == NvResult::Success, "duplicate clear failed");
     std::cout << "PASS: repeated cancellation, zero timeout, asynchronous rearm, exact completion, allocation, invalid slot\n";
+    std::cout << "PASS: active callback join before clear, cancelled-threshold reuse, duplicate clear\n";
     return 0;
 } catch (const std::exception& error) {
     std::cerr << "FAIL: " << error.what() << '\n';

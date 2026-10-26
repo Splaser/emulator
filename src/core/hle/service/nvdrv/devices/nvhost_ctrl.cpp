@@ -250,12 +250,15 @@ NvResult nvhost_ctrl::IocCtrlClearEventWait(IocCtrlEventClearParams& params) {
     auto lock = NvEventsLock();
 
     auto& event = events[event_id];
-    if (event.status.exchange(EventState::Cancelling, std::memory_order_acq_rel) ==
-        EventState::Waiting) {
-        auto& host1x_syncpoint_manager = system.Host1x().GetSyncpointManager();
-        host1x_syncpoint_manager.DeregisterHostAction(event.assigned_syncpt, event.wait_handle);
+    const auto previous_status =
+        event.status.exchange(EventState::Cancelling, std::memory_order_acq_rel);
+    // Signalling is still an active callback. Join it before publishing Cancelled
+    // or clearing/reusing its KEvent; EventState alone is not completion.
+    auto& host1x_syncpoint_manager = system.Host1x().GetSyncpointManager();
+    host1x_syncpoint_manager.DeregisterHostAction(event.assigned_syncpt, event.wait_handle);
+    event.wait_handle = {};
+    if (previous_status == EventState::Waiting) {
         syncpoint_manager.UpdateMin(event.assigned_syncpt);
-        event.wait_handle = {};
     }
     event.status.store(EventState::Cancelled, std::memory_order_release);
     event.kevent->Clear();
