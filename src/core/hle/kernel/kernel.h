@@ -109,6 +109,9 @@ public:
 
     /// Clears all resources in use by the kernel instance.
     void Shutdown();
+    // Cold ownership bootstrap must refuse reuse of this thread's native Kernel
+    // TLS; the query never dereferences a possibly retired binding.
+    static bool HasCurrentHostKernelBinding() noexcept;
 
     /// Close all active services in use by the kernel instance.
     void CloseServices();

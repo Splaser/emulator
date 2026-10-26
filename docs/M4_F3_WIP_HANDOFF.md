@@ -1,5 +1,24 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-26: restricted real native owner foundation
+
+The next gate now has Windows native evidence using a private owned System,
+actual KProcess/KEvent and actual ProcessCohortStop, without test-scope borrowed
+foundation objects. Positive, quarantined Unknown and unpolled closures pass x3;
+two foreign-release fail-stop controls and the exact missing-foundation native
+counterfactual also pass x3. Three final production units compile separately to
+real Windows objects. Details, local build exceptions and all evidence are in
+[the native owner record](M4_NATIVE_OWNER_AND_REMAINING_GATES.md) and
+[results](M4_NATIVE_OWNER_RESULTS.json).
+
+This accepts the restricted cold combination only. Existing active guest/NVDRV
+adoption remains unproved; mapping/alias freeze is next, followed by native GPU
+completion with retained backing, then the first restricted Vulkan Copy. Do not
+expand passed controlled compositions or infer mapping/GPU authority from this
+owner result. Ordinary DeviceMemory remains untracked, all unproved aliases
+refuse, F2/F3 remain Open and GuestBackingAdmission remains Unknown. CI is deferred;
+this task modifies only the issue branch, not main.
+
 ## 2026-10-26: one active NVDRV/Host1x/cohort/GPU owner graph
 
 From `ae5e649630`, actual Module/session retirement, nvhost_ctrl callback,

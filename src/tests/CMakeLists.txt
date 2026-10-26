@@ -63,6 +63,18 @@ target_link_libraries(controlled_cpu_scheduler_tests PRIVATE common core Vulkan:
     ${PLATFORM_LIBRARIES} Catch2::Catch2WithMain Threads::Threads)
 add_test(NAME controlled_cpu_scheduler_tests COMMAND controlled_cpu_scheduler_tests)
 set_tests_properties(controlled_cpu_scheduler_tests PROPERTIES TIMEOUT 180)
+
+# Separate process: native Kernel TLS must never be reused across Systems. This
+# owner acceptance uses real objects and an owned Null renderer, without Vulkan.
+add_executable(restricted_process_owner_tests core/restricted_process_owner.cpp)
+set_property(TARGET restricted_process_owner_tests PROPERTY UNITY_BUILD OFF)
+target_link_libraries(restricted_process_owner_tests PRIVATE common core Vulkan::Headers
+    ${PLATFORM_LIBRARIES} Catch2::Catch2WithMain Threads::Threads)
+add_test(NAME native_restricted_process_owner COMMAND restricted_process_owner_tests "[native-restricted-owner]")
+set_tests_properties(native_restricted_process_owner PROPERTIES TIMEOUT 90)
+add_test(NAME native_restricted_owner_unknown COMMAND restricted_process_owner_tests "[native-owner-unknown]")
+add_test(NAME native_restricted_owner_unpolled COMMAND restricted_process_owner_tests "[native-owner-unpolled]")
+set_tests_properties(native_restricted_owner_unknown native_restricted_owner_unpolled PROPERTIES TIMEOUT 90)
 # A new System in the same host thread would reuse KernelCore's TLS dummy KThread
 # from the first System. Keep both native owners intact and isolate their processes.
 add_test(NAME native_f3_witness COMMAND controlled_cpu_scheduler_tests "[f3]")

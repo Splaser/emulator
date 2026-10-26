@@ -15,6 +15,8 @@ add_library(core STATIC
     constants.h
     core.cpp
     core.h
+    restricted_process_owner.cpp
+    restricted_process_owner.h
     core_timing.cpp
     core_timing.h
     cpu_manager.cpp

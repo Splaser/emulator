@@ -402,6 +402,8 @@ struct KernelCore::Impl {
         return host_thread_id;
     }
 
+    static inline thread_local bool host_dummy_initialized{false};
+
     // Gets the dummy KThread for the caller, allocating a new one if this is the first time
     LTO_NOINLINE KThread* GetHostDummyThread(KThread* existing_thread) {
         const auto initialize{[](KThread* thread) LTO_NOINLINE {
@@ -411,6 +413,7 @@ struct KernelCore::Impl {
 
         thread_local KThread raw_thread{system.Kernel()};
         thread_local KThread* thread = existing_thread ? existing_thread : initialize(&raw_thread);
+        host_dummy_initialized = true;
         return thread;
     }
 
@@ -894,6 +897,11 @@ struct KernelCore::Impl {
 
 KernelCore::KernelCore(Core::System& system) : impl{std::make_unique<Impl>(system, *this)} {}
 KernelCore::~KernelCore() = default;
+
+bool KernelCore::HasCurrentHostKernelBinding() noexcept {
+    return Impl::host_dummy_initialized || Impl::current_thread != nullptr ||
+           Impl::host_thread_id != UINT8_MAX;
+}
 
 void KernelCore::SetMulticore(bool is_multicore) {
     impl->SetMulticore(is_multicore);
