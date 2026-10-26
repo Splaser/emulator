@@ -188,6 +188,13 @@ NvResult nvhost_ctrl::IocCtrlEventWait(IocCtrlEventWaitParams& params, bool is_a
         return NvResult::BadParameter;
     }
 
+    if (event.status.load(std::memory_order_acquire) == EventState::Signalling) {
+        // Signal can wake the guest before the callback publishes Signalled.
+        // Join that old callback before reusing its slot or replacing its handle.
+        host1x_syncpoint_manager.DeregisterHostAction(event.assigned_syncpt, event.wait_handle);
+        event.wait_handle = {};
+    }
+
     if (event.IsBeingUsed()) {
         return NvResult::BadParameter;
     }
