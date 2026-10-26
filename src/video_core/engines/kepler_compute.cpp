@@ -7,6 +7,7 @@
 #include "core/core.h"
 #include "video_core/engines/kepler_compute.h"
 #include "video_core/engines/maxwell_3d.h"
+#include "video_core/invalid_gpu_address.h"
 #include "video_core/memory_manager.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/textures/decoders.h"
@@ -57,6 +58,12 @@ void KeplerCompute::CallMethod(u32 method, u32 method_argument, [[maybe_unused]]
     }
     case KEPLER_COMPUTE_REG_INDEX(launch): {
         const GPUVAddr launch_desc_loc = regs.launch_desc_loc.Address();
+        constexpr size_t qmd_size = LaunchParams::NUM_LAUNCH_PARAMETERS * sizeof(u32);
+        if (!memory_manager.IsWithinGPUAddressRange(launch_desc_loc, qmd_size)) {
+            LOG_ERROR(HW_GPU, "QMD outside GPU address space: address=0x{:x}, bytes={}",
+                      launch_desc_loc, qmd_size);
+            throw VideoCommon::InvalidGpuAddress{};
+        }
 
         constexpr size_t dispatch_size = 3 * sizeof(u32);
         const GPUVAddr dispatch_address = launch_desc_loc + offsetof(LaunchParams, grid_dim_x);

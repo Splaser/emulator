@@ -18,6 +18,7 @@
 #include "video_core/dma_pusher.h"
 #include "video_core/gpu.h"
 #include "video_core/gpu_thread.h"
+#include "video_core/invalid_gpu_address.h"
 #include "video_core/renderer_base.h"
 #include "video_core/texture_cache/image_size.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
@@ -112,6 +113,8 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
             } catch (const VideoCommon::ControlledProducerConflict& exception) {
                 request_failure_shutdown(exception.what());
             } catch (const VideoCommon::UnsupportedGatherMapping& exception) {
+                request_failure_shutdown(exception.what());
+            } catch (const VideoCommon::InvalidGpuAddress& exception) {
                 request_failure_shutdown(exception.what());
             } catch (const VideoCommon::InvalidImageSize& exception) {
                 request_failure_shutdown(exception.what());

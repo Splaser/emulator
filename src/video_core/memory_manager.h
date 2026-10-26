@@ -173,8 +173,8 @@ public:
         return std::unique_lock{page_table_guard};
     }
 
-    bool IsWithinGPUAddressRange(GPUVAddr gpu_addr) const {
-        return gpu_addr < address_space_size;
+    bool IsWithinGPUAddressRange(GPUVAddr gpu_addr, u64 size = 1) const {
+        return gpu_addr < address_space_size && size <= address_space_size - gpu_addr;
     }
 
     PTEKind GetPageKind(GPUVAddr gpu_addr) const;
