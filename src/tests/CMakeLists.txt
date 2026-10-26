@@ -52,6 +52,11 @@ target_link_libraries(controlled_cpu_scheduler_tests PRIVATE common core Vulkan:
 add_test(NAME controlled_cpu_scheduler_tests COMMAND controlled_cpu_scheduler_tests)
 set_tests_properties(controlled_cpu_scheduler_tests PROPERTIES TIMEOUT 180)
 
+# Keep the packet assembler regression runnable without a renderer or device.
+add_executable(inline_upload_tests video_core/inline_upload.cpp)
+target_include_directories(inline_upload_tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
+add_test(NAME inline_upload_tests COMMAND inline_upload_tests)
+
 if (CITRON_USE_PRECOMPILED_HEADERS)
     target_precompile_headers(tests PRIVATE precompiled_headers.h)
 endif()
