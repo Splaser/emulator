@@ -16,6 +16,7 @@ p.add_argument('--baseline', action='store_true')
 p.add_argument('--candidate', action='store_true')
 p.add_argument('--revision', default='33ca3eb2ad540b669deed958eedb751be9cafb20')
 p.add_argument('--output-dir', type=Path)
+p.add_argument('--emit-only', action='store_true', help='Emit the actual Module/session/Host1x owner fixture without running it')
 a = p.parse_args()
 if a.repeat < 1 or (a.baseline and a.candidate):
     p.error('positive repeats; one source mode')
@@ -162,7 +163,18 @@ def execute(name, text, cases, expected=None, code=0, headers=None):
     print('PASS ' + name, flush=True)
 
 
-if a.baseline:
+if a.emit_only:
+    inputs.update(['src/video_core/host1x/syncpoint_manager.h', 'src/common/owned_retirement.h',
+                   'src/common/producer_drain.h', 'src/common/retained_backing_storage.h',
+                   'src/common/terminal_fail_stop.h', 'src/core/hle/service/nvdrv/nvdata.h',
+                   'tools/physical_coherency_tests/run_nvhost_ctrl_owner_tests.py'])
+    (out / 'production.cpp').write_text(source)
+    (out / 'emission.json').write_text(json.dumps({
+        'sha256': {n: hashlib.sha256(raw(n)).hexdigest() for n in sorted(inputs)},
+        'compiled': False}, indent=2) + '\n')
+    print('EMITTED actual Module/session/Host1x owner fixture', flush=True)
+    raise SystemExit(0)
+elif a.baseline:
     execute('historical-queued', source, ['queued'], 'FAIL queued callback used retired target', 91)
     execute('historical-active', source, ['active'], 'FAIL event freed during active Host1x callback', 91)
     execute('historical-clear-active', source, ['clear-active'], 'FAIL clear overtook active callback', 91)

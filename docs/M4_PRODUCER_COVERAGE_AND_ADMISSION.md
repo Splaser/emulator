@@ -6,6 +6,15 @@ coverage ledger, not a certificate that all producers are closed. Existing
 per-feature reports provide controlled evidence; the owner chain below defines
 what must remain held together. GuestBackingAdmission stays Unknown in code.
 
+The [2026-10-26 active NVDRV/cohort/GPU composition](M4_P2_NVDRV_COHORT_GPU_COMPOSITION.md)
+now places actual Module/session/retirement, Host1x increment/callback and
+ProcessCohortStop/ThreadManager in one live fixture graph. Eight schedules and
+eight exact controls pass x5, with native collaborators explicitly bounded.
+BackendsStopped with active Host1x/GPU work and a pre-resolved alias store remain
+coverage-negative witnesses. This supersedes the previously pending named
+combined-fixture milestone; native KProcess/System/service/mapping closure and
+GPU completion/visibility are still open. No admission or production change.
+
 The [nvhost_ctrl review and named owner composition](M4_P2_NVHOST_CTRL_OWNER_COMPOSITION.md)
 adds repeated/concurrent cancellation, final facade capture release on Host1x
 completion/cancellation, and dispatch closure during final owner destruction.
@@ -13,7 +22,7 @@ Sixteen schedules/one terminal case/nine exact controls pass x10. The active
 callback with an otherwise drained dispatch domain remains an explicit
 counterexample; GuestBackingAdmission stays Unknown. This is an active named
 NVDRV/Host1x owner graph, separate from the earlier Audio/Memory/GPU fixture;
-a single joint actual cohort/service/GPU graph is still the next boundary.
+that separate test did not establish the combined graph now exercised above.
 
 The [nvhost_ctrl lifetime repair](M4_P2_NVHOST_CTRL_CALLBACK_LIFETIME.md) now
 tests the actual Module/session retirement -> raw Host1x callback chain with

@@ -1,5 +1,26 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-26: one active NVDRV/Host1x/cohort/GPU owner graph
+
+From `ae5e649630`, actual Module/session retirement, nvhost_ctrl callback,
+SyncptIncrManager/SyncpointManager, ProcessCohortStop and ThreadManager now run
+in one controlled active scenario. Eight schedules/eight exact controls pass x5;
+nvhost regression and original Audio/Memory/GPU composition pass x3. Seven fresh
+real Windows production units compile to AMD64 COFF objects. No production
+defect was reproduced; only test emission/composition and docs change.
+See [active graph, witnesses and limits](M4_P2_NVDRV_COHORT_GPU_COMPOSITION.md)
+and [retained results](M4_P2_NVDRV_COHORT_GPU_RESULTS.json).
+
+Actual retirement counting spans final Module destruction and raw callback join.
+GPU tail/join remains independent of cohort acknowledgement. BackendsStopped with
+active raw Host1x/GPU work, and a pre-resolved escaped alias write, are mandatory
+negative coverage witnesses; neither grants admission. Unknown deferred owners
+have no newly trusted terminal disposal. This closes the named combined-fixture
+test gap, not all P2/native/service/mapping obligations. Next: restricted real
+KProcess/KEvent/System-backed composition with continuous mapping/alias ownership
+and native completion refusal before any Vulkan Copy acceptance. Main untouched,
+CI deferred, P2 incomplete, F2/F3 Open, GuestBackingAdmission Unknown.
+
 ## 2026-10-25: nvhost_ctrl review and active final-owner composition
 
 Reviewed `44c6fbdccc`: no new production defect found in lock order, repeated

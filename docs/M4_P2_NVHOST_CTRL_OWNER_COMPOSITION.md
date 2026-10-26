@@ -1,5 +1,10 @@
 # nvhost_ctrl lifecycle review and named M4 owner composition
 
+The subsequent [2026-10-26 joint fixture](M4_P2_NVDRV_COHORT_GPU_COMPOSITION.md)
+now exercises the restricted cohort/Module/GPU composition target identified
+below. Its controlled evidence does not close native System/KProcess, mapping
+or GPU completion obligations.
+
 Reviewed source: `44c6fbdccc67b76046df8a75fe1be209ff091956`, 2026-10-25
 (Asia/Taipei). This follow-up changes tests and documentation only. CI remains
 deferred and main is untouched. Results are stored under `owner_review_44c6fbdccc`

@@ -17,6 +17,7 @@ p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--repeat', type=int, default=3)
 p.add_argument('--output-dir', type=Path)
 p.add_argument('--reuse-prerequisites', action='store_true')
+p.add_argument('--emit-only', action='store_true', help='Emit the combined actual-body fixture for a larger owner composition')
 a = p.parse_args()
 if a.repeat < 1:
     p.error('positive repeat required')
@@ -114,6 +115,25 @@ flags = [a.cxx, '-std=c++23', '-O1', '-pthread', '-Wall', '-Wextra', '-Werror',
          '-Wno-unused-parameter', '-Wno-unused-variable', '-I', str(timing.parent), '-I', str(out / 'gpu/shims'),
          '-I', str(out / 'cpu/stubs'), '-I', str(root / 'src'), '-isystem',
          str(root / 'externals/dynarmic/externals/fmt/include')]
+
+if a.emit_only:
+    (out / 'production.cpp').write_text(source, encoding='utf-8')
+    # Include the CPU prerequisite manifest; generated collaborators are not
+    # substitutes for its production-input provenance.
+    inputs.update(json.loads((out / 'cpu/extraction.json').read_text())['sha256'])
+    inputs.update(['src/audio_core/audio_manager.h', 'src/audio_core/audio_event.h',
+                   'src/core/hle/kernel/process_cohort_stop.h', 'src/core/hle/kernel/process_execution_stop.h',
+                   'src/core/managed_host_producer.h', 'src/core/managed_guest_writes.h',
+                   'src/common/producer_drain.h', 'src/common/retained_backing_storage.h',
+                   'src/video_core/gpu_thread.h', 'src/video_core/gpu_thread.cpp',
+                   'src/common/terminal_ingress.h', 'src/video_core/acknowledged_callback.h',
+                   'tools/gpu_lifecycle_tests/run_thread_tests.py',
+                   'tools/physical_coherency_tests/run_owner_closure_composition_tests.py'])
+    (out / 'emission.json').write_text(json.dumps({
+        'sha256': {n: hashlib.sha256((root / n).read_bytes()).hexdigest() for n in sorted(inputs)},
+        'compiler_flags': flags, 'compiled': False}, indent=2) + '\n')
+    print('EMITTED combined cohort/ThreadManager owner fixture', flush=True)
+    raise SystemExit(0)
 
 
 def execute(name, text, cases, expected=None, override=None):
