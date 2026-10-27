@@ -935,6 +935,7 @@ bool Scheduler::UpdateRescaling(bool is_rescaling) {
 
 void Scheduler::WorkerThread(std::stop_token stop_token) {
     Common::SetCurrentThreadName("VulkanWorker");
+    Common::SetCurrentThreadPriority(Common::ThreadPriority::Critical);
 
     const auto TryPopQueue{[this](auto& work) -> bool {
         if (work_queue.empty()) {

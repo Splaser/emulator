@@ -225,7 +225,7 @@ Result ServerManager::ManageNamedPort(const std::string& service_name,
 Result ServerManager::ManageDeferral(Kernel::KEvent** out_event) {
     // Create a new event.
     m_deferral_event = Kernel::KEvent::Create(m_system.Kernel());
-    ASSERT(m_deferral_event != nullptr);
+    assert(m_deferral_event != nullptr);
 
     // Initialize the event.
     m_deferral_event->Initialize(nullptr);
@@ -310,7 +310,7 @@ Result ServerManager::Process(MultiWaitHolder* holder) {
     case UserDataTag::DeferEvent:
         R_RETURN(this->OnDeferralEvent());
     default:
-        UNREACHABLE();
+        std::unreachable();
     }
 }
 
@@ -335,7 +335,7 @@ Result ServerManager::OnPortEvent(Port* server) {
     // Accept a new server session.
     auto* server_port = static_cast<Kernel::KServerPort*>(server->GetNativeHandle());
     Kernel::KServerSession* server_session = server_port->AcceptSession();
-    ASSERT(server_session != nullptr);
+    assert(server_session != nullptr);
 
     // Create the session manager and install the handler.
     auto manager = std::make_shared<SessionRequestManager>(m_system.Kernel(), *this);

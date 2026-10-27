@@ -3,6 +3,10 @@
 
 #pragma once
 
+#include <optional>
+
+#include "shader_recompiler/frontend/ir/attribute.h"
+
 namespace Shader {
 
 // Try to keep entries here to a minimum

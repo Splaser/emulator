@@ -29,6 +29,7 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 p.add_argument('--boost-root', type=Path,
                default=Path.home() / '.cache/citron-deps/boost_1_87_0')
+p.add_argument('--fmt-include', type=Path, help='Existing fmt include directory when Dynarmic is vendored')
 p.add_argument('--fetch-boost', action='store_true',
                help='Fetch SHA256-pinned Boost 1.87 headers into the default shared cache')
 p.add_argument('--source', action='append', help='Repository-relative production .cpp; default: nine GPU/Vulkan/GMMU/NV units')
@@ -58,9 +59,9 @@ for header in ('boost/version.hpp', 'boost/unordered/unordered_flat_map.hpp',
                'boost/icl/separate_interval_set.hpp', 'boost/container/small_vector.hpp'):
     if not (boost / header).is_file():
         p.error('Incomplete Boost headers; use --fetch-boost or --boost-root: ' + str(boost / header))
-fmt = root / 'externals/dynarmic/externals/fmt/include'
+fmt = a.fmt_include.resolve() if a.fmt_include else root / 'externals/dynarmic/externals/fmt/include'
 if not (fmt / 'fmt/format.h').is_file():
-    p.error('Initialize the pinned Dynarmic fmt submodule before compiling')
+    p.error('Provide existing fmt headers with --fmt-include when using vendored Dynarmic')
 out = (a.output_dir or root / '.diagnostics/m4-windows-production').resolve()
 out.mkdir(parents=True, exist_ok=True)
 flags = [a.cxx, '-std=c++23', '-O1', '-DNDEBUG', '-DARCHITECTURE_x86_64',

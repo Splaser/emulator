@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <cassert>
 
 #include "common/settings.h"
 #include "common/terminal_fail_stop.h"
@@ -19,7 +20,7 @@
 namespace Vulkan {
 
 BlitScreen::BlitScreen(Tegra::MaxwellDeviceMemoryManager& device_memory_, const Device& device_,
-                       MemoryAllocator& memory_allocator_, PresentManager& present_manager_,
+                       MemoryAllocator& memory_allocator_, PresentManager* present_manager_,
                        Scheduler& scheduler_, const PresentFilters& filters_)
     : device_memory{device_memory_}, device{device_}, memory_allocator{memory_allocator_},
       present_manager{present_manager_}, scheduler{scheduler_}, filters{filters_}, image_count{1},
@@ -36,7 +37,7 @@ void BlitScreen::WaitIdle() {
         // presentation queue, otherwise that queue can appear prematurely idle.
         scheduler.WaitWorker();
         stage = "blit.presentation_drain";
-        present_manager.WaitPresent();
+        if (present_manager) present_manager->WaitPresent();
         stage = "blit.native_idle";
         // Drains can submit work; take this lock only after both CPU producers.
         std::scoped_lock lock{scheduler.submit_mutex};
@@ -109,7 +110,8 @@ void BlitScreen::DrawToFrame(RasterizerVulkan& rasterizer, Frame* frame,
         WaitIdle();
         auto candidate = CreateWindowAdaptPass(requested_filter, current_swapchain_view_format);
         if (presentation_recreate_required) {
-            present_manager.RecreateFrame(frame, layout.width, layout.height,
+            assert(present_manager);
+            present_manager->RecreateFrame(frame, layout.width, layout.height,
                                           current_swapchain_view_format, candidate->GetRenderPass());
         }
         // Frame preparation above and pass construction can throw. Everything

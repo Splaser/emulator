@@ -39,19 +39,10 @@ if (ARCHITECTURE_arm64 AND NOT TARGET merry::oaknut)
     endif()
 endif()
 
-# Dynarmic
+# Dynarmic (part of this tree)
 if ((ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64) AND NOT TARGET dynarmic::dynarmic)
-    if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dynarmic/CMakeLists.txt")
-        set(DYNARMIC_IGNORE_ASSERTS ON)
-        add_subdirectory(dynarmic)
-        # The restored submodule assumes std::hash for tuple keys. Supply static,
-        # build-only compatibility headers without editing the pinned checkout.
-        # PUBLIC/BEFORE keeps one alias definition across the backend and users.
-        target_include_directories(dynarmic BEFORE PUBLIC
-            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dynarmic_compat/include>")
-        set_property(TARGET dynarmic PROPERTY CITRON_PINNED_CONTAINER_COMPAT ON)
-        add_library(dynarmic::dynarmic ALIAS dynarmic)
-    endif()
+    add_subdirectory(dynarmic)
+    add_library(dynarmic::dynarmic ALIAS dynarmic)
 endif()
 
 # getopt

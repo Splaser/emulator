@@ -103,25 +103,36 @@ Device CreateDevice(const vk::Instance& instance, const vk::InstanceDispatch& dl
 
 RendererVulkan::RendererVulkan(Core::Frontend::EmuWindow& emu_window,
                                Tegra::MaxwellDeviceMemoryManager& device_memory_, Tegra::GPU& gpu_,
-                               std::unique_ptr<Core::Frontend::GraphicsContext> context_) try
+                               std::unique_ptr<Core::Frontend::GraphicsContext> context_,
+                               bool headless) try
     : RendererBase(emu_window, std::move(context_)),
       device_memory(device_memory_), gpu(gpu_), library(OpenLibrary(context.get())),
-      instance(CreateInstance(*library, dld, VK_API_VERSION_1_1, render_window.GetWindowInfo().type,
+      instance(CreateInstance(*library, dld, VK_API_VERSION_1_1,
+                              headless ? Core::Frontend::WindowSystemType::Headless
+                                       : render_window.GetWindowInfo().type,
                               Settings::values.renderer_debug.GetValue())),
       debug_messenger(Settings::values.renderer_debug ? CreateDebugUtilsCallback(instance)
                                                       : vk::DebugUtilsMessenger{}),
-      surface(CreateSurface(instance, render_window.GetWindowInfo())),
+      surface(headless ? vk::SurfaceKHR{} : CreateSurface(instance, render_window.GetWindowInfo())),
       device(CreateDevice(instance, dld, *surface)), memory_allocator(device), state_tracker(),
       scheduler(device, state_tracker),
-      swapchain(*surface, device, scheduler, render_window.GetFramebufferLayout().width,
-                render_window.GetFramebufferLayout().height),
-      present_manager(instance, render_window, device, memory_allocator, scheduler, swapchain,
-                      surface),
-      blit_swapchain(device_memory, device, memory_allocator, present_manager, scheduler,
+      swapchain(headless ? std::nullopt
+                         : std::optional<Swapchain>(std::in_place, *surface, device, scheduler,
+                                                    render_window.GetFramebufferLayout().width,
+                                                    render_window.GetFramebufferLayout().height)),
+      present_manager(headless ? std::nullopt
+                               : std::optional<PresentManager>(std::in_place, instance,
+                                                               render_window, device,
+                                                               memory_allocator, scheduler,
+                                                               *swapchain, surface)),
+      blit_swapchain(device_memory, device, memory_allocator,
+                     present_manager ? &*present_manager : nullptr, scheduler,
                      PresentFiltersForDisplay),
-      blit_capture(device_memory, device, memory_allocator, present_manager, scheduler,
+      blit_capture(device_memory, device, memory_allocator,
+                   present_manager ? &*present_manager : nullptr, scheduler,
                    PresentFiltersForDisplay),
-      blit_applet(device_memory, device, memory_allocator, present_manager, scheduler,
+      blit_applet(device_memory, device, memory_allocator,
+                  present_manager ? &*present_manager : nullptr, scheduler,
                   PresentFiltersForAppletCapture),
       rasterizer(render_window, gpu, device_memory, device, memory_allocator, state_tracker,
                  scheduler),
@@ -174,7 +185,7 @@ void RendererVulkan::Shutdown() {
         stage = "renderer.recording_drain";
         scheduler.WaitWorker(); // publish even a final recorded Present callback
         stage = "renderer.presentation_join";
-        present_manager.Shutdown(); // drain presentation and stop its queue submissions
+        if (present_manager) present_manager->Shutdown(); // drain presentation submissions
         stage = "renderer.scheduler_join";
         scheduler.Shutdown(); // no recording/submission callbacks can run after this
         stage = "renderer.detach_submit";
@@ -223,6 +234,10 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
     if (framebuffers.empty()) {
         return;
     }
+    if (!present_manager) {
+        CompositeHeadless(framebuffers);
+        return;
+    }
 
     const auto frame_start_time = std::chrono::steady_clock::now();
 
@@ -245,15 +260,15 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
     }
 
     RenderScreenshot(framebuffers);
-    Frame* frame = present_manager.GetRenderFrame();
+    Frame* frame = present_manager->GetRenderFrame();
     // GetRenderFrame has removed this Frame from the pool and reset its fence.
     // No cancellation/recycle receipt exists for a failed draw/flush/present.
     try {
         blit_swapchain.DrawToFrame(rasterizer, frame, framebuffers,
-                                   render_window.GetFramebufferLayout(), swapchain.GetImageCount(),
-                                   swapchain.GetImageViewFormat());
+                                   render_window.GetFramebufferLayout(), swapchain->GetImageCount(),
+                                   swapchain->GetImageViewFormat());
         scheduler.Flush(*frame->render_ready);
-        present_manager.Present(frame);
+        present_manager->Present(frame);
     } catch (const vk::Exception& error) {
         Common::TerminalFailStop("present.composition", "vulkan_exception",
                                  static_cast<int>(error.GetResult()));
@@ -315,6 +330,20 @@ void RendererVulkan::ExerciseChunkImports() {
     }
 }
 
+void RendererVulkan::CompositeHeadless(std::span<const Tegra::FramebufferConfig> framebuffers) {
+    RenderAppletCaptureLayer(framebuffers);
+    RenderScreenshot(framebuffers);
+
+    // Submit the frame, then wait for the one HEADLESS_FRAMES_IN_FLIGHT frames older
+    const u64 tick = scheduler.Flush();
+    scheduler.Wait(std::exchange(headless_frame_ticks[headless_frame_index], tick));
+    headless_frame_index = (headless_frame_index + 1) % HEADLESS_FRAMES_IN_FLIGHT;
+
+    gpu.RendererFrameEndNotify();
+    rasterizer.TickFrame();
+    render_window.OnFrameDisplayed();
+}
+
 void RendererVulkan::Report() const {
     using namespace Common::Literals;
     const std::string vendor_name{device.GetVendorName()};
@@ -354,8 +383,11 @@ vk::Buffer RendererVulkan::RenderToBuffer(std::span<const Tegra::FramebufferConf
                                           VkDeviceSize buffer_size) {
     scheduler.RequireNativeBorrowAdmission();
     auto frame = [&]() {
+        // Sized here, so DrawToFrame does not hand the frame to the present manager to recreate
         Frame f{};
         f.image_view_format = format;
+        f.width = layout.width;
+        f.height = layout.height;
         f.image =
             CreateWrappedImage(memory_allocator, VkExtent2D{layout.width, layout.height}, format);
         f.image_view = CreateWrappedImageView(device, f.image, format);

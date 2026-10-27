@@ -239,10 +239,12 @@ public:
      * @returns The pointer to the given address, if the address is valid.
      *          If the address is not valid, nullptr will be returned.
      */
-    /// Synchronize host instruction cache after guest code updates (including NCE).
-    void SyncInstructionCache(Common::ProcessAddress vaddr, std::size_t size);
     u8* GetPointer(Common::ProcessAddress vaddr);
     u8* GetPointerSilent(Common::ProcessAddress vaddr);
+
+    /// Makes the host instruction cache see what is now in [vaddr, vaddr + size) of this
+    /// process's memory, for guest code run in place (NCE). Unmapped pages are skipped.
+    void SyncInstructionCache(Common::ProcessAddress vaddr, std::size_t size);
 
     template <typename T>
     T* GetPointer(Common::ProcessAddress vaddr) {

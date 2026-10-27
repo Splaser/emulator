@@ -130,7 +130,7 @@ protected:
         constexpr PageLinkedList() : m_root(nullptr) {}
 
         void Push(Node* n) {
-            ASSERT(Common::IsAligned(reinterpret_cast<uintptr_t>(n), PageSize));
+            assert(Common::IsAligned(reinterpret_cast<uintptr_t>(n), PageSize));
             n->m_next = m_root;
             m_root = n;
         }
@@ -164,7 +164,7 @@ protected:
         case Svc::CreateProcessFlag::AddressSpace32BitWithoutAlias:
             return 32;
         default:
-            UNREACHABLE();
+            std::unreachable();
         }
     }
 
@@ -397,35 +397,35 @@ protected:
     }
 
     bool IsLinearMappedPhysicalAddress(KPhysicalAddress phys_addr) {
-        ASSERT(this->IsLockedByCurrentThread());
+        assert(this->IsLockedByCurrentThread());
 
         return m_kernel.MemoryLayout().IsLinearMappedPhysicalAddress(
             m_cached_physical_linear_region, phys_addr);
     }
 
     bool IsLinearMappedPhysicalAddress(KPhysicalAddress phys_addr, size_t size) {
-        ASSERT(this->IsLockedByCurrentThread());
+        assert(this->IsLockedByCurrentThread());
 
         return m_kernel.MemoryLayout().IsLinearMappedPhysicalAddress(
             m_cached_physical_linear_region, phys_addr, size);
     }
 
     bool IsHeapPhysicalAddress(KPhysicalAddress phys_addr) {
-        ASSERT(this->IsLockedByCurrentThread());
+        assert(this->IsLockedByCurrentThread());
 
         return m_kernel.MemoryLayout().IsHeapPhysicalAddress(m_cached_physical_heap_region,
                                                              phys_addr);
     }
 
     bool IsHeapPhysicalAddress(KPhysicalAddress phys_addr, size_t size) {
-        ASSERT(this->IsLockedByCurrentThread());
+        assert(this->IsLockedByCurrentThread());
 
         return m_kernel.MemoryLayout().IsHeapPhysicalAddress(m_cached_physical_heap_region,
                                                              phys_addr, size);
     }
 
     bool IsHeapPhysicalAddressForFinalize(KPhysicalAddress phys_addr) {
-        ASSERT(!this->IsLockedByCurrentThread());
+        assert(!this->IsLockedByCurrentThread());
 
         return m_kernel.MemoryLayout().IsHeapPhysicalAddress(m_cached_physical_heap_region,
                                                              phys_addr);
@@ -548,7 +548,7 @@ private:
 
     bool GetPhysicalAddressLocked(KPhysicalAddress* out, KProcessAddress virt_addr) const {
         // Validate pre-conditions.
-        ASSERT(this->IsLockedByCurrentThread());
+        assert(this->IsLockedByCurrentThread());
 
         return this->GetImpl().GetPhysicalAddress(out, virt_addr);
     }
@@ -556,7 +556,7 @@ private:
 public:
     bool GetPhysicalAddress(KPhysicalAddress* out, KProcessAddress virt_addr) const {
         // Validate pre-conditions.
-        ASSERT(!this->IsLockedByCurrentThread());
+        assert(!this->IsLockedByCurrentThread());
 
         // Acquire exclusive access to the table while doing address translation.
         KScopedLightLock lk(m_general_lock);

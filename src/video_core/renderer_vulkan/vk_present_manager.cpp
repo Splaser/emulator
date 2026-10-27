@@ -3,6 +3,7 @@
 
 #include <type_traits>
 #include <utility>
+#include <array>
 
 #include "common/settings.h"
 #include "common/terminal_fail_stop.h"
@@ -213,12 +214,23 @@ void PresentManager::RecreateFrame(Frame* frame, u32 width, u32 height, VkFormat
     candidate.height = height;
     candidate.image_view_format = image_view_format;
 
+    // The frame is only ever viewed as image_view_format. Mutable without a format list lets the
+    // driver assume any format; Turnip then stores the image linear (tu_image.cc).
+    const VkFormat image_format = swapchain.GetImageFormat();
+    const std::array view_formats{image_format, image_view_format};
+    const VkImageFormatListCreateInfo format_list{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO,
+        .pNext = nullptr,
+        .viewFormatCount = static_cast<u32>(view_formats.size()),
+        .pViewFormats = view_formats.data(),
+    };
+    const bool is_mutable = image_view_format != image_format;
     candidate.image = memory_allocator.CreateImage({
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT,
+        .pNext = is_mutable && device.IsKhrImageFormatListSupported() ? &format_list : nullptr,
+        .flags = is_mutable ? VkImageCreateFlags{VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT} : 0,
         .imageType = VK_IMAGE_TYPE_2D,
-        .format = swapchain.GetImageFormat(),
+        .format = image_format,
         .extent =
             {
                 .width = width,
@@ -306,6 +318,7 @@ void PresentManager::WaitPresent() {
 
 void PresentManager::PresentThread(std::stop_token token) {
     Common::SetCurrentThreadName("VulkanPresent");
+    Common::SetCurrentThreadPriority(Common::ThreadPriority::High);
     while (!token.stop_requested()) {
         std::unique_lock lock{queue_mutex};
 

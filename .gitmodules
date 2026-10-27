@@ -8,18 +8,12 @@
 [submodule "cubeb"]
 	path = externals/cubeb
 	url = https://github.com/mozilla/cubeb.git
-[submodule "dynarmic"]
-	path = externals/dynarmic
-	url = https://github.com/xinitrcn1/dynarmic.git
 [submodule "libusb"]
 	path = externals/libusb/libusb
 	url = https://github.com/libusb/libusb.git
 [submodule "Vulkan-Headers"]
 	path = externals/Vulkan-Headers
 	url = https://github.com/KhronosGroup/Vulkan-Headers.git
-[submodule "sirit"]
-	path = externals/sirit
-	url = https://github.com/yuzu-mirror/sirit.git
 [submodule "mbedtls"]
 	path = externals/mbedtls
 	url = https://github.com/yuzu-mirror/mbedtls.git

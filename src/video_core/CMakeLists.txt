@@ -43,8 +43,6 @@ add_library(video_core STATIC
     delayed_destruction_ring.h
     dirty_flags.cpp
     dirty_flags.h
-    zbc_manager.cpp
-    zbc_manager.h
     dma_pusher.cpp
     dma_pusher.h
     engines/sw_blitter/blitter.cpp
@@ -123,14 +121,9 @@ add_library(video_core STATIC
     query_cache/query_cache.h
     query_cache/query_stream.h
     query_cache/types.h
-    query_cache.h
     rasterizer_interface.h
     renderer_base.cpp
     renderer_base.h
-    renderer_null/null_rasterizer.cpp
-    renderer_null/null_rasterizer.h
-    renderer_null/renderer_null.cpp
-    renderer_null/renderer_null.h
     renderer_vulkan/present/anti_alias_pass.h
     renderer_vulkan/present/filters.cpp
     renderer_vulkan/present/filters.h
@@ -155,8 +148,6 @@ add_library(video_core STATIC
     renderer_vulkan/present/window_adapt_pass.h
     renderer_vulkan/blit_image.cpp
     renderer_vulkan/blit_image.h
-    renderer_vulkan/vk_zbc_clear.cpp
-    renderer_vulkan/vk_zbc_clear.h
     renderer_vulkan/fixed_pipeline_state.cpp
     renderer_vulkan/fixed_pipeline_state.h
     renderer_vulkan/maxwell_to_vk.cpp
@@ -272,6 +263,8 @@ add_library(video_core STATIC
     vulkan_common/vulkan_debug_callback.h
     vulkan_common/vulkan_device.cpp
     vulkan_common/vulkan_device.h
+    vulkan_common/vulkan_guest_memory.cpp
+    vulkan_common/vulkan_guest_memory.h
     vulkan_common/vulkan_instance.cpp
     vulkan_common/vulkan_instance.h
     vulkan_common/vulkan_library.cpp
@@ -292,7 +285,7 @@ add_library(video_core STATIC
 )
 
 target_link_libraries(video_core PUBLIC common core)
-target_link_libraries(video_core PUBLIC glad shader_recompiler stb bc_decoder)
+target_link_libraries(video_core PUBLIC shader_recompiler stb bc_decoder)
 
 if (CITRON_USE_BUNDLED_FFMPEG AND
     (CITRON_CLANGCL OR CITRON_CLANGTRON OR NOT (WIN32 OR ANDROID)))

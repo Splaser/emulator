@@ -116,6 +116,7 @@ option(CITRON_USE_CPM "Use CPM.cmake to fetch dependencies" ON)
 if (CITRON_USE_CPM AND CITRON_USE_BUNDLED_VCPKG)
     message(FATAL_ERROR "CITRON_USE_CPM and CITRON_USE_BUNDLED_VCPKG cannot both be enabled")
 endif()
+option(CITRON_BUNDLE_SCARLETNX "Bundle a prebuilt ScarletNX (the 'Run with AOT' backend, Windows x86_64 only) next to citron. Needs CITRON_USE_CPM; ~110 MB download, ~350 MB unpacked" OFF)
 option(CITRON_CLANGCL "Build natively on Windows with clang-cl and the MSVC ABI" OFF)
 option(CITRON_CLANGCL_FULL_LTO_LINE_TABLES "Use CodeView line tables for clang-cl full-LTO RelWithDebInfo" OFF)
 
@@ -493,11 +494,6 @@ set(CITRON_HAS_DYNARMIC FALSE)
 
 if ((ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64) AND NOT (MSVC AND ARCHITECTURE_arm64))
     if (TARGET dynarmic::dynarmic)
-        set(dynarmic_FOUND TRUE)
-    else()
-        find_package(dynarmic 6.4.0 CONFIG)
-    endif()
-    if (dynarmic_FOUND)
         message(STATUS "Dynarmic found, enabling dynamic recompilation support.")
         set(CITRON_HAS_DYNARMIC TRUE) # Set our variable to TRUE
     else()
@@ -557,32 +553,6 @@ endfunction()
 
 add_subdirectory(externals)
 include(DependencyTargets)
-# When CPM is ON, dynarmic/mcl patches are applied post-populate
-# inside CMakeModules/dependencies.cmake. Skip the submodule-path patches.
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT CITRON_USE_CPM)
-    message(STATUS "Applying custom patch to submodule's mcl for Clang compatibility...")
-
-    set(MCL_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/patches/mcl_clang_template_fix.patch")
-    set(MCL_PATCH_TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/externals/dynarmic/externals/mcl")
-
-    if(EXISTS "${MCL_PATCH_TARGET_DIR}")
-        execute_process(
-            COMMAND git apply --ignore-whitespace "${MCL_PATCH_FILE}"
-            WORKING_DIRECTORY "${MCL_PATCH_TARGET_DIR}"
-            RESULT_VARIABLE MCL_PATCH_RESULT
-            OUTPUT_QUIET
-            ERROR_QUIET
-        )
-
-        if(NOT MCL_PATCH_RESULT EQUAL 0)
-            message(WARNING "Failed to apply mcl Clang compatibility patch! This might be okay if it's already applied.")
-        endif()
-    else()
-        message(WARNING "Could not find mcl directory to patch. It may not have been downloaded yet.")
-    endif()
-endif()
-
-
 # Apply a patch to stb_image.h to fix a string overflow warning with modern compilers
 message(STATUS "Applying custom patch to stb_image.h...")
 
