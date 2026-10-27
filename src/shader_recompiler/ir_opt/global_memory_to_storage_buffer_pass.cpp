@@ -963,6 +963,14 @@ void GlobalMemoryToStorageBufferPass(IR::Program& program, const HostTranslateIn
         const IR::U32 index{IR::Value{static_cast<u32>(info.set.index_of(it))}};
         IR::Block* const block{storage_inst.block};
         IR::Inst* const inst{storage_inst.inst};
+        const bool cas32{inst->GetOpcode() == IR::Opcode::GlobalAtomicCompareExchange32};
+        const bool cas64{inst->GetOpcode() == IR::Opcode::GlobalAtomicCompareExchange64};
+        // The checked storage offset has the guest address's low alignment bits only when
+        // the bound buffer base is naturally aligned. Otherwise retain the global address check.
+        if ((cas32 && host_info.min_ssbo_alignment < sizeof(u32)) ||
+            (cas64 && host_info.min_ssbo_alignment < sizeof(u64))) {
+            continue;
+        }
         const IR::U32 offset{
             StorageOffset(*block, *inst, storage_buffer, host_info.min_ssbo_alignment)};
         Replace(*block, *inst, index, offset);

@@ -117,7 +117,11 @@ void CheckCBufNVN(Info& info, IR::Inst& inst) {
 }
 
 void VisitUsages(Info& info, IR::Inst& inst) {
-    if (inst.GetOpcode() == IR::Opcode::GlobalAtomicCompareExchange32) {
+    if (inst.GetOpcode() == IR::Opcode::StorageAtomicCompareExchange32) {
+        info.uses_storage_atomic_compare_exchange32 = true;
+    } else if (inst.GetOpcode() == IR::Opcode::StorageAtomicCompareExchange64) {
+        info.uses_storage_atomic_compare_exchange64 = true;
+    } else if (inst.GetOpcode() == IR::Opcode::GlobalAtomicCompareExchange32) {
         info.uses_global_atomic_compare_exchange32 = true;
     } else if (inst.GetOpcode() == IR::Opcode::GlobalAtomicCompareExchange64) {
         info.uses_global_atomic_compare_exchange64 = true;
