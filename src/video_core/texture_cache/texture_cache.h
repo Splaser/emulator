@@ -13,6 +13,7 @@
 
 #include "common/alignment.h"
 #include "common/settings.h"
+#include "shader_recompiler/shader_info.h"
 #include "video_core/cache_memory_pressure.h"
 #include "video_core/control/channel_state.h"
 #include "video_core/dirty_flags.h"
@@ -534,11 +535,20 @@ void TextureCache<P>::FillImageViews(DescriptorTable<TICEntry>& table,
         for (ImageViewInOut& view : views) {
             view.id = VisitImageView(table, cached_image_view_ids, view.index);
             if constexpr (has_blacklists) {
-                if (view.blacklist && view.id != NULL_IMAGE_VIEW_ID) {
-                    const ImageViewBase& image_view{slot_image_views[view.id]};
-                    auto& image = slot_images[image_view.image_id];
-                    has_blacklisted |= ScaleDown(image);
-                    image.scale_rating = 0;
+                if (view.id != NULL_IMAGE_VIEW_ID && (view.blacklist || view.storage_format != 0)) {
+                    auto& image = slot_images[slot_image_views[view.id].image_id];
+                    if (view.blacklist) {
+                        has_blacklisted |= ScaleDown(image);
+                        image.scale_rating = 0;
+                    }
+                    // A typed storage view is made when the descriptors are written, after this,
+                    // so its format has to be in the image's list by then. Widening drops the
+                    // image's views and sets has_deleted_images: the views are looked up again.
+                    const auto storage_format =
+                        static_cast<Shader::ImageFormat>(view.storage_format);
+                    if (image.NeedsWideStorageViews(storage_format)) {
+                        WidenViewFormats(image);
+                    }
                 }
             }
         }
@@ -695,6 +705,9 @@ bool TextureCache<P>::BlitImage(const Tegra::Engines::Fermi2D::Surface& dst,
 
     PrepareImage(src_id, false, false);
     PrepareImage(dst_id, true, false);
+    // Both views are looked up below and used together; neither lookup may drop the other
+    PrepareViewFormat(src_id, images.src_format);
+    PrepareViewFormat(dst_id, images.dst_format);
 
     Image& dst_image = slot_images[dst_id];
     Image& src_image = slot_images[src_id];
@@ -1346,6 +1359,11 @@ void TextureCache<P>::InvalidateScale(Image& image) {
     if (image.scale_tick <= frame_tick) {
         image.scale_tick = frame_tick + 1;
     }
+    InvalidateImageViews(image);
+}
+
+template <class P>
+void TextureCache<P>::InvalidateImageViews(Image& image) {
     const std::span<const ImageViewId> image_view_ids = image.image_view_ids;
     auto& dirty = maxwell3d->dirty.flags;
     dirty[Dirty::RenderTargets] = true;
@@ -1547,6 +1565,10 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
             gpu_addr = solution->gpu_addr;
             cpu_addr = solution->cpu_addr;
             new_info.resources = solution->resources;
+            // The new image takes over this memory, including its first DMA download (see
+            // DmaImageId). A game that maps the same render target at a new GPU address every
+            // frame would otherwise get a full CPU sync for every DMA download.
+            new_info.dma_downloaded |= overlap.info.dma_downloaded;
             join_overlap_ids.push_back(overlap_id);
             join_copies_to_do.emplace_back(JoinCopy{false, overlap_id});
             return;
@@ -1574,6 +1596,7 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
             }
             if (overlap.gpu_addr == gpu_addr && overlap.guest_size_bytes == size_bytes) {
                 join_ignore_textures.insert(overlap_id);
+                new_info.dma_downloaded |= overlap.info.dma_downloaded;
             }
         }
     };
@@ -1839,7 +1862,7 @@ ImageId TextureCache<P>::FindDMAImage(const ImageInfo& info, GPUVAddr gpu_addr) 
             if (existing_image.gpu_addr == gpu_addr && existing.type == info.type &&
                 existing.pitch == info.pitch &&
                 IsPitchLinearSameSize(existing, info, strict_size) &&
-                IsViewCompatible(existing.format, info.format, false, true)) {
+                IsViewCompatible(existing.format, info.format, false, runtime.HasNativeBgr())) {
                 image_id = existing_image_id;
                 image_ids.push_back(existing_image_id);
                 return true;
@@ -1919,14 +1942,52 @@ ImageViewId TextureCache<P>::FindDepthBuffer() {
 }
 
 template <class P>
+ImageId TextureCache<P>::FindPaddedRenderTarget(const ImageInfo& info, GPUVAddr gpu_addr) {
+    if (info.type == ImageType::Linear) {
+        return ImageId{};
+    }
+    const std::optional<DAddr> cpu_addr = gpu_memory->GpuToCpuAddress(gpu_addr);
+    if (!cpu_addr) {
+        return ImageId{};
+    }
+    const bool broken_views = runtime.HasBrokenTextureViewFormats();
+    const bool native_bgr = runtime.HasNativeBgr();
+    ImageId result{};
+    const auto lambda = [&](ImageId id, ImageBase& image) {
+        if (True(image.flags & ImageFlagBits::Remapped) || image.info.type == ImageType::Linear ||
+            image.info.format != info.format) {
+            return;
+        }
+        const auto base =
+            FindSubresource(info, image, gpu_addr, RelaxedOptions::Size, broken_views, native_bgr);
+        if (!base) {
+            return;
+        }
+        const u32 width = std::max(1U, image.info.size.width >> base->level);
+        const u32 height = std::max(1U, image.info.size.height >> base->level);
+        if (width > info.size.width || height > info.size.height ||
+            (width == info.size.width && height == info.size.height)) {
+            return;
+        }
+        if (!result || image.modification_tick > slot_images[result].modification_tick) {
+            result = id;
+        }
+    };
+    ForEachImageInRegion(*cpu_addr, CalculateGuestSizeInBytes(info), lambda);
+    return result;
+}
+
+template <class P>
 ImageViewId TextureCache<P>::FindRenderTargetView(const ImageInfo& info, GPUVAddr gpu_addr) {
-    ImageId image_id{};
+    ImageId image_id = FindPaddedRenderTarget(info, gpu_addr);
     bool delete_state = has_deleted_images;
-    do {
-        has_deleted_images = false;
-        image_id = FindOrInsertImage(info, gpu_addr);
-        delete_state |= has_deleted_images;
-    } while (has_deleted_images);
+    if (!image_id) {
+        do {
+            has_deleted_images = false;
+            image_id = FindOrInsertImage(info, gpu_addr);
+            delete_state |= has_deleted_images;
+        } while (has_deleted_images);
+    }
     has_deleted_images = delete_state;
     if (!image_id) {
         return NULL_IMAGE_VIEW_ID;
@@ -2122,10 +2183,29 @@ ImageViewId TextureCache<P>::FindOrEmplaceImageView(ImageId image_id, const Imag
     if (const ImageViewId image_view_id = image.FindView(info); image_view_id) {
         return image_view_id;
     }
+    if (image.NeedsWideViews(info.format)) {
+        WidenViewFormats(image);
+    }
     const ImageViewId image_view_id =
         slot_image_views.insert(runtime, info, image_id, image, slot_images);
     image.InsertView(info, image_view_id);
     return image_view_id;
+}
+
+template <class P>
+void TextureCache<P>::PrepareViewFormat(ImageId image_id, PixelFormat format) {
+    Image& image = slot_images[image_id];
+    if (image.NeedsWideViews(format)) {
+        WidenViewFormats(image);
+    }
+}
+
+template <class P>
+void TextureCache<P>::WidenViewFormats(Image& image) {
+    if (image.WidenViewFormats()) {
+        LOG_DEBUG(HW_GPU, "Image at {:#x} made again with every view format", image.gpu_addr);
+        InvalidateImageViews(image);
+    }
 }
 
 template <class P>

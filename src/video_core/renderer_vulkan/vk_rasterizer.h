@@ -5,6 +5,8 @@
 
 #include <array>
 #include <atomic>
+#include <bitset>
+#include <chrono>
 #include <optional>
 #include <shared_mutex>
 
@@ -171,6 +173,8 @@ private:
     /// Once a frame: decides whether finished passes are submitted to the host GPU early.
     void UpdatePassEndSubmit();
 
+    void RecordComputeWriteBarrier();
+
     void UpdateDynamicStates();
 
     void HandleTransformFeedback();
@@ -226,7 +230,9 @@ private:
     AccelerateDMA accelerate_dma;
     FenceManager fence_manager;
 
-    vk::Event wfi_event;
+
+    /// Past-stride vertex layouts already logged by UpdateVertexInput, by guest type and size
+    std::bitset<512> reported_vertex_layouts;
 
     boost::container::static_vector<u32, MAX_IMAGE_VIEWS> image_view_indices;
     std::array<VideoCommon::ImageViewId, MAX_IMAGE_VIEWS> image_view_ids;
@@ -245,6 +251,8 @@ private:
     [[maybe_unused]] u32 frames_off = 0;
     [[maybe_unused]] s64 last_frame_wall_ns = 0;
     [[maybe_unused]] s64 last_frame_cpu_ns = 0;
+
+    std::chrono::steady_clock::time_point last_submit_time{};
 
     std::shared_mutex shutdown_mutex;
     std::atomic_bool is_shutting_down{false};

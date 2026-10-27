@@ -55,6 +55,9 @@ struct ImageViewInOut {
     u32 index{};
     bool blacklist{};
     ImageViewId id{};
+    /// Format of a typed storage access to the image (Shader::ImageFormat), 0 (Typeless) for
+    /// any other access.
+    u32 storage_format{};
 };
 
 struct AsyncDecodeContext {
@@ -362,6 +365,8 @@ public:
     /// Find or create a view for a render target with the given image parameters
     [[nodiscard]] ImageViewId FindRenderTargetView(const ImageInfo& info, GPUVAddr gpu_addr);
 
+    [[nodiscard]] ImageId FindPaddedRenderTarget(const ImageInfo& info, GPUVAddr gpu_addr);
+
     /// Iterates over all the images in a region calling func
     template <typename Func>
     void ForEachImageInRegion(DAddr cpu_addr, size_t size, Func&& func);
@@ -376,8 +381,16 @@ public:
     template <typename Func>
     void ForEachSparseSegment(ImageBase& image, Func&& func);
 
-    /// Find or create an image view in the given image with the passed parameters
+    /// Find or create an image view in the given image with the passed parameters. Can make the
+    /// image again with more view formats, which drops its other views (WidenViewFormats).
     [[nodiscard]] ImageViewId FindOrEmplaceImageView(ImageId image_id, const ImageViewInfo& info);
+
+    /// Gives the image the view formats a view in this format needs, before views of it are
+    /// looked up that have to stay valid together.
+    void PrepareViewFormat(ImageId image_id, PixelFormat format);
+
+    /// Makes the image again with every view format it may need and drops its views.
+    void WidenViewFormats(Image& image);
 
     /// Register image in the page table
     void RegisterImage(ImageId image);
@@ -427,6 +440,8 @@ public:
 
     bool ImageCanRescale(ImageBase& image);
     void InvalidateScale(Image& image);
+    /// Drops every view of the image, for an image whose backing image was replaced
+    void InvalidateImageViews(Image& image);
     bool ScaleUp(Image& image);
     bool ScaleDown(Image& image);
     u64 GetScaledImageSizeBytes(const ImageBase& image);

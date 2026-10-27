@@ -24,7 +24,15 @@ struct Profile {
     bool support_storage_texel_buffer_array_non_uniform_indexing{};
     bool support_int8{};
     bool support_int16{};
+    /// 8/16-bit loads and stores in storage buffers (storageBuffer8/16BitAccess).
+    bool support_int8_storage{};
+    bool support_int16_storage{};
+    /// 8/16-bit loads from uniform buffers (uniformAndStorageBuffer8/16BitAccess).
+    bool support_int8_uniform{};
+    bool support_int16_uniform{};
     bool support_int64{};
+    /// Storage images in the R8, R16 and two-component formats (shaderStorageImageExtendedFormats).
+    bool support_storage_image_extended_formats{};
     bool support_vertex_instance_id{};
     bool support_float_controls{};
     bool support_separate_denorm_behavior{};
@@ -38,6 +46,8 @@ struct Profile {
     bool support_fp64_signed_zero_nan_preserve{};
     bool support_explicit_workgroup_layout{};
     bool support_vote{};
+    /// OpGroupNonUniformQuadSwap is available in fragment shaders
+    bool support_fragment_quad_swap{};
     bool support_viewport_index_layer_non_geometry{};
     bool support_viewport_mask{};
     bool support_typeless_image_loads{};
@@ -72,6 +82,7 @@ struct Profile {
     /// architecture. Applying an offset does fix this mismatching rounding behaviour.
     bool need_gather_subpixel_offset{};
 
+    bool reduce_float_precision{};
     /// OpFClamp is broken and OpFMax + OpFMin should be used instead
     bool has_broken_spirv_clamp{};
     /// The Position builtin needs to be wrapped in a struct when used as an input

@@ -511,9 +511,11 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
     CollectPhysicalMemoryInfo();
     CollectToolingInfo();
 
-    if (is_qualcomm || is_turnip) {
-        LOG_WARNING(Render_Vulkan,
-                    "Qualcomm and Turnip drivers have broken VK_EXT_custom_border_color");
+    // Turnip keeps it: samplers only take a custom colour slot for a colour that is not one of the
+    // standard ones, and never more than maxCustomBorderColorSamplers (Mesa tu_sampler.cc takes
+    // the first free slot without a bounds check in release builds).
+    if (is_qualcomm) {
+        LOG_WARNING(Render_Vulkan, "Qualcomm drivers have broken VK_EXT_custom_border_color");
         RemoveExtensionFeature(extensions.custom_border_color, features.custom_border_color,
                                VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
     }
@@ -1206,6 +1208,11 @@ bool Device::GetSuitability(bool requires_swapchain) {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_PROPERTIES_EXT;
         SetNext(next, properties.robustness2);
     }
+    if (extensions.custom_border_color) {
+        properties.custom_border_color.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_PROPERTIES_EXT;
+        SetNext(next, properties.custom_border_color);
+    }
 
     // Perform the property fetch.
     physical.GetProperties2(properties2);
@@ -1386,12 +1393,10 @@ void Device::SetupFamilies(VkSurfaceKHR surface) {
         LOG_ERROR(Render_Vulkan, "Device lacks a present queue");
         throw vk::Exception(VK_ERROR_FEATURE_NOT_PRESENT);
     }
-    if (graphics) {
-        graphics_family = *graphics;
-    }
-    if (present) {
-        present_family = *present;
-    }
+    graphics_family = *graphics;
+    // Without a surface nothing presents; the graphics family keeps GetDeviceQueueCreateInfos from
+    // creating a queue on family 0 for it
+    present_family = present.value_or(*graphics);
 }
 
 u64 Device::GetDeviceMemoryUsage() const {
