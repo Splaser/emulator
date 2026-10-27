@@ -124,6 +124,61 @@ void NativeCases(bool expect_vulnerable) {
         Check(VirtualQuery(saved, &mapping, sizeof(mapping)) == sizeof(mapping) &&
               mapping.State == MEM_FREE, "final-native-allocation-release");
     }
+    {
+        // Replace the real facade while a paused alias writer is the last
+        // allocation owner. Epoch invalidation must not depend on test-scope pins.
+        HostMemory destination(g * 8, g * 64, {}, 0, false, false, {}, true);
+        destination.Map(0, 0, g, P::ReadWrite, false);
+        destination.ClearBackingRegion(0, g, 71);
+        auto* old_backing = destination.BackingBasePointer();
+        auto* old_alias = destination.VirtualBasePointer();
+        auto old_epoch = destination.BackingEpoch(); // Identity only, not storage.
+        auto pin = destination.PinPhysicalRange(0, g);
+        auto storage = destination.RetainBackingStorage();
+        Check(pin && storage, "replacement-capture");
+        HostMemory incoming(g * 8, g * 64, {}, 0, false, false, {}, true);
+        incoming.Map(0, 0, g, P::ReadWrite, false);
+        incoming.ClearBackingRegion(0, g, 83);
+        const auto incoming_epoch = incoming.BackingEpoch();
+        std::promise<void> entered, resume;
+        auto gate = resume.get_future();
+        bool writer_saw_retirement{}, writer_saw_bytes{};
+        std::thread writer{[&, pin = std::move(pin), storage = std::move(storage)]() mutable {
+            entered.set_value();
+            gate.wait();
+            writer_saw_retirement = !pin->OwnerAlive() && !storage->OwnerAlive();
+            old_alias[0] = 97;
+            writer_saw_bytes = pin->Bytes()[0] == 97 && old_backing[0] == 97;
+            pin.reset();
+            storage.reset(); // Actual last allocation owner, on this writer.
+        }};
+        entered.get_future().wait();
+        pin.reset();
+        storage.reset();
+        destination = std::move(incoming);
+        const bool retired = !old_epoch->alive.load(std::memory_order_acquire);
+        const bool transferred = destination.BackingEpoch() == incoming_epoch &&
+                                 incoming_epoch->alive.load(std::memory_order_acquire);
+        MEMORY_BASIC_INFORMATION before{};
+        const bool retained = VirtualQuery(old_backing, &before, sizeof(before)) == sizeof(before) &&
+                              before.State == MEM_COMMIT;
+        // Join before reporting any failure: no timeout-based scheduling oracle.
+        resume.set_value();
+        writer.join();
+        Check(retired && writer_saw_retirement, "replaced-epoch-still-live");
+        Check(transferred && retained && writer_saw_bytes, "replacement-last-owner-storage");
+        Check(destination.BackingBasePointer()[0] == 83,
+              "retired-alias-wrote-replacement-backing");
+        MEMORY_BASIC_INFORMATION after{};
+        Check(VirtualQuery(old_backing, &after, sizeof(after)) == sizeof(after) &&
+              after.State == MEM_FREE, "replacement-final-native-release");
+        Check(VirtualQuery(old_alias, &after, sizeof(after)) == sizeof(after) &&
+              after.State == MEM_FREE, "replacement-final-alias-release");
+        Check(!destination.TryFreezeMappingEntries() &&
+              !Common::HostMappingDomain::Freeze::GuestBackingAdmission(),
+              "replacement-is-not-freeze-admission");
+        std::cout << "PASS replacement invalidates epoch; paused alias writer retains old storage; final native release\n";
+    }
     std::cout << "PASS real Windows alias/remap/protection/retained-allocation effects; all unproved freezes refuse\n";
 }
 } // namespace

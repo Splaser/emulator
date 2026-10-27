@@ -32,9 +32,9 @@ if a.baseline:
               'WITNESS post-move first export bypasses the transferred owner'),
              ('baseline-reject-fixed', binary, [], 91, 'MAPPING OWNER CHECK: moved-from-pointer')]
 elif a.negative_dir:
-    for name in ['backing_mutable', 'backing_const', 'virtual_mutable', 'virtual_const', 'windows_enrollment']:
+    for name in ['backing_mutable', 'backing_const', 'virtual_mutable', 'virtual_const', 'windows_enrollment', 'replacement_epoch']:
         marker = ('unsupported-windows-freeze-refusal' if name == 'windows_enrollment'
-                  else 'moved-from-pointer')
+                  else 'replaced-epoch-still-live' if name == 'replacement_epoch' else 'moved-from-pointer')
         plans.append((name, (a.negative_dir / ('mapping_owner_' + name + '.exe')).resolve(strict=True),
                       [], 91, 'MAPPING OWNER CHECK: ' + marker))
 records = []
@@ -58,7 +58,7 @@ for name, executable, arguments, expected, marker in plans:
         print(f'{"PASS" if passed else "FAIL"} {name} repeat={i} exit={actual}', flush=True)
         if not passed: break
     if not records[-1]['passed']: break
-paths = ['src/common/host_memory.h', 'src/common/host_memory.cpp',
+paths = ['src/common/published_guest_chunk.h', 'src/common/host_memory.h', 'src/common/host_memory.cpp',
          'src/common/host_mapping_domain.h', 'src/common/retained_backing_storage.h',
          'src/common/pinned_physical_memory.h', 'src/tests/common/windows_mapping_owner.cpp',
          'src/tests/CMakeLists.txt', 'tools/physical_coherency_tests/run_windows_mapping_owner_tests.py']

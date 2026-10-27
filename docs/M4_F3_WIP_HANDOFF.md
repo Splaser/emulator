@@ -1,5 +1,17 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-27: closeout status verified without production refactoring
+
+[Current gate status](M4_CLOSEOUT_STATUS.md) and [exact results](M4_CLOSEOUT_STATUS_RESULTS.json)
+now distinguish retained source-identical native-owner evidence from fresh real
+Windows mapping execution. A paused last-owner writer survives backing replacement;
+old epoch invalidation, distinct replacement bytes and final native release pass.
+The omitted-invalidation counterfactual is detected x3; total mapping processes
+21/21. Metadata-ledger checks pass with 11 assertion controls. No new production
+defect or source repair. Physical freeze and native GPU completion remain Open;
+GuestBackingAdmission Unknown. CI deferred, issue branch only.
+
+
 ## 2026-10-27: native Windows mapping effects and moved-owner exports
 
 After the FFR/upstream synchronization, this checkpoint repairs a demonstrated

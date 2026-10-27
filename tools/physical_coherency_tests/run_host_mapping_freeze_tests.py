@@ -12,10 +12,11 @@ import sys
 parser = argparse.ArgumentParser()
 parser.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
 parser.add_argument('--unit-only', action='store_true')
+parser.add_argument('--output-dir', type=Path)
 parser.add_argument('--boost-include', type=Path)
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
-out = root / '.diagnostics/m4-host-mapping-freeze'
+out = args.output_dir.resolve() if args.output_dir else root / '.diagnostics/m4-host-mapping-freeze'
 out.mkdir(parents=True, exist_ok=True)
 header_path = 'src/common/host_mapping_domain.h'
 unit_path = 'tools/physical_coherency_tests/host_mapping_domain_tests.cpp'

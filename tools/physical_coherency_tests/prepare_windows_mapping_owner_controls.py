@@ -22,6 +22,7 @@ for name, marker in [
     ('virtual_mutable', '[[nodiscard]] u8* VirtualBasePointer() noexcept {'),
     ('virtual_const', '[[nodiscard]] const u8* VirtualBasePointer() const noexcept {'),
     ('windows_enrollment', None),
+    ('replacement_epoch', None),
 ]:
     directory = out / name
     directory.mkdir(exist_ok=True)
@@ -39,6 +40,18 @@ for name, marker in [
         target.write_text(changed, encoding='utf-8')
         controls.append(dict(name=name, marker=marker, original_sha256=hashlib.sha256((root/'src/common/host_memory.h').read_bytes()).hexdigest(),
                              changed_sha256=hashlib.sha256(target.read_bytes()).hexdigest(), expected='moved-from-pointer'))
+    elif name == 'replacement_epoch':
+        original = root / 'src/common/published_guest_chunk.h'
+        text = original.read_text()
+        needle = '            Invalidate();\n            epoch = std::move(other.epoch);'
+        assert text.count(needle) == 1
+        includes = directory / 'include'
+        target = includes / 'common/published_guest_chunk.h'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text.replace(needle, '            epoch = std::move(other.epoch);'), encoding='utf-8')
+        controls.append(dict(name=name, original_sha256=hashlib.sha256(original.read_bytes()).hexdigest(),
+                             changed_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
+                             expected='replaced-epoch-still-live'))
     else:
         text = source.read_text()
         needle = 'mapping_domain.Initialize(backing_size, false);'
