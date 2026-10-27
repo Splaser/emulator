@@ -348,6 +348,8 @@ public:
     Id f32x2_max_cas{};
 
     Id write_storage_cas_loop_func{};
+    Id global_atomic_compare_exchange32{};
+    Id global_atomic_compare_exchange64{};
 
     Id load_global_func_u32{};
     Id load_global_func_u32x2{};

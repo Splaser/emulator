@@ -82,6 +82,7 @@ bool IsGlobalMemory(const IR::Inst& inst) {
     case IR::Opcode::GlobalAtomicAnd32:
     case IR::Opcode::GlobalAtomicOr32:
     case IR::Opcode::GlobalAtomicXor32:
+    case IR::Opcode::GlobalAtomicCompareExchange32:
     case IR::Opcode::GlobalAtomicExchange32:
     case IR::Opcode::GlobalAtomicIAdd64:
     case IR::Opcode::GlobalAtomicSMin64:
@@ -91,6 +92,7 @@ bool IsGlobalMemory(const IR::Inst& inst) {
     case IR::Opcode::GlobalAtomicAnd64:
     case IR::Opcode::GlobalAtomicOr64:
     case IR::Opcode::GlobalAtomicXor64:
+    case IR::Opcode::GlobalAtomicCompareExchange64:
     case IR::Opcode::GlobalAtomicExchange64:
     case IR::Opcode::GlobalAtomicIAdd32x2:
     case IR::Opcode::GlobalAtomicSMin32x2:
@@ -134,6 +136,7 @@ bool IsGlobalMemoryWrite(const IR::Inst& inst) {
     case IR::Opcode::GlobalAtomicAnd32:
     case IR::Opcode::GlobalAtomicOr32:
     case IR::Opcode::GlobalAtomicXor32:
+    case IR::Opcode::GlobalAtomicCompareExchange32:
     case IR::Opcode::GlobalAtomicExchange32:
     case IR::Opcode::GlobalAtomicIAdd64:
     case IR::Opcode::GlobalAtomicSMin64:
@@ -143,6 +146,7 @@ bool IsGlobalMemoryWrite(const IR::Inst& inst) {
     case IR::Opcode::GlobalAtomicAnd64:
     case IR::Opcode::GlobalAtomicOr64:
     case IR::Opcode::GlobalAtomicXor64:
+    case IR::Opcode::GlobalAtomicCompareExchange64:
     case IR::Opcode::GlobalAtomicExchange64:
     case IR::Opcode::GlobalAtomicIAdd32x2:
     case IR::Opcode::GlobalAtomicSMin32x2:
@@ -217,6 +221,8 @@ IR::Opcode GlobalToStorage(IR::Opcode opcode) {
         return IR::Opcode::StorageAtomicOr32;
     case IR::Opcode::GlobalAtomicXor32:
         return IR::Opcode::StorageAtomicXor32;
+    case IR::Opcode::GlobalAtomicCompareExchange32:
+        return IR::Opcode::StorageAtomicCompareExchange32;
     case IR::Opcode::GlobalAtomicExchange32:
         return IR::Opcode::StorageAtomicExchange32;
     case IR::Opcode::GlobalAtomicIAdd64:
@@ -235,6 +241,8 @@ IR::Opcode GlobalToStorage(IR::Opcode opcode) {
         return IR::Opcode::StorageAtomicOr64;
     case IR::Opcode::GlobalAtomicXor64:
         return IR::Opcode::StorageAtomicXor64;
+    case IR::Opcode::GlobalAtomicCompareExchange64:
+        return IR::Opcode::StorageAtomicCompareExchange64;
     case IR::Opcode::GlobalAtomicExchange64:
         return IR::Opcode::StorageAtomicExchange64;
     case IR::Opcode::GlobalAtomicIAdd32x2:
@@ -480,6 +488,14 @@ void ReplaceAtomic(IR::Block& block, IR::Inst& inst, const IR::U32& storage_inde
 void Replace(IR::Block& block, IR::Inst& inst, const IR::U32& storage_index,
              const IR::U32& offset) {
     switch (inst.GetOpcode()) {
+    case IR::Opcode::GlobalAtomicCompareExchange32:
+    case IR::Opcode::GlobalAtomicCompareExchange64: {
+        const auto it{block.IteratorTo(inst)};
+        const IR::Value value{*block.PrependNewInst(
+            it, GlobalToStorage(inst.GetOpcode()), {storage_index, offset, inst.Arg(1), inst.Arg(2)})};
+        inst.ReplaceUsesWith(value);
+        return;
+    }
     case IR::Opcode::LoadGlobalS8:
     case IR::Opcode::LoadGlobalU8:
     case IR::Opcode::LoadGlobalS16:
