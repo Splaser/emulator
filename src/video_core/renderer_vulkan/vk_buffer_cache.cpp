@@ -972,8 +972,10 @@ void BufferCacheRuntime::PostCopyBarrier() {
         .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
     };
     scheduler.RequestOutsideRenderPassOperationContext();
-    scheduler.RecordProvenanceBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                      WRITE_BARRIER);
+    // Batched readback also needs device writes visible to the CPU after completion.
+    scheduler.RecordProvenanceBarrier(
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, WRITE_BARRIER);
 }
 
 namespace {
