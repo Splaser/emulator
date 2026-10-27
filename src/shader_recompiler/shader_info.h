@@ -339,6 +339,8 @@ struct Info {
     bool uses_image_buffers{};
     bool uses_shared_increment{};
     bool uses_shared_decrement{};
+    bool uses_global_atomic_compare_exchange32{};
+    bool uses_global_atomic_compare_exchange64{};
     bool uses_global_increment{};
     bool uses_global_decrement{};
     bool uses_atomic_f32_add{};
