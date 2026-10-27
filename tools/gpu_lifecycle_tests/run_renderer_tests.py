@@ -19,7 +19,7 @@ root = Path(__file__).resolve().parents[2]
 out = root/'.diagnostics/gpu-lifecycle'/('windows' if os.name=='nt' else 'linux')
 out.mkdir(parents=True, exist_ok=True)
 def extract(path, marker):
-    text=(root/path).read_text()
+    text=(root/path).read_text(encoding='utf-8')
     if marker not in text:
         return ''
     start=text.index(marker); opening=text.index('{',start); depth=1; end=opening+1
@@ -53,6 +53,7 @@ if not renderer_shutdown:
     renderer_shutdown='void RendererVulkan::Shutdown() { throw std::runtime_error("no renderer drain"); }'
 
 head=r'''
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -62,6 +63,7 @@ head=r'''
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <shared_mutex>
 #include <stdexcept>
@@ -87,7 +89,7 @@ template<class T> T Ready(std::future<T>& f) {
     Require(f.wait_for(5s)==std::future_status::ready,"operation timeout"); return f.get();
 }
 namespace Common {
-enum class ThreadPriority { High };
+enum class ThreadPriority { High, Critical };
 void SetCurrentThreadName(const char*) {}
 void SetCurrentThreadPriority(ThreadPriority) {}
 }
@@ -210,7 +212,8 @@ struct RendererVulkan {
         void Shutdown() {AssertCanSubmit(); order.push_back("scheduler_join");}
         void RegisterOnSubmit(std::function<void()>) {order.push_back("detach_on_submit");}
     } scheduler;
-    struct PresentSpy { void Shutdown() {order.push_back("presentation_join");} } present_manager;
+    struct PresentSpy { void Shutdown() {order.push_back("presentation_join");} };
+    std::optional<PresentSpy> present_manager{std::in_place};
     struct TurboSpy { void reset() {order.push_back("turbo_join");} } turbo_mode;
     struct DeviceSpy {
         std::mutex* submit_mutex;
@@ -237,6 +240,13 @@ void renderer_order() {
     order.clear(); {RendererVulkan renderer;}
     const std::vector<std::string> expected={"pin_seal","pipelines","finish","fencing","runtime_finish","runtime_finish","recording","presentation_join","scheduler_join","detach_on_submit","turbo_join","device_idle","controlled_retire","completion_join","imports"};
     Require(order==expected,"renderer destroys resources or waits idle before host workers are joined");
+}
+void renderer_headless() {
+    renderer_order();
+    auto expected=order;
+    expected.erase(std::find(expected.begin(),expected.end(),"presentation_join"));
+    order.clear(); {RendererVulkan renderer;renderer.present_manager.reset();}
+    Require(order==expected,"headless shutdown lost producer drains or accessed absent presenter");
 }
 void renderer_failed_idle() {
     order.clear(); {RendererVulkan renderer;renderer.device.idle_result=-4;renderer.Shutdown();}
@@ -310,6 +320,7 @@ int main(int argc,char** argv) {
         std::string test=argc>1?argv[1]:"renderer_order";
         if(test=="renderer_order") renderer_order(); else if(test=="scheduler") scheduler_drain();
         else if(test=="renderer_failed_idle") renderer_failed_idle();
+        else if(test=="renderer_headless") renderer_headless();
         else if(test=="scheduler_cancel") scheduler_cancel();
         else if(test=="presentation") present_drain(); else if(test=="fencing") fence_cancel();
         else if(test=="turbo") turbo_drain(); else if(test=="completion") completion_drain();
@@ -335,7 +346,7 @@ subprocess.run(flags+[str(cpp),'-o',str(exe)],check=True)
     'instrumentation':['signal on entry to wait/drain'],
 },indent=2))
 failed=False
-for case in args.case or ['renderer_order','renderer_failed_idle','scheduler','scheduler_cancel','presentation','fencing','turbo','completion']:
+for case in args.case or ['renderer_order','renderer_headless','renderer_failed_idle','scheduler','scheduler_cancel','presentation','fencing','turbo','completion']:
     for i in range(args.repeat):
         result=subprocess.run([str(exe),case],capture_output=True,text=True,timeout=20)
         (out/f'renderer-{case}-{i}.log').write_text(result.stdout+result.stderr)

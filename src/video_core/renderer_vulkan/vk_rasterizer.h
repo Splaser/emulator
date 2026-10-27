@@ -7,6 +7,7 @@
 #include <atomic>
 #include <bitset>
 #include <memory>
+#include <chrono>
 #include <optional>
 #include <shared_mutex>
 
@@ -244,6 +245,8 @@ private:
     /// Once a frame: decides whether finished passes are submitted to the host GPU early.
     void UpdatePassEndSubmit();
 
+    void RecordComputeWriteBarrier();
+
     void UpdateDynamicStates();
 
     void HandleTransformFeedback();
@@ -325,6 +328,8 @@ private:
     [[maybe_unused]] u32 frames_off = 0;
     [[maybe_unused]] s64 last_frame_wall_ns = 0;
     [[maybe_unused]] s64 last_frame_cpu_ns = 0;
+
+    std::chrono::steady_clock::time_point last_submit_time{};
 
     std::shared_mutex shutdown_mutex;
     std::atomic_bool is_shutting_down{false};

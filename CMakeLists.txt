@@ -116,6 +116,7 @@ option(CITRON_USE_CPM "Use CPM.cmake to fetch dependencies" ON)
 if (CITRON_USE_CPM AND CITRON_USE_BUNDLED_VCPKG)
     message(FATAL_ERROR "CITRON_USE_CPM and CITRON_USE_BUNDLED_VCPKG cannot both be enabled")
 endif()
+option(CITRON_BUNDLE_SCARLETNX "Bundle a prebuilt ScarletNX (the 'Run with AOT' backend, Windows x86_64 only) next to citron. Needs CITRON_USE_CPM; ~110 MB download, ~350 MB unpacked" OFF)
 option(CITRON_CLANGCL "Build natively on Windows with clang-cl and the MSVC ABI" OFF)
 option(CITRON_CLANGCL_FULL_LTO_LINE_TABLES "Use CodeView line tables for clang-cl full-LTO RelWithDebInfo" OFF)
 
