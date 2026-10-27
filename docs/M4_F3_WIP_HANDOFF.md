@@ -1,5 +1,18 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-27: native Windows mapping effects and moved-owner exports
+
+After the FFR/upstream synchronization, this checkpoint repairs a demonstrated
+post-move raw-export gap in HostMemory's four pointer getters. Real Windows
+alias/remap/protection/retained-allocation tests and per-getter counterfactuals
+retain the unsupported-freeze refusal boundary. The cold native owner bootstrap
+uses a private backend that refuses GPU work after upstream removed RendererNull.
+See [scope, diagnosis and remaining gates](M4_WINDOWS_MAPPING_OWNER.md) and
+[exact local results](M4_WINDOWS_MAPPING_OWNER_RESULTS.json). CI remains deferred;
+no main or FFR worktree changes. Physical freeze, active guest adoption and native
+GPU completion remain open; GuestBackingAdmission remains Unknown.
+
+
 ## 2026-10-26: restricted real native owner foundation
 
 The next gate now has Windows native evidence using a private owned System,

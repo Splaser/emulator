@@ -8,6 +8,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include "common/settings.h"
 #include "core/restricted_process_owner.h"
+#include "core/restricted_process_renderer.h"
+#include "core/frontend/emu_window.h"
+#include "core/frontend/graphics_context.h"
+#include "video_core/renderer_base.h"
 
 TEST_CASE("Restricted native owner survives loss of external roots", "[native-restricted-owner]") {
     using Owner = Core::RestrictedProcessOwner;
@@ -153,4 +157,17 @@ TEST_CASE("Restricted foundation outlives an unpolled native cohort", "[.][nativ
     REQUIRE(observation->retirement == Owner::Retirement::Live);
     cohort.reset();
     REQUIRE(observation->retirement == Owner::Retirement::Released);
+}
+
+TEST_CASE("Restricted cold backend never manufactures fence completion", "[.][native-owner-forbidden-gpu]") {
+    class Window final : public Core::Frontend::EmuWindow {
+    public:
+        std::unique_ptr<Core::Frontend::GraphicsContext> CreateSharedContext() const override {
+            return std::make_unique<Core::Frontend::GraphicsContext>();
+        }
+        bool IsShown() const override { return false; }
+    } window;
+    auto renderer = Core::Detail::CreateRestrictedProcessRenderer(window);
+    renderer->ReadRasterizer()->SignalFence([] { std::_Exit(92); });
+    FAIL("restricted backend accepted a fence");
 }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstring>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -37,7 +38,9 @@ nvhost_gpu::nvhost_gpu(Core::System& system_, EventInterface& events_interface_,
     : nvdevice{system_}, events_interface{events_interface_}, core{core_},
       syncpoint_manager{core_.GetSyncpointManager()}, nvmap{core.GetNvMapFile()},
       channel_state{std::move(channel)} {
-    ASSERT(channel_state);
+    if (!channel_state) {
+        throw std::invalid_argument("NVDRV channel owner is missing");
+    }
     channel_syncpoint = syncpoint_manager.AllocateSyncpoint(false);
     sm_exception_breakpoint_int_report_event =
         events_interface.CreateEvent("GpuChannelSMExceptionBreakpointInt");

@@ -96,7 +96,7 @@
 #include "hid_core/hid_core.h"
 #include "network/network.h"
 #include "video_core/host1x/host1x.h"
-#include "video_core/renderer_null/renderer_null.h"
+#include "core/restricted_process_renderer.h"
 #include "video_core/renderer_base.h"
 #include "video_core/video_core.h"
 
@@ -747,8 +747,7 @@ void System::InitializeRestrictedOwner(Frontend::EmuWindow& window) {
     impl->cpu_manager.Initialize();
     impl->host1x_core.emplace(*this);
     impl->gpu_core = std::make_unique<Tegra::GPU>(*this, true, false);
-    impl->gpu_core->BindRenderer(
-        std::make_unique<Null::RendererNull>(window, *impl->gpu_core, window.CreateSharedContext()));
+    impl->gpu_core->BindRenderer(Detail::CreateRestrictedProcessRenderer(window));
     impl->gpu_core->Start();
     impl->cpu_manager.OnGpuReady();
     impl->core_timing.SyncPause(false);

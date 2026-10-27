@@ -933,30 +933,6 @@ struct KernelCore::Impl {
     Core::System& system;
 };
 
-struct KernelCore::SlabHeapContainer {
-    KSlabHeap<KClientSession> client_session;
-    KSlabHeap<KEvent> event;
-    KSlabHeap<KPort> port;
-    KSlabHeap<KProcess> process;
-    KSlabHeap<KResourceLimit> resource_limit;
-    KSlabHeap<KSession> session;
-    KSlabHeap<KLightSession> light_session;
-    KSlabHeap<KSharedMemory> shared_memory;
-    KSlabHeap<KSharedMemoryInfo> shared_memory_info;
-    KSlabHeap<KThread> thread;
-    KSlabHeap<KTransferMemory> transfer_memory;
-    KSlabHeap<KCodeMemory> code_memory;
-    KSlabHeap<KDeviceAddressSpace> device_address_space;
-    KSlabHeap<KPageBuffer> page_buffer;
-    KSlabHeap<KThreadLocalPage> thread_local_page;
-    KSlabHeap<KObjectName> object_name;
-    KSlabHeap<KSessionRequest> session_request;
-    KSlabHeap<KSecureSystemResource> secure_system_resource;
-    KSlabHeap<KThread::LockWithPriorityInheritanceInfo> lock_info;
-    KSlabHeap<KEventInfo> event_info;
-    KSlabHeap<KDebug> debug;
-};
-
 KernelCore::KernelCore(Core::System& system) : impl{std::make_unique<Impl>(system, *this)} {}
 KernelCore::~KernelCore() = default;
 

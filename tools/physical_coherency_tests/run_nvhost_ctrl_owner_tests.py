@@ -11,6 +11,7 @@ import subprocess
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--cxx', default=os.environ.get('CXX', 'g++'))
+p.add_argument('--fmt-include', type=Path, help='Existing fmt headers for the vendored Dynarmic layout')
 p.add_argument('--repeat', type=int, default=3)
 p.add_argument('--baseline', action='store_true')
 p.add_argument('--candidate', action='store_true')
@@ -126,7 +127,7 @@ terminal = out / 'terminal.cpp'
 terminal.write_text(read('src/common/terminal_fail_stop.cpp'))
 flags = [a.cxx, '-std=c++23', '-O1', '-pthread', '-Wall', '-Wextra', '-Werror',
          '-Wno-unused-parameter', '-DFMT_HEADER_ONLY', '-I', str(root / 'src'), '-isystem',
-         str(root / 'externals/dynarmic/externals/fmt/include')]
+         str(a.fmt_include or root / 'externals/dynarmic/externals/fmt/include')]
 
 
 observations = []

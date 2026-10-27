@@ -56,6 +56,14 @@ endif()
 
 add_test(NAME tests COMMAND tests)
 
+if(WIN32)
+    add_executable(windows_mapping_owner_tests common/windows_mapping_owner.cpp)
+    set_property(TARGET windows_mapping_owner_tests PROPERTY UNITY_BUILD OFF)
+    target_link_libraries(windows_mapping_owner_tests PRIVATE common ${PLATFORM_LIBRARIES} Threads::Threads)
+    add_test(NAME windows_mapping_owner COMMAND windows_mapping_owner_tests)
+    set_tests_properties(windows_mapping_owner PROPERTIES TIMEOUT 30)
+endif()
+
 # Full native owners and software Vulkan; separate from portable unit tests so a missing
 # graphics driver is an explicit CI failure rather than a silently skipped acceptance.
 add_executable(controlled_cpu_scheduler_tests core/controlled_cpu_scheduler.cpp)

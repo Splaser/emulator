@@ -5,6 +5,11 @@ Baseline: `874bbe70c60dd2ad7984f89ae94469d5b9eada59`.
 CI remains deferred. This task writes only the issue checkout, not main.
 [Commands, source hashes, runtime logs and cleanup](M4_NATIVE_OWNER_RESULTS.json).
 
+The 2026-10-27 synchronization follow-up replaces the removed Null renderer only
+inside the private cold owner bootstrap. The historical results below retain
+their original source context; see [the current mapping/owner checkpoint](M4_WINDOWS_MAPPING_OWNER.md)
+for the refusal backend and fresh native revalidation.
+
 ## Required order
 
 | Priority | Gate | Acceptance |

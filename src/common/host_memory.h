@@ -193,19 +193,24 @@ public:
     }
 
     [[nodiscard]] u8* BackingBasePointer() noexcept {
+        // A moved-from facade has neither allocation ownership nor its export ledger.
+        if (!impl) return nullptr;
         mapping_domain.ObserveEscape(HostMappingDomain::CanonicalPointer);
         return backing_base;
     }
     [[nodiscard]] const u8* BackingBasePointer() const noexcept {
+        if (!impl) return nullptr;
         mapping_domain.ObserveEscape(HostMappingDomain::CanonicalPointer);
         return backing_base;
     }
 
     [[nodiscard]] u8* VirtualBasePointer() noexcept {
+        if (!impl) return nullptr;
         mapping_domain.ObserveEscape(HostMappingDomain::VirtualPointer);
         return virtual_base;
     }
     [[nodiscard]] const u8* VirtualBasePointer() const noexcept {
+        if (!impl) return nullptr;
         mapping_domain.ObserveEscape(HostMappingDomain::VirtualPointer);
         return virtual_base;
     }

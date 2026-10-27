@@ -109,7 +109,9 @@ struct GPU::Impl {
         {
             std::scoped_lock map_lock{channel_map_mutex};
             auto it = channels.find(channel_id);
-            ASSERT(it != channels.end());
+            if (it == channels.end()) {
+                throw std::runtime_error("GPU channel is not registered");
+            }
             channel_state = it->second;
         }
         bound_channel = channel_id;

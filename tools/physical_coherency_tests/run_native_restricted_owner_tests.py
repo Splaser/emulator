@@ -28,6 +28,8 @@ env = os.environ.copy()
 env['PATH'] = os.pathsep.join(str(d.resolve()) for d in a.dll_dir) + os.pathsep + env['PATH']
 inputs = [
     'src/core/restricted_process_owner.h', 'src/core/restricted_process_owner.cpp',
+    'src/core/restricted_process_renderer.h', 'src/core/restricted_process_renderer.cpp',
+    'src/common/host_memory.h',
     'src/core/core.h', 'src/core/core.cpp', 'src/core/hle/kernel/kernel.h',
     'src/core/hle/kernel/kernel.cpp', 'src/core/hle/kernel/k_event.cpp',
     'src/core/hle/kernel/k_process.cpp', 'src/core/hle/kernel/process_cohort_stop.cpp',
@@ -43,6 +45,8 @@ for i in range(a.repeat):
         ('native-owner', '[native-restricted-owner]', 0, 'All tests passed'),
         ('unknown-owner', '[native-owner-unknown]', 0, 'All tests passed'),
         ('unpolled-owner', '[native-owner-unpolled]', 0, 'All tests passed'),
+        ('forbidden-gpu', '[native-owner-forbidden-gpu]', 86,
+         'stage=restricted_owner.renderer reason=submission_forbidden'),
         ('foreign-owner-release', '[native-owner-terminal]', 86,
          'stage=restricted_owner.release reason=wrong_thread'),
         ('foreign-cohort-release', '[native-cohort-terminal]', 86,
@@ -89,7 +93,7 @@ result = dict(platform=platform.platform(), python=sys.version,
               repeats_requested=a.repeat, records=records,
               mutant_records=mutant_records,
               mutant_binary_sha256=hashlib.sha256(a.mutant_binary.read_bytes()).hexdigest() if a.mutant_binary else None,
-              passed=(len(records) == a.repeat * 5 and all(r['passed'] for r in records) and
+              passed=(len(records) == a.repeat * 6 and all(r['passed'] for r in records) and
                       (not a.mutant_binary or (len(mutant_records) == a.repeat and
                                              all(r['passed'] for r in mutant_records)))),
               evidence_scope='Native Windows real kernel owner lifetime only; guest backing admission Unknown')
