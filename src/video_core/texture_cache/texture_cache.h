@@ -1672,9 +1672,16 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
         new_image.flags |= ImageFlagBits::Sparse;
     }
 
+    // Initialize untouched subresources before preserving GPU-written overlaps. Uploading after
+    // those copies would discard their contents and use an undefined destination layout first.
+    RefreshContents(new_image, new_image_id);
+
     for (const ImageId overlap_id : join_ignore_textures) {
         Image& overlap = slot_images[overlap_id];
-        if (True(overlap.flags & ImageFlagBits::GpuModified)) {
+        // A remap or a newer CPU write invalidates the old GPU contents even if GpuModified
+        // is still set. Initialize from the current guest backing instead of copying stale data.
+        if (True(overlap.flags & ImageFlagBits::GpuModified) &&
+            False(overlap.flags & (ImageFlagBits::CpuModified | ImageFlagBits::Remapped))) {
             // For ignored textures that are GPU modified, try to preserve the data
             // by copying it to the new image if possible, otherwise mark as modified
             const auto base_opt = new_image.TryFindBase(overlap.gpu_addr);
@@ -1703,9 +1710,6 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
         UnregisterImage(overlap_id);
         DeleteImage(overlap_id);
     }
-
-    // TODO: Only upload what we need
-    RefreshContents(new_image, new_image_id);
 
     if (can_rescale) {
         ScaleUp(new_image);
