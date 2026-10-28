@@ -11,6 +11,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 #include <boost/container/small_vector.hpp>
 
@@ -1214,7 +1215,7 @@ void TextureCacheRuntime::ReinterpretImage(Image& dst, Image& src,
             offset, std::max(copy_size(in_copy, src.info.format),
                              copy_size(out_copy, dst.info.format)));
     }
-    if (total_size > std::numeric_limits<size_t>::max()) {
+    if (!std::in_range<size_t>(total_size)) {
         throw VideoCommon::InvalidImageSize{"Reinterpret staging size exceeds host address space"};
     }
     const VkBuffer copy_buffer = GetTemporaryBuffer(static_cast<size_t>(total_size));
