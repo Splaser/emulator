@@ -62,6 +62,11 @@ if(WIN32)
     target_link_libraries(windows_mapping_owner_tests PRIVATE common ${PLATFORM_LIBRARIES} Threads::Threads)
     add_test(NAME windows_mapping_owner COMMAND windows_mapping_owner_tests)
     set_tests_properties(windows_mapping_owner PROPERTIES TIMEOUT 30)
+    add_executable(windows_alias_freeze_tests common/windows_alias_freeze.cpp)
+    set_property(TARGET windows_alias_freeze_tests PROPERTY UNITY_BUILD OFF)
+    target_link_libraries(windows_alias_freeze_tests PRIVATE common ${PLATFORM_LIBRARIES} Threads::Threads)
+    add_test(NAME windows_alias_freeze COMMAND windows_alias_freeze_tests)
+    set_tests_properties(windows_alias_freeze PROPERTIES TIMEOUT 30)
 endif()
 
 # Full native owners and software Vulkan; separate from portable unit tests so a missing

@@ -5,6 +5,11 @@ Validation base: `4fa1ad8e0d9f36340bcfe3486e875afb60a1f1cd`.
 [Exact evidence and cleanup](M4_CLOSEOUT_STATUS_RESULTS.json).
 CI remains deferred; main and the FFR worktree are not changed.
 
+The 2026-10-28 [alias/PTE refusal checkpoint](M4_PHYSICAL_ALIAS_REFUSAL.md) adds
+fresh physical-bypass witnesses and distinguishes the synced KPageTable dependency
+from the historical native-owner evidence below. This table retains its dated
+2026-10-27 validation context; it is not a current-head full owner rerun.
+
 ## Current gates
 
 | Gate | Verified status | Remaining acceptance |

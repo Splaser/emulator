@@ -1,5 +1,19 @@
 # M4 physical alias coherency: WIP handoff
 
+## 2026-10-28: physical alias/PTE bypass and exact refusal evidence
+
+[Physical alias refusal checkpoint](M4_PHYSICAL_ALIAS_REFUSAL.md) and
+[exact results](M4_PHYSICAL_ALIAS_REFUSAL_RESULTS.json): 24/24 native Windows alias
+processes pass, plus three mapping-owner regression positives and two strict
+production objects. Actual old-pointer writes, direct VirtualProtect and saved-VA
+remaps demonstrate why metadata closure is not physical isolation. Six-entry
+closure refusals and six exact negative controls are distinguished from production
+Windows unsupported refusal. No production source repair or Windows enrollment.
+Physical freeze remains Open, GuestBackingAdmission Unknown; CI deferred.
+Synchronized KPageTable changes mean prior native-owner execution is historical,
+not freshly validated at this head. Main and other worktrees remain untouched.
+
+
 ## 2026-10-27: closeout status verified without production refactoring
 
 [Current gate status](M4_CLOSEOUT_STATUS.md) and [exact results](M4_CLOSEOUT_STATUS_RESULTS.json)
