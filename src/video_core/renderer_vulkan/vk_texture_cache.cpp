@@ -7,6 +7,7 @@
 #include <atomic>
 #include <bit>
 #include <cmath>
+#include <numeric>
 #include <span>
 #include <string>
 #include <string_view>
@@ -1169,6 +1170,9 @@ void TextureCacheRuntime::BarrierFeedbackLoop() {
 
 void TextureCacheRuntime::ReinterpretImage(Image& dst, Image& src,
                                            std::span<const VideoCommon::ImageCopy> copies) {
+    if (copies.empty()) {
+        return;
+    }
     boost::container::small_vector<VkBufferImageCopy, 16> vk_in_copies(copies.size());
     boost::container::small_vector<VkBufferImageCopy, 16> vk_out_copies(copies.size());
     const VkImageAspectFlags src_aspect_mask = src.AspectMask();
@@ -1186,18 +1190,34 @@ void TextureCacheRuntime::ReinterpretImage(Image& dst, Image& src,
     std::ranges::transform(copies, vk_out_copies.begin(), [dst_aspect_mask](const auto& copy) {
         return MakeBufferImageCopy(copy, false, dst_aspect_mask);
     });
-    const u32 img_bpp = BytesPerBlock(dst.info.format);
-    size_t total_size = 0;
-    for (const auto& copy : copies) {
+    const auto copy_size = [](const VkBufferImageCopy& copy, PixelFormat format) {
+        using namespace VideoCommon::ImageSize;
+        const u64 blocks_x = DivCeil(copy.imageExtent.width, DefaultBlockWidth(format));
+        const u64 blocks_y = DivCeil(copy.imageExtent.height, DefaultBlockHeight(format));
+        const u64 blocks = Multiply(blocks_x, blocks_y);
+        const u64 slices = Multiply(copy.imageExtent.depth, copy.imageSubresource.layerCount);
+        return Multiply(Multiply(blocks, slices), BytesPerBlock(format));
+    };
+    // Each region needs its own tightly packed slice, aligned for both image formats.
+    // Array layers also occupy buffer space; extent.depth alone only covers 3D slices.
+    const u64 texel_alignment = std::lcm(u64{BytesPerBlock(src.info.format)},
+                                         u64{BytesPerBlock(dst.info.format)});
+    const u64 alignment = std::lcm(u64{4}, texel_alignment);
+    u64 total_size = 0;
+    for (size_t index = 0; index < copies.size(); ++index) {
+        const u64 offset = VideoCommon::ImageSize::AlignUp(total_size, alignment);
+        auto& in_copy = vk_in_copies[index];
+        auto& out_copy = vk_out_copies[index];
+        in_copy.bufferOffset = offset;
+        out_copy.bufferOffset = offset;
         total_size = VideoCommon::ImageSize::Add(
-            total_size,
-            VideoCommon::ImageSize::Multiply(
-                VideoCommon::ImageSize::Multiply(
-                    VideoCommon::ImageSize::Multiply(copy.extent.width, copy.extent.height),
-                    copy.extent.depth),
-                img_bpp));
+            offset, std::max(copy_size(in_copy, src.info.format),
+                             copy_size(out_copy, dst.info.format)));
     }
-    const VkBuffer copy_buffer = GetTemporaryBuffer(total_size);
+    if (total_size > std::numeric_limits<size_t>::max()) {
+        throw VideoCommon::InvalidImageSize{"Reinterpret staging size exceeds host address space"};
+    }
+    const VkBuffer copy_buffer = GetTemporaryBuffer(static_cast<size_t>(total_size));
     const VkImage dst_image = dst.Handle();
     const VkImage src_image = src.Handle();
     scheduler.RequestOutsideRenderPassOperationContext();
