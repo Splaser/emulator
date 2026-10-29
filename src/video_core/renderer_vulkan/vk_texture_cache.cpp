@@ -1013,6 +1013,8 @@ TextureCacheRuntime::TextureCacheRuntime(const Device& device_, Scheduler& sched
         msaa_copy_pass = std::make_unique<MSAACopyPass>(
             device, scheduler, descriptor_pool, staging_buffer_pool, compute_pass_descriptor_queue);
     }
+    depth_stencil_dma_pass = std::make_unique<DepthStencilDmaPass>(
+        device, scheduler, descriptor_pool, compute_pass_descriptor_queue);
     // Turnip stores an image linear, not tiled, when its mutable format list holds a format with
     // a component swap such as B8G8R8A8 (tu_image.cc: format_list_has_swaps sets
     // force_linear_tile when the formats are not all UBWC compatible). Every RGBA8 image would get
@@ -1817,10 +1819,10 @@ using namespace DepthStencilStaging;
 namespace {
 void RecordStagingDownload(Scheduler* scheduler, VkImage image_handle,
                            VkImageAspectFlags aspect_mask, std::vector<VkBuffer> buffers_vector,
-                           std::vector<std::vector<VkBufferImageCopy>> vk_copies) {
+                           std::vector<std::vector<VkBufferImageCopy>> vk_copies, bool host_visible = true) {
     scheduler->RequestOutsideRenderPassOperationContext();
     scheduler->Record([buffers = std::move(buffers_vector), image = image_handle,
-                       aspect_mask_ = aspect_mask, vk_copies](vk::CommandBuffer cmdbuf) {
+                       aspect_mask_ = aspect_mask, vk_copies, host_visible](vk::CommandBuffer cmdbuf) {
         const VkImageMemoryBarrier read_barrier{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .pNext = nullptr,
@@ -1874,11 +1876,140 @@ void RecordStagingDownload(Scheduler* scheduler, VkImage image_handle,
         // HOST: the CPU reads the copies once the fence signals, and a fence alone does not make
         // device writes visible to the host (Vulkan spec, synchronization chapter).
         cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                               VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, 0,
+                               VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | (host_visible ? VK_PIPELINE_STAGE_HOST_BIT : 0u), 0,
                                memory_write_barrier, nullptr, image_write_barrier);
     });
 }
 } // namespace
+
+namespace {
+void CopyDmaBaseline(Scheduler& scheduler, VkBuffer src, size_t src_offset, VkBuffer dst,
+                     size_t dst_offset, size_t size, bool host = false) {
+    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.Record([=](vk::CommandBuffer cmdbuf) {
+        const VkMemoryBarrier before{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
+                                     VK_ACCESS_MEMORY_WRITE_BIT,
+                                     VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT};
+        const VkBufferMemoryBarrier after{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,nullptr,
+            VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT|
+                (host?VK_ACCESS_HOST_READ_BIT:0u),VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,
+                dst,dst_offset,size};
+        cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                               0, before);
+        const VkBufferCopy copy{src_offset, dst_offset, size};
+        cmdbuf.CopyBuffer(src, dst, copy);
+        cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                               VK_PIPELINE_STAGE_ALL_COMMANDS_BIT |
+                                   (host ? VK_PIPELINE_STAGE_HOST_BIT : 0u),
+                               0, nullptr, after, nullptr);
+    });
+}
+void ConvertDmaPlanes(TextureCacheRuntime& runtime, const StagingBufferRef& packed, size_t size,
+                      const StagingBufferRef& planes, size_t plane_size,
+                      const StagingDepthStencilCopies& plan, DS::GuestLayout guest, bool pack) {
+    if (packed.offset || planes.offset) {
+        throw std::invalid_argument("DMA scratch buffers must have zero offsets");
+    }
+    for (const auto& t : plan.transfers) {
+        runtime.depth_stencil_dma_pass->Run(
+            packed.buffer, static_cast<u32>(size), planes.buffer, static_cast<u32>(plane_size),
+            {static_cast<u32>(t.region.width), static_cast<u32>(t.region.height),
+             static_cast<u32>(t.region.layers), static_cast<u32>(t.packed.row_pitch),
+             static_cast<u32>(t.packed.layer_pitch), static_cast<u32>(t.packed.offset),
+             static_cast<u32>(t.depth.offset), static_cast<u32>(t.stencil.offset),
+             static_cast<u32>(guest), pack ? 1u : 0u, pack ? 0u : static_cast<u32>(t.depth.offset),
+             static_cast<u32>(pack ? size : t.end)});
+    }
+}
+} // namespace
+
+bool Image::CanDepthStencilDma(std::span<const BufferImageCopy> copies, size_t size) const {
+    if (!NeedsSynchronousDownloadBaseline()) {
+        return true;
+    }
+    if (!size || size % 4 || size > runtime->device.GetMaxStorageBufferRange()) {
+        return false;
+    }
+    const auto guest = GuestDepthStencilFormat(info.format);
+    const auto host = HostDepthStencilFormat(image_format);
+    if (!IsNativeDmaFormat(guest, host)) {
+        return false;
+    }
+    try {
+        const auto plan = PlanStagingDepthStencilCopies(info, guest, host, copies, size);
+        return !plan.transfers.empty() && plan.size <= runtime->device.GetMaxStorageBufferRange();
+    } catch (const std::invalid_argument&) {
+        return false;
+    } catch (const VideoCommon::InvalidImageSize&) {
+        return false;
+    }
+}
+
+void Image::UploadMemoryDma(VkBuffer buffer, size_t offset, size_t size,
+                            std::span<const BufferImageCopy> copies) {
+    if (!NeedsSynchronousDownloadBaseline()) {
+        UploadMemory(buffer, offset, copies);
+        return;
+    }
+    if (offset % 4 || !CanDepthStencilDma(copies, size)) {
+        throw std::invalid_argument("Unsupported depth/stencil DMA upload");
+    }
+    const auto guest = GuestDepthStencilFormat(info.format);
+    auto plan = PlanStagingDepthStencilCopies(info, guest, HostDepthStencilFormat(image_format),
+                                              copies, size);
+    // Pool entries carry CurrentTick and cannot recycle before KnownGpuTick reaches it.
+    // DeviceLocal requests never use the upload stream; both offsets are zero/aligned.
+    const auto packed = runtime->staging_buffer_pool.Request(size, MemoryUsage::DeviceLocal);
+    const auto planes = runtime->staging_buffer_pool.Request(plan.size, MemoryUsage::DeviceLocal);
+    CopyDmaBaseline(*scheduler, buffer, offset, packed.buffer, packed.offset, size);
+    ConvertDmaPlanes(*runtime, packed, size, planes, plan.size, plan, guest, false);
+    const bool scaled = True(flags & ImageFlagBits::Rescaled);
+    if (scaled) {
+        ScaleDown(true);
+    }
+    scheduler->RequestOutsideRenderPassOperationContext();
+    const bool was_initialized = std::exchange(initialized, true);
+    scheduler->Record([buffer = planes.buffer, image = *original_image, aspects = aspect_mask,
+                       was_initialized,
+                       regions = std::move(plan.regions)](vk::CommandBuffer cmdbuf) {
+        CopyBufferToImage(cmdbuf, buffer, image, aspects, was_initialized, regions);
+    });
+    if (scaled) {
+        ScaleUp();
+    }
+}
+
+void Image::DownloadMemoryDma(std::span<VkBuffer> buffers, std::span<size_t> offsets, size_t size,
+                              std::span<const BufferImageCopy> copies) {
+    if (!NeedsSynchronousDownloadBaseline()) {
+        DownloadMemory(buffers, offsets, copies);
+        return;
+    }
+    if (buffers.empty() || buffers.size() != offsets.size() ||
+        std::ranges::any_of(offsets, [](size_t offset) { return offset % 4 != 0; }) ||
+        !CanDepthStencilDma(copies, size)) {
+        throw std::invalid_argument("Unsupported depth/stencil DMA readback");
+    }
+    const auto guest = GuestDepthStencilFormat(info.format);
+    auto plan = PlanStagingDepthStencilCopies(info, guest, HostDepthStencilFormat(image_format),
+                                              copies, size);
+    const auto packed = runtime->staging_buffer_pool.Request(size, MemoryUsage::DeviceLocal);
+    const auto planes = runtime->staging_buffer_pool.Request(plan.size, MemoryUsage::DeviceLocal);
+    CopyDmaBaseline(*scheduler, buffers[0], offsets[0], packed.buffer, packed.offset, size);
+    const bool scaled = True(flags & ImageFlagBits::Rescaled);
+    if (scaled) {
+        ScaleDown();
+    }
+    RecordStagingDownload(scheduler, *original_image, aspect_mask, {planes.buffer}, {plan.regions}, false);
+    ConvertDmaPlanes(*runtime, packed, size, planes, plan.size, plan, guest, true);
+    for (size_t i = 0; i < buffers.size(); ++i) {
+        CopyDmaBaseline(*scheduler, packed.buffer, packed.offset, buffers[i], offsets[i], size,
+                        i != 0);
+    }
+    if (scaled) {
+        ScaleUp(true);
+    }
+}
 
 void Image::UploadMemory(VkBuffer buffer, VkDeviceSize offset,
                          std::span<const VideoCommon::BufferImageCopy> copies) {

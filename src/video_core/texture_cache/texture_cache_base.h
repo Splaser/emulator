@@ -234,7 +234,8 @@ public:
 
     [[nodiscard]] std::pair<Image*, BufferImageCopy> DmaBufferImageCopy(
         const Tegra::DMA::ImageCopy& copy_info, const Tegra::DMA::BufferOperand& buffer_operand,
-        const Tegra::DMA::ImageOperand& image_operand, ImageId image_id, bool modifies_image);
+        const Tegra::DMA::ImageOperand& image_operand, ImageId image_id, bool modifies_image,
+        bool prepare = true);
 
     void DownloadImageIntoBuffer(Image* image, BufferType buffer, size_t buffer_offset,
                                  std::span<const VideoCommon::BufferImageCopy> copies,
