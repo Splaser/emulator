@@ -19,6 +19,7 @@ add_executable(tests
     core/exit_callback.cpp
     core/internal_network/network.cpp
     precompiled_headers.h
+    video_core/depth_stencil.cpp
     video_core/blit_operation.cpp
     video_core/memory_tracker.cpp
     video_core/image_size.cpp
