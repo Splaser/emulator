@@ -3,6 +3,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 namespace VideoCommon::DepthStencil {
@@ -24,6 +25,23 @@ struct Region {
 struct Layout {
     std::size_t offset, row_pitch, layer_pitch;
 };
+// Tight aspect planes for one copy, with Vulkan-required four-byte offsets.
+struct Transfer {
+    Region region;
+    Layout packed, depth, stencil;
+    std::size_t end;
+};
+[[nodiscard]] std::optional<Transfer> PlanTransfer(GuestLayout guest, DepthFormat host,
+                                                   Region region, Layout packed,
+                                                   std::size_t packed_size,
+                                                   std::size_t plane_offset);
+[[nodiscard]] bool UnpackTransfer(GuestLayout guest, DepthFormat host, const Transfer& transfer,
+                                  std::span<const std::uint8_t> packed,
+                                  std::span<std::uint8_t> planes);
+[[nodiscard]] bool PackTransfer(GuestLayout guest, DepthFormat host, const Transfer& transfer,
+                                std::span<const std::uint8_t> planes,
+                                std::span<std::uint8_t> packed);
+
 // All three guest layouts can convert to all three host depth representations.
 // UNORM conversions use normalized numeric values with nearest, half-up rounding;
 // narrowing to D16 loses precision (D24 reconstruction error at most 128).

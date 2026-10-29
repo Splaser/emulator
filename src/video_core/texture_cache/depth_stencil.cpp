@@ -102,6 +102,59 @@ std::size_t At(Layout l, std::size_t x, std::size_t y, std::size_t z, std::size_
 }
 } // namespace
 
+std::optional<Transfer> PlanTransfer(GuestLayout guest, DepthFormat host, Region r, Layout packed,
+                                     std::size_t packed_size, std::size_t offset) {
+    const auto db = DepthBytes(host);
+    if (!db || !Fits(packed_size, packed, r, GuestBytes(guest))) {
+        return std::nullopt;
+    }
+    const auto align = [](std::size_t& n) {
+        if (!Add(n, 1, 3)) {
+            return false;
+        }
+        n &= ~std::size_t{3};
+        return true;
+    };
+    std::size_t row = 0, layer = 0, depth_bytes = 0, stencil_layer = 0, stencil_bytes = 0;
+    if (!Add(row, db, r.width) || !Add(layer, row, r.height) ||
+        !Add(depth_bytes, layer, r.layers) || !Add(stencil_layer, r.width, r.height) ||
+        !Add(stencil_bytes, stencil_layer, r.layers) || !align(offset)) {
+        return std::nullopt;
+    }
+    Transfer result{r, packed, {offset, row, layer}, {}, 0};
+    if (!Add(offset, 1, depth_bytes) || !align(offset)) {
+        return std::nullopt;
+    }
+    result.stencil = {offset, r.width, stencil_layer};
+    if (!Add(offset, 1, stencil_bytes) || !align(offset)) {
+        return std::nullopt;
+    }
+    result.end = offset;
+    return result;
+}
+bool UnpackTransfer(GuestLayout guest, DepthFormat host, const Transfer& t,
+                    std::span<const Byte> packed, std::span<Byte> planes) {
+    if (t.depth.offset > t.stencil.offset || t.stencil.offset > planes.size()) {
+        return false;
+    }
+    // Separate spans also prove the writable planes cannot alias.
+    auto depth = planes.first(t.stencil.offset);
+    auto stencil = planes.subspan(t.stencil.offset);
+    auto sl = t.stencil;
+    sl.offset = 0;
+    return Unpack(guest, host, t.region, packed, t.packed, depth, t.depth, stencil, sl);
+}
+bool PackTransfer(GuestLayout guest, DepthFormat host, const Transfer& t,
+                  std::span<const Byte> planes, std::span<Byte> packed) {
+    if (t.depth.offset > t.stencil.offset || t.stencil.offset > planes.size()) {
+        return false;
+    }
+    auto sl = t.stencil;
+    sl.offset = 0;
+    return Pack(guest, host, t.region, planes.first(t.stencil.offset), t.depth,
+                planes.subspan(t.stencil.offset), sl, packed, t.packed);
+}
+
 bool Unpack(GuestLayout guest, DepthFormat host, Region r, std::span<const Byte> packed, Layout pl,
             std::span<Byte> depth, Layout dl, std::span<Byte> stencil, Layout sl) {
     const auto gb = GuestBytes(guest), db = DepthBytes(host);

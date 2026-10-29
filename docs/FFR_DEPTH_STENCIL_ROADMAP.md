@@ -6,7 +6,7 @@
 ## 当前状态
 
 - [x] 1A：CPU helper 已实现，实际生产源码已通过优化构建及断言调试构建的独立测试。尚未接入 staging。
-- [ ] 1B：尚未接入普通 staging 上传与回读。
+- [x] 1B：普通 staging 上传与独立同步回读已接入，通过组件编译和离线测试；GPU 运行待验证。
 - [ ] 2：尚未接入 GPU-side DMA 转换。
 - [ ] 3：尚未完成集成层面的格式回退和生命周期验证。
 
@@ -93,3 +93,17 @@
 - UBSan could not link because this GCC installation lacks libubsan; no sanitizer pass is claimed.
 - The standalone entry point executes the same tests registered with Catch2. The full project/Catch2 target and Android APK were not built. No GPU validation was performed.
 - These explicit byte contracts do not yet bind project PixelFormat values to guest layouts. Integration must select the real guest layout and the actual created VkFormat independently, checking device support. D16S8 is a host representation here, not an invented guest PixelFormat.
+
+## 1B implementation and offline verification (2026-10-29)
+
+- Regular depth/stencil staging uploads now unpack into separately aligned depth/stencil planes, with one pair of VkBufferImageCopy regions per copy/mip/layer range. DMA and asynchronous readback retain their existing paths.
+- Image stores the format selected by the same MakeImageCreateInfo logic that creates its native allocation. Host aspect representation is selected from this VkFormat, independently of guest layout. Unsupported host formats, image types, MSAA and invalid copy ranges are rejected explicitly.
+- Guest mapping was cross-checked against Nouveau nv50_formats.c and the project's TIC lookup: TIC S8Z24 maps to PIPE_FORMAT_Z24_UNORM_S8_UINT and project D24_UNORM_S8_UINT; TIC Z24S8 maps to PIPE_FORMAT_S8_UINT_Z24_UNORM and project S8_UINT_D24_UNORM. Existing blit shaders were not treated as independent byte-layout authority.
+- Source: https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/gallium/drivers/nouveau/nv50/nv50_formats.c (examined via the mesa-mirror copy); local texture_cache/format_lookup_table.cpp binds the TIC codes to PixelFormat.
+- Synchronous readback seeds its destination using original guest data. DownloadMemorySynchronous returns an explicit completion operation owning deferred intermediate planes; callers invoke it after their existing runtime.Finish(), before swizzling back to guest. This retains D32/S8 padding and leaves other guest bytes intact. The batch GC path still waits once. The operation is scoped to the caller rather than stored in a global completion queue.
+- D24 readback ignores X bits and reads stencil only from its own aspect plane. Intermediate offsets are four-byte aligned; packed source offsets and row pitches may be nonaligned because CPU packing handles them.
+- Actual vk_texture_cache.cpp and explicit synchronous TextureCache template instantiations compiled to Windows GCC 13.2 C++23 object files. No Android APK/full application build was performed.
+- Optimized and assertion-debug standalone runs passed for CPU conversion and the production Vulkan staging layout adapter. The adapter checks nine format pairs, five mip dimensions, partial rectangles, layer subsets, pitched buffers, padding, X-bit perturbation and invalid regions. Software buffer/image addressing checks use the production VkBufferImageCopy regions; they do not execute Vulkan commands.
+- Catch2 build and execution passed: six test cases, 33,575,223 assertions, including exhaustive D24 float round-trip and separate D16 quantization checks. Fixed the existing test wrapper to parenthesize logical expressions for Catch2 decomposition.
+- Staging tests are registered in src/tests/CMakeLists.txt. The offline Catch2 runner is under E:/retro/diagnostics/ffr-depth-layout-20261029/catch-project; it builds the real production helper and test files.
+- No runtime GPU execution, driver cache visibility, game behavior or FFR hang resolution is claimed. Async depth/stencil readback and GPU DMA conversion remain outstanding under later stages.
