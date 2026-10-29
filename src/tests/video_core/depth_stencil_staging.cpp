@@ -33,6 +33,14 @@ void StagingAdapterTests() {
             VERIFY(stencil[0] == 0x44);
         }
     }
+    for (auto layout : {DS::GuestLayout::Depth24Stencil8, DS::GuestLayout::Stencil8Depth24,
+                        DS::GuestLayout::Float32Stencil8Padding24}) {
+        VERIFY(!IsNativeDmaFormat(layout, DS::DepthFormat::Unorm16));
+        VERIFY(IsNativeDmaFormat(layout, DS::DepthFormat::Float32) ==
+               (layout == DS::GuestLayout::Float32Stencil8Padding24));
+        VERIFY(IsNativeDmaFormat(layout, DS::DepthFormat::Unorm24) ==
+               (layout != DS::GuestLayout::Float32Stencil8Padding24));
+    }
     for (auto gf : {PixelFormat::S8_UINT_D24_UNORM, PixelFormat::D24_UNORM_S8_UINT,
                     PixelFormat::D32_FLOAT_S8_UINT}) {
         for (auto hf : {VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT,

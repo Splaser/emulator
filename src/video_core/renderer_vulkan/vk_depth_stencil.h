@@ -5,11 +5,11 @@
 #include <bit>
 #include <stdexcept>
 #include <vector>
-#include "video_core/vulkan_common/vulkan.h"
 #include "video_core/surface.h"
 #include "video_core/texture_cache/depth_stencil.h"
 #include "video_core/texture_cache/image_info.h"
 #include "video_core/texture_cache/image_size.h"
+#include "video_core/vulkan_common/vulkan.h"
 namespace Vulkan::DepthStencilStaging {
 using VideoCore::Surface::PixelFormat;
 namespace DS = VideoCommon::DepthStencil;
@@ -42,6 +42,22 @@ inline DS::DepthFormat HostDepthStencilFormat(VkFormat format) {
         throw std::invalid_argument("Unsupported staging host depth/stencil format");
     }
 }
+static_assert(static_cast<u32>(DS::GuestLayout::Depth24Stencil8) == 0 &&
+              static_cast<u32>(DS::GuestLayout::Stencil8Depth24) == 1 &&
+              static_cast<u32>(DS::GuestLayout::Float32Stencil8Padding24) == 2);
+// Stage 2 is bit-preserving only. Numeric guest/host depth conversions require
+// the separately verified fallback kernel in stage 3, never silent bit copies.
+inline bool IsNativeDmaFormat(DS::GuestLayout guest, DS::DepthFormat host) {
+    switch (guest) {
+    case DS::GuestLayout::Depth24Stencil8:
+    case DS::GuestLayout::Stencil8Depth24:
+        return host == DS::DepthFormat::Unorm24;
+    case DS::GuestLayout::Float32Stencil8Padding24:
+        return host == DS::DepthFormat::Float32;
+    }
+    return false;
+}
+
 struct StagingDepthStencilCopies {
     std::vector<DS::Transfer> transfers;
     std::vector<VkBufferImageCopy> regions;

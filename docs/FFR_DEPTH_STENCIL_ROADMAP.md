@@ -7,7 +7,7 @@
 
 - [x] 1A：CPU helper 已实现，实际生产源码已通过优化构建及断言调试构建的独立测试。尚未接入 staging。
 - [x] 1B：普通 staging 上传与独立同步回读已接入，通过组件编译和离线测试；GPU 运行待验证。
-- [ ] 2：尚未接入 GPU-side DMA 转换。
+- [x] 2：native depth 类型匹配的 GPU-side DMA 转换已接入并通过离线验证；数值回退组合明确拒绝加速，属于第 3 步。
 - [ ] 3：尚未完成集成层面的格式回退和生命周期验证。
 
 ## 1A — 格式转换 helper
@@ -107,3 +107,16 @@
 - Catch2 build and execution passed: six test cases, 33,575,223 assertions, including exhaustive D24 float round-trip and separate D16 quantization checks. Fixed the existing test wrapper to parenthesize logical expressions for Catch2 decomposition.
 - Staging tests are registered in src/tests/CMakeLists.txt. The offline Catch2 runner is under E:/retro/diagnostics/ffr-depth-layout-20261029/catch-project; it builds the real production helper and test files.
 - No runtime GPU execution, driver cache visibility, game behavior or FFR hang resolution is claimed. Async depth/stencil readback and GPU DMA conversion remain outstanding under later stages.
+
+## Stage 2 — GPU DMA implementation (2026-10-29)
+
+- Native GPU DMA supports both D24 guest orders with host D24/S8, and D32/S8 with host D32/S8. D24-to-float, float-to-D24 and D16 numeric fallbacks explicitly decline acceleration with a diagnostic and use the existing guest DMA engine; they are not bit-reinterpreted. GPU numerical fallback support remains stage 3.
+- Both directions first GPU-copy the packed buffer into a device-local scratch allocation. Upload computes separate aspect planes and records buffer-to-image copies; download reads image aspects, packs into the baseline scratch, then GPU-copies the result to the canonical buffer and the existing DMA staging mirror. The mirror receives identical untouched bytes, including D32/S8 padding. No CPU readback or additional Finish/Wait is introduced on this accelerated path.
+- DMA admission now queries layout without preparing or marking the image, before obtaining/marking the buffer. Invalid size, alignment, pitch, partial texel, format or descriptor ranges refuse acceleration before those side effects.
+- The compute pass consumes the CPU staging planner's offsets and format mapping. Each shader invocation owns an output uint word; byte-preservation reads are confined to its own destination word. D24 X bytes are zeroed when unpacking and ignored when packing.
+- GPU baseline copies: ALL_COMMANDS/MEMORY_WRITE to TRANSFER/TRANSFER_READ|WRITE, followed by transfer-write visibility to subsequent commands. Compute: buffer-range barriers on the dedicated packed/plane buffers from TRANSFER|COMPUTE writes to COMPUTE read/write, then an output-buffer barrier from COMPUTE writes to TRANSFER|COMPUTE read/write. Final mirror copies additionally publish TRANSFER_WRITE to HOST/HOST_READ. Existing image-layout/readback barriers remain in use; device-local DMA plane readbacks omit the HOST stage.
+- Dedicated DeviceLocal staging pool entries hold allocations and are stamped with CurrentTick. Pool reuse/deletion requires scheduler.IsFree(entry.tick), so destroying a local StagingBufferRef does not recycle the buffer on command recording completion. The compute descriptors use zero buffer offsets and bounded ranges; dispatches split at the Vulkan minimum guaranteed X-group-count limit without submitting or waiting.
+- GLSL compiles to SPIR-V 1.3 and spirv-val passes for Vulkan 1.1. tools/depth_stencil_dma/check_shader.py extracts the actual uint shader functions and parameter fields, executes them as C++, and compares them against the production CPU helper: 96 native-layout cases per optimization level, including odd offsets/pitches, layers, X-bit perturbation, padding, tail invocations and forward/reverse invocation ordering. This is an algorithm comparison, not Vulkan execution or a concurrency proof.
+- GCC 13.2 C++23 compiled vk_compute_pass.cpp, vk_texture_cache.cpp, vk_rasterizer.cpp and the explicit DMA mirror TextureCache template instantiation into object files. Shader headers were generated outside the repository. Catch2 CPU/staging regressions passed (6 cases, 33,575,223 assertions).
+- Ordinary asynchronous image readback remains on its original entry point. Only the DMA-specific staging mirror path invokes DownloadMemoryDma. No memory configuration, ATOM_cas or workflow change was made.
+- Unverified: actual device compute/copy ordering, driver cache behavior, allocation/recycling under GPU pressure, numerical-format GPU fallbacks and FFR runtime. No FFR hang-resolution claim is made. Do not synchronize other branches until the requested remaining stages have passed.
