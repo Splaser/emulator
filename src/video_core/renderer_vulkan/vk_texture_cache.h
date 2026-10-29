@@ -4,6 +4,7 @@
 #pragma once
 
 #include <deque>
+#include <functional>
 #include <memory>
 #include <span>
 #include <vector>
@@ -188,6 +189,14 @@ public:
     void DownloadMemory(std::span<VkBuffer> buffers, std::span<size_t> offsets,
                         std::span<const VideoCommon::BufferImageCopy> copies);
 
+    bool NeedsSynchronousDownloadBaseline() const;
+
+    // Caller must keep the destination and image alive, wait with runtime.Finish(),
+    // then invoke the returned pack operation before consuming guest-layout bytes.
+    // Destroying the operation releases its deferred intermediate after the current tick.
+    [[nodiscard]] std::function<void()> DownloadMemorySynchronous(
+        const StagingBufferRef& map, std::span<const VideoCommon::BufferImageCopy> copies);
+
     void DownloadMemory(const StagingBufferRef& map,
                         std::span<const VideoCommon::BufferImageCopy> copies);
 
@@ -248,6 +257,7 @@ private:
     VkImageAspectFlags aspect_mask = 0;
     bool initialized = false;
     std::shared_ptr<vk::Image> scaled_image;
+    VkFormat image_format = VK_FORMAT_UNDEFINED;
     /// Whether the image was made with the wide view format list
     bool wide_view_formats = false;
     VkImage current_image{};

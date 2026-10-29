@@ -160,13 +160,17 @@ bool TextureCache<P>::RunGarbageCollector(bool aggressive_mode) {
     // Retain staging until Finish and all mapped reads below have completed.
     auto map = *staging;
     const size_t original_offset = map.offset;
+    std::vector<std::function<void()>> complete_readbacks;
     for (const auto& download : pending_downloads) {
         Image& image = slot_images[download.image_id];
         const auto copies = FullDownloadCopies(image.info);
         map.offset = original_offset + download.offset;
-        image.DownloadMemory(map, copies);
+        complete_readbacks.push_back(DownloadImageMemorySynchronous(image, map, copies));
     }
     runtime.Finish();
+    for (auto& complete : complete_readbacks) {
+        complete();
+    }
     for (const auto& download : pending_downloads) {
         const ImageId image_id = download.image_id;
         Image& image = slot_images[image_id];
@@ -627,8 +631,9 @@ void TextureCache<P>::DownloadMemory(DAddr cpu_addr, size_t size) {
         Image& image = slot_images[image_id];
         auto map = runtime.DownloadStagingBuffer(image.unswizzled_size_bytes);
         const auto copies = FullDownloadCopies(image.info);
-        image.DownloadMemory(map, copies);
+        auto complete = DownloadImageMemorySynchronous(image, map, copies);
         runtime.Finish();
+        complete();
         SwizzleImage(*gpu_memory, image.gpu_addr, image.info, copies, map.mapped_span,
                      swizzle_data_buffer);
     }
@@ -1135,6 +1140,26 @@ void TextureCache<P>::RefreshContents(Image& image, ImageId image_id) {
     auto staging = runtime.UploadStagingBuffer(MapSizeBytes(image));
     UploadImageContents(image, staging);
     runtime.InsertUploadMemoryBarrier();
+}
+
+template <class P>
+template <typename StagingBuffer>
+std::function<void()> TextureCache<P>::DownloadImageMemorySynchronous(
+    Image& image, StagingBuffer& staging, std::span<const BufferImageCopy> copies) {
+    if constexpr (requires { image.NeedsSynchronousDownloadBaseline(); }) {
+        if (image.NeedsSynchronousDownloadBaseline()) {
+            // Preserve guest padding in the eventual full-mip swizzle. The Vulkan X bits
+            // are undefined, and a fresh staging allocation is not a guest baseline.
+            Tegra::Memory::GpuGuestMemory<u8, Tegra::Memory::GuestMemoryFlags::UnsafeRead> guest(
+                *gpu_memory, image.gpu_addr, image.guest_size_bytes, &swizzle_data_buffer);
+            (void)UnswizzleImage(*gpu_memory, image.gpu_addr, image.info, guest,
+                                 staging.mapped_span.subspan(static_cast<size_t>(staging.offset)));
+        }
+        return image.DownloadMemorySynchronous(staging, copies);
+    } else {
+        image.DownloadMemory(staging, copies);
+        return [] {};
+    }
 }
 
 template <class P>

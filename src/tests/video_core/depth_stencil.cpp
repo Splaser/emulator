@@ -16,7 +16,7 @@
     } while (false)
 #else
 #include <catch2/catch_test_macros.hpp>
-#define CHECK_VALUE(v) REQUIRE(v)
+#define CHECK_VALUE(v) REQUIRE((v))
 #endif
 #include "video_core/texture_cache/depth_stencil.h"
 
