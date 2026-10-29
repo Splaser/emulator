@@ -17,11 +17,11 @@
 #include <boost/container/small_vector.hpp>
 #include <queue>
 
+#include <ranges>
 #include "common/common_types.h"
 #include "common/hash.h"
 #include "common/literals.h"
 #include "common/lru_cache.h"
-#include <ranges>
 #include "common/scratch_buffer.h"
 #include "common/slot_vector.h"
 #include "common/thread_worker.h"
@@ -498,6 +498,16 @@ public:
         bool is_swizzle;
         size_t async_buffer_id;
         Common::SlotId object_id;
+        // Immutable queue-time identity: never resolve a reused slot at completion.
+        std::optional<ImageInfo> image_info;
+        GPUVAddr image_address{};
+        size_t image_bytes{};
+        bool canceled{};
+        bool recorded{};
+        u64 recorded_cpu_epoch{};
+        // DeleteImage transfers ownership here until the corresponding fence is consumed.
+        std::shared_ptr<Image> retired_image;
+        std::function<void()> complete;
     };
 
     Common::SlotVector<Image> slot_images;

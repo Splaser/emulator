@@ -2022,8 +2022,8 @@ bool AccelerateDMA::DmaBufferImageCopy(const Tegra::DMA::ImageCopy& copy_info,
             (u64(copy_info.length_x) * image_operand.bytes_per_pixel) % bpp ||
             (u64(image_operand.params.origin.x.Value()) * image_operand.bytes_per_pixel) % bpp ||
             !image->CanDepthStencilDma(std::span{&copy, 1}, buffer_size)) {
-            LOG_DEBUG(Render_Vulkan, "Depth/stencil DMA requires unsupported layout or numerical "
-                                     "format conversion; using guest DMA fallback");
+            LOG_DEBUG(Render_Vulkan, "Depth/stencil DMA requires unsupported layout or device "
+                                     "buffer range; using guest DMA fallback");
             return false;
         }
     }

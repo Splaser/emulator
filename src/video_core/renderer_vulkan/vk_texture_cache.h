@@ -53,6 +53,20 @@ public:
                                  ComputePassDescriptorQueue& compute_pass_descriptor_queue);
     ~TextureCacheRuntime();
 
+    std::shared_ptr<StagingBufferRef> ReservePendingReadbackBuffer(size_t size);
+    void CollectPendingReadbackBuffers();
+    // Only the recording thread edits this list/pool. Async consumers only drop
+    // shared references, so no allocator cache is modified on the fence thread.
+    std::deque<std::shared_ptr<StagingBufferRef>> pending_readback_buffers;
+    std::shared_ptr<Image> ReservePendingReadbackImage();
+    void RetirePendingReadbackImage(const std::shared_ptr<Image>& owner);
+    struct PendingReadbackImage {
+        std::shared_ptr<Image> owner;
+        u64 tick{}, frame{};
+        bool retired{};
+    };
+    std::deque<PendingReadbackImage> pending_readback_images;
+
     void Finish();
 
     StagingBufferRef UploadStagingBuffer(size_t size);
@@ -199,11 +213,12 @@ public:
 
     bool NeedsSynchronousDownloadBaseline() const;
 
-    // Caller must keep the destination and image alive, wait with runtime.Finish(),
-    // then invoke the returned pack operation before consuming guest-layout bytes.
+    // Keep the destination alive and wait with runtime.Finish() or the matching
+    // asynchronous fence, then invoke completion before consuming guest-layout bytes.
     // Destroying the operation releases its deferred intermediate after the current tick.
-    [[nodiscard]] std::function<void()> DownloadMemorySynchronous(
-        const StagingBufferRef& map, std::span<const VideoCommon::BufferImageCopy> copies);
+    [[nodiscard]] std::function<void()>
+    PrepareStagingReadback(const StagingBufferRef& map,
+                           std::span<const VideoCommon::BufferImageCopy> copies);
 
     void DownloadMemory(const StagingBufferRef& map,
                         std::span<const VideoCommon::BufferImageCopy> copies);
