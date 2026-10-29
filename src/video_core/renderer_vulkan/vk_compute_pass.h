@@ -56,9 +56,9 @@ public:
     DepthStencilDmaPass(const Device& device, Scheduler& scheduler, DescriptorPool& pool,
                         ComputePassDescriptorQueue& queue);
     void Run(VkBuffer packed, u32 packed_size, VkBuffer planes, u32 planes_size,
-             std::array<u32, 12> parameters);
+             std::array<u32, 13> parameters);
 
-private:
+  private:
     Scheduler& scheduler;
     ComputePassDescriptorQueue& queue;
 };

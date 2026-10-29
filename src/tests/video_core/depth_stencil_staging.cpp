@@ -35,12 +35,13 @@ void StagingAdapterTests() {
     }
     for (auto layout : {DS::GuestLayout::Depth24Stencil8, DS::GuestLayout::Stencil8Depth24,
                         DS::GuestLayout::Float32Stencil8Padding24}) {
-        VERIFY(!IsNativeDmaFormat(layout, DS::DepthFormat::Unorm16));
-        VERIFY(IsNativeDmaFormat(layout, DS::DepthFormat::Float32) ==
-               (layout == DS::GuestLayout::Float32Stencil8Padding24));
-        VERIFY(IsNativeDmaFormat(layout, DS::DepthFormat::Unorm24) ==
-               (layout != DS::GuestLayout::Float32Stencil8Padding24));
+        for (auto host :
+             {DS::DepthFormat::Unorm16, DS::DepthFormat::Unorm24, DS::DepthFormat::Float32}) {
+            VERIFY(IsSupportedDmaFormat(layout, host));
+        }
+        VERIFY(!IsSupportedDmaFormat(layout, static_cast<DS::DepthFormat>(99)));
     }
+    VERIFY(!IsSupportedDmaFormat(static_cast<DS::GuestLayout>(99), DS::DepthFormat::Unorm24));
     for (auto gf : {PixelFormat::S8_UINT_D24_UNORM, PixelFormat::D24_UNORM_S8_UINT,
                     PixelFormat::D32_FLOAT_S8_UINT}) {
         for (auto hf : {VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT,

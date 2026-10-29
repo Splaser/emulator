@@ -45,17 +45,22 @@ inline DS::DepthFormat HostDepthStencilFormat(VkFormat format) {
 static_assert(static_cast<u32>(DS::GuestLayout::Depth24Stencil8) == 0 &&
               static_cast<u32>(DS::GuestLayout::Stencil8Depth24) == 1 &&
               static_cast<u32>(DS::GuestLayout::Float32Stencil8Padding24) == 2);
-// Stage 2 is bit-preserving only. Numeric guest/host depth conversions require
-// the separately verified fallback kernel in stage 3, never silent bit copies.
-inline bool IsNativeDmaFormat(DS::GuestLayout guest, DS::DepthFormat host) {
+static_assert(static_cast<u32>(DS::DepthFormat::Unorm24) == 0 &&
+              static_cast<u32>(DS::DepthFormat::Float32) == 1 &&
+              static_cast<u32>(DS::DepthFormat::Unorm16) == 2);
+// These are byte-layout/numeric conversion capabilities, not device format support.
+// The host format must still come from the image's actual VkFormat.
+inline bool IsSupportedDmaFormat(DS::GuestLayout guest, DS::DepthFormat host) {
     switch (guest) {
     case DS::GuestLayout::Depth24Stencil8:
     case DS::GuestLayout::Stencil8Depth24:
-        return host == DS::DepthFormat::Unorm24;
     case DS::GuestLayout::Float32Stencil8Padding24:
-        return host == DS::DepthFormat::Float32;
+        break;
+    default:
+        return false;
     }
-    return false;
+    return host == DS::DepthFormat::Unorm24 || host == DS::DepthFormat::Float32 ||
+           host == DS::DepthFormat::Unorm16;
 }
 
 struct StagingDepthStencilCopies {

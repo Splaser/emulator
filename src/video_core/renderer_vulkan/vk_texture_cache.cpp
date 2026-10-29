@@ -1101,6 +1101,43 @@ void TextureCacheRuntime::RetireImage(vk::Image original, vk::Image scaled,
     }));
 }
 
+std::shared_ptr<StagingBufferRef> TextureCacheRuntime::ReservePendingReadbackBuffer(size_t size) {
+    CollectPendingReadbackBuffers();
+    auto buffer = std::make_shared<StagingBufferRef>();
+    *buffer = DownloadStagingBuffer(size, true);
+    try {
+        pending_readback_buffers.push_back(buffer);
+    } catch (...) {
+        staging_buffer_pool.FreeDeferred(*buffer);
+        throw;
+    }
+    return buffer;
+}
+
+void TextureCacheRuntime::CollectPendingReadbackBuffers() {
+    std::erase_if(pending_readback_buffers, [&](const auto& buffer) {
+        if (buffer.use_count() != 1)
+            return false;
+        staging_buffer_pool.FreeDeferred(*buffer);
+        return true;
+    });
+}
+
+std::shared_ptr<Image> TextureCacheRuntime::ReservePendingReadbackImage() {
+    auto owner = std::make_shared<Image>(VideoCommon::NullImageParams{});
+    pending_readback_images.push_back({owner});
+    return owner;
+}
+
+void TextureCacheRuntime::RetirePendingReadbackImage(const std::shared_ptr<Image>& owner) {
+    const auto entry = std::ranges::find_if(
+        pending_readback_images, [&](const auto& entry) { return entry.owner == owner; });
+    assert(entry != pending_readback_images.end());
+    entry->retired = true;
+    entry->tick = scheduler.CurrentTick();
+    entry->frame = frame_count;
+}
+
 void TextureCacheRuntime::Finish() {
     scheduler.Finish();
 }
@@ -1662,6 +1699,13 @@ bool TextureCacheRuntime::CanReportMemoryUsage() const {
 
 void TextureCacheRuntime::TickFrame() {
     ++frame_count;
+    CollectPendingReadbackBuffers();
+    std::erase_if(pending_readback_images, [&](const auto& entry) {
+        return entry.owner.use_count() == 1 &&
+               (!entry.retired ||
+                (frame_count >= entry.frame + 10 && scheduler.IsFree(entry.tick)));
+    });
+
     // Views of a retired image are destroyed with the texture cache's delayed destruction
     // (TICKS_TO_DESTROY = 8 frames); the image outlives them and the GPU work that used it.
     constexpr u64 RETIRED_IMAGE_FRAMES = 10;
@@ -1906,7 +1950,8 @@ void CopyDmaBaseline(Scheduler& scheduler, VkBuffer src, size_t src_offset, VkBu
 }
 void ConvertDmaPlanes(TextureCacheRuntime& runtime, const StagingBufferRef& packed, size_t size,
                       const StagingBufferRef& planes, size_t plane_size,
-                      const StagingDepthStencilCopies& plan, DS::GuestLayout guest, bool pack) {
+                      const StagingDepthStencilCopies& plan, DS::GuestLayout guest,
+                      DS::DepthFormat host, bool pack) {
     if (packed.offset || planes.offset) {
         throw std::invalid_argument("DMA scratch buffers must have zero offsets");
     }
@@ -1918,7 +1963,7 @@ void ConvertDmaPlanes(TextureCacheRuntime& runtime, const StagingBufferRef& pack
              static_cast<u32>(t.packed.layer_pitch), static_cast<u32>(t.packed.offset),
              static_cast<u32>(t.depth.offset), static_cast<u32>(t.stencil.offset),
              static_cast<u32>(guest), pack ? 1u : 0u, pack ? 0u : static_cast<u32>(t.depth.offset),
-             static_cast<u32>(pack ? size : t.end)});
+             static_cast<u32>(pack ? size : t.end), static_cast<u32>(host)});
     }
 }
 } // namespace
@@ -1932,9 +1977,8 @@ bool Image::CanDepthStencilDma(std::span<const BufferImageCopy> copies, size_t s
     }
     const auto guest = GuestDepthStencilFormat(info.format);
     const auto host = HostDepthStencilFormat(image_format);
-    if (!IsNativeDmaFormat(guest, host)) {
+    if (!IsSupportedDmaFormat(guest, host))
         return false;
-    }
     try {
         const auto plan = PlanStagingDepthStencilCopies(info, guest, host, copies, size);
         return !plan.transfers.empty() && plan.size <= runtime->device.GetMaxStorageBufferRange();
@@ -1962,7 +2006,8 @@ void Image::UploadMemoryDma(VkBuffer buffer, size_t offset, size_t size,
     const auto packed = runtime->staging_buffer_pool.Request(size, MemoryUsage::DeviceLocal);
     const auto planes = runtime->staging_buffer_pool.Request(plan.size, MemoryUsage::DeviceLocal);
     CopyDmaBaseline(*scheduler, buffer, offset, packed.buffer, packed.offset, size);
-    ConvertDmaPlanes(*runtime, packed, size, planes, plan.size, plan, guest, false);
+    ConvertDmaPlanes(*runtime, packed, size, planes, plan.size, plan, guest,
+                     HostDepthStencilFormat(image_format), false);
     const bool scaled = True(flags & ImageFlagBits::Rescaled);
     if (scaled) {
         ScaleDown(true);
@@ -2000,8 +2045,10 @@ void Image::DownloadMemoryDma(std::span<VkBuffer> buffers, std::span<size_t> off
     if (scaled) {
         ScaleDown();
     }
-    RecordStagingDownload(scheduler, *original_image, aspect_mask, {planes.buffer}, {plan.regions}, false);
-    ConvertDmaPlanes(*runtime, packed, size, planes, plan.size, plan, guest, true);
+    RecordStagingDownload(scheduler, *original_image, aspect_mask, {planes.buffer}, {plan.regions},
+                          false);
+    ConvertDmaPlanes(*runtime, packed, size, planes, plan.size, plan, guest,
+                     HostDepthStencilFormat(image_format), true);
     for (size_t i = 0; i < buffers.size(); ++i) {
         CopyDmaBaseline(*scheduler, packed.buffer, packed.offset, buffers[i], offsets[i], size,
                         i != 0);
@@ -2103,8 +2150,8 @@ bool Image::NeedsSynchronousDownloadBaseline() const {
     return aspect_mask == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 }
 
-std::function<void()> Image::DownloadMemorySynchronous(const StagingBufferRef& map,
-                                                       std::span<const BufferImageCopy> copies) {
+std::function<void()> Image::PrepareStagingReadback(const StagingBufferRef& map,
+                                                    std::span<const BufferImageCopy> copies) {
     if (!NeedsSynchronousDownloadBaseline() || copies.empty()) {
         DownloadMemory(map, copies);
         return [] {};
@@ -2117,15 +2164,7 @@ std::function<void()> Image::DownloadMemorySynchronous(const StagingBufferRef& m
     const auto host = HostDepthStencilFormat(image_format);
     auto plan = PlanStagingDepthStencilCopies(info, guest, host, copies, destination.size());
     // Deferred ownership prevents recycling across recording, GPU completion and CPU packing.
-    auto* pool = &runtime->staging_buffer_pool;
-    auto planes =
-        std::shared_ptr<StagingBufferRef>(new StagingBufferRef{}, [pool](StagingBufferRef* ref) {
-            if (ref->buffer) {
-                pool->FreeDeferred(*ref);
-            }
-            delete ref;
-        });
-    *planes = runtime->DownloadStagingBuffer(plan.size, true);
+    auto planes = runtime->ReservePendingReadbackBuffer(plan.size);
     for (auto& region : plan.regions) {
         region.bufferOffset += planes->offset;
     }
@@ -2138,7 +2177,11 @@ std::function<void()> Image::DownloadMemorySynchronous(const StagingBufferRef& m
     if (rescaled) {
         ScaleUp(true);
     }
-    return [planes, destination, guest, host, transfers = plan.transfers] {
+    return [planes, destination, guest, host, transfers = plan.transfers, scheduler = scheduler,
+            tick = scheduler->CurrentTick()] {
+        if (!scheduler->IsFree(tick)) {
+            throw std::logic_error("Staging readback consumed before GPU completion");
+        }
         const auto source = planes->mapped_span.subspan(static_cast<size_t>(planes->offset));
         for (const auto& transfer : transfers) {
             if (!DS::PackTransfer(guest, host, transfer, source, destination)) {
