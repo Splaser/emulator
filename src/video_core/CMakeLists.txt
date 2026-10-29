@@ -229,6 +229,8 @@ add_library(video_core STATIC
     texture_cache/texture_cache.h
     texture_cache/texture_cache_base.h
     texture_cache/types.h
+    texture_cache/depth_stencil.cpp
+    texture_cache/depth_stencil.h
     texture_cache/util.cpp
     texture_cache/util.h
     textures/astc.h
