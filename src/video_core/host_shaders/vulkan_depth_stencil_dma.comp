@@ -1,0 +1,92 @@
+// SPDX-FileCopyrightText: Copyright 2026 citron Emulator Project
+// SPDX-License-Identifier: GPL-3.0-or-later
+#version 450
+
+// Native-depth DMA kernel. The caller must reject guest/host depth type
+// mismatches; numerical fallback conversion is not a raw bit copy.
+// One invocation owns one complete output word, including partial byte updates.
+// This requires neither 8/16-bit storage nor subword atomic writes.
+layout(local_size_x = 64) in;
+layout(std430, set=0, binding=0) buffer Packed { uint words[]; } packed;
+layout(std430, set=0, binding=1) buffer Planes { uint words[]; } planes;
+layout(push_constant) uniform Parameters {
+    uint width;
+    uint height;
+    uint layers;
+    uint row_pitch;
+    uint layer_pitch;
+    uint packed_offset;
+    uint depth_offset;
+    uint stencil_offset;
+    uint guest_layout; // CPU GuestLayout enum: depth24/stencil8, stencil8/depth24, float32/stencil8/X24
+    uint pack_mode;
+    uint output_first; // Four-byte aligned; depth_offset on unpack, zero on pack.
+    uint output_end;   // Exclusive, rounded to four bytes and inside the descriptor.
+} p;
+
+uint packed_byte(uint address) {
+    return (packed.words[address / 4u] >> ((address % 4u) * 8u)) & 255u;
+}
+uint plane_byte(uint address) {
+    return (planes.words[address / 4u] >> ((address % 4u) * 8u)) & 255u;
+}
+uint packed_pixel(uint index) {
+    uint x = index % p.width;
+    uint y = (index / p.width) % p.height;
+    uint z = index / (p.width * p.height);
+    return p.packed_offset + z * p.layer_pitch + y * p.row_pitch +
+        x * (p.guest_layout == 2u ? 8u : 4u);
+}
+uint unpack_byte(uint address) {
+    uint count = p.width * p.height * p.layers;
+    if (address >= p.depth_offset && address - p.depth_offset < count * 4u) {
+        uint relative = address - p.depth_offset;
+        uint component = relative % 4u;
+        // X8_D24_UNORM_PACK32 has no meaningful fourth depth byte.
+        if (p.guest_layout != 2u && component == 3u) return 0u;
+        return packed_byte(packed_pixel(relative / 4u) + component +
+            (p.guest_layout == 1u ? 1u : 0u));
+    }
+    if (address >= p.stencil_offset && address - p.stencil_offset < count) {
+        uint pixel = packed_pixel(address - p.stencil_offset);
+        return packed_byte(pixel + (p.guest_layout == 0u ? 3u : p.guest_layout == 1u ? 0u : 4u));
+    }
+    return 0u; // Dedicated plane allocation alignment padding.
+}
+uint pack_byte(uint address, uint previous) {
+    if (address < p.packed_offset) return previous;
+    uint relative = address - p.packed_offset;
+    uint z = relative / p.layer_pitch;
+    relative %= p.layer_pitch;
+    uint y = relative / p.row_pitch;
+    relative %= p.row_pitch;
+    uint bpp = p.guest_layout == 2u ? 8u : 4u;
+    uint x = relative / bpp;
+    uint component = relative % bpp;
+    if (z >= p.layers || y >= p.height || x >= p.width) return previous;
+    uint pixel = (z * p.height + y) * p.width + x;
+    if (p.guest_layout == 2u) {
+        if (component > 4u) return previous; // Preserve guest X24 baseline.
+        if (component == 4u) return plane_byte(p.stencil_offset + pixel);
+    } else {
+        uint stencil_component = p.guest_layout == 0u ? 3u : 0u;
+        if (component == stencil_component) return plane_byte(p.stencil_offset + pixel);
+        if (p.guest_layout == 1u) component--;
+    }
+    return plane_byte(p.depth_offset + pixel * 4u + component);
+}
+void main() {
+    uint address = p.output_first + gl_GlobalInvocationID.x * 4u;
+    if (address >= p.output_end) return;
+    uint word = 0u;
+    // Pack reads the original word once. Every preserved byte comes from that
+    // invocation's own word; no invocation reads a word another one overwrites.
+    uint previous = p.pack_mode != 0u ? packed.words[address / 4u] : 0u;
+    for (uint i=0u; i<4u; ++i) {
+        uint value = p.pack_mode != 0u ? pack_byte(address+i, (previous >> (8u*i)) & 255u) :
+                                       unpack_byte(address+i);
+        word |= value << (8u*i);
+    }
+    if (p.pack_mode != 0u) packed.words[address / 4u] = word;
+    else planes.words[address / 4u] = word;
+}

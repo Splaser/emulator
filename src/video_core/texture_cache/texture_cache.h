@@ -1052,8 +1052,13 @@ bool TextureCache<P>::IsRegionGpuModified(DAddr addr, size_t size) {
 template <class P>
 std::pair<typename TextureCache<P>::Image*, BufferImageCopy> TextureCache<P>::DmaBufferImageCopy(
     const Tegra::DMA::ImageCopy& copy_info, const Tegra::DMA::BufferOperand& buffer_operand,
-    const Tegra::DMA::ImageOperand& image_operand, ImageId image_id, bool modifies_image) {
-    const auto [level, base] = PrepareDmaImage(image_id, image_operand.address, modifies_image);
+    const Tegra::DMA::ImageOperand& image_operand, ImageId image_id, bool modifies_image,
+    bool prepare) {
+    // Admission must not upload/mark the image before the GPU path accepts the copy.
+    const auto subresource = slot_images[image_id].TryFindBase(image_operand.address).value();
+    const auto [level, base] =
+        prepare ? PrepareDmaImage(image_id, image_operand.address, modifies_image)
+                : std::pair<u32, u32>{subresource.level, subresource.layer};
     auto* image = &slot_images[image_id];
     const u32 buffer_size = static_cast<u32>(buffer_operand.pitch * buffer_operand.height);
     const u32 bpp = VideoCore::Surface::BytesPerBlock(image->info.format);
@@ -1113,7 +1118,13 @@ void TextureCache<P>::DownloadImageIntoBuffer(typename TextureCache<P>::Image* i
             buffer_offset,
             download_map.offset,
         };
-        image->DownloadMemory(buffers, buffer_offsets, copies);
+        if constexpr (requires {
+                          image->DownloadMemoryDma(buffers, buffer_offsets, size, copies);
+                      }) {
+            image->DownloadMemoryDma(buffers, buffer_offsets, size, copies);
+        } else {
+            image->DownloadMemory(buffers, buffer_offsets, copies);
+        }
     } else {
         image->DownloadMemory(buffer, buffer_offset, copies);
     }

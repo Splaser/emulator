@@ -145,6 +145,7 @@ public:
     RenderPassCache& render_pass_cache;
     std::optional<ASTCDecoderPass> astc_decoder_pass;
     std::unique_ptr<MSAACopyPass> msaa_copy_pass;
+    std::unique_ptr<DepthStencilDmaPass> depth_stencil_dma_pass;
     const Settings::ResolutionScalingInfo& resolution;
     std::array<std::vector<VkFormat>, VideoCore::Surface::MaxPixelFormat> view_formats;
     std::array<std::vector<VkFormat>, VideoCore::Surface::MaxPixelFormat> narrow_view_formats;
@@ -176,6 +177,13 @@ public:
 
     Image(Image&&) = default;
     Image& operator=(Image&&) noexcept;
+
+    bool CanDepthStencilDma(std::span<const VideoCommon::BufferImageCopy> copies,
+                            size_t size) const;
+    void UploadMemoryDma(VkBuffer buffer, size_t offset, size_t size,
+                         std::span<const VideoCommon::BufferImageCopy> copies);
+    void DownloadMemoryDma(std::span<VkBuffer> buffers, std::span<size_t> offsets, size_t size,
+                           std::span<const VideoCommon::BufferImageCopy> copies);
 
     void UploadMemory(VkBuffer buffer, VkDeviceSize offset,
                       std::span<const VideoCommon::BufferImageCopy> copies);
