@@ -188,6 +188,7 @@ add_library(video_core STATIC
     renderer_vulkan/vk_state_tracker.h
     renderer_vulkan/vk_swapchain.cpp
     renderer_vulkan/vk_swapchain.h
+    renderer_vulkan/vk_depth_stencil.h
     renderer_vulkan/vk_texture_cache.cpp
     renderer_vulkan/vk_texture_cache.h
     renderer_vulkan/vk_texture_cache_base.cpp

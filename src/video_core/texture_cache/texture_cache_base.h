@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <span>
@@ -323,6 +324,10 @@ public:
     /// Upload data from guest to an image
     template <typename StagingBuffer>
     void UploadImageContents(Image& image, StagingBuffer& staging_buffer);
+
+    template <typename StagingBuffer>
+    std::function<void()> DownloadImageMemorySynchronous(Image& image, StagingBuffer& staging,
+                                                         std::span<const BufferImageCopy> copies);
 
     /// Find or create an image view from a guest descriptor
     [[nodiscard]] ImageViewId FindImageView(const TICEntry& config);
