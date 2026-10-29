@@ -7,8 +7,8 @@
 
 - [x] 1A：CPU helper 已实现，实际生产源码已通过优化构建及断言调试构建的独立测试。尚未接入 staging。
 - [x] 1B：普通 staging 上传与独立同步回读已接入，通过组件编译和离线测试；GPU 运行待验证。
-- [x] 2：native depth 类型匹配的 GPU-side DMA 转换已接入并通过离线验证；数值回退组合明确拒绝加速，属于第 3 步。
-- [ ] 3：尚未完成集成层面的格式回退和生命周期验证。
+- [x] 2：GPU-side DMA 转换、基线镜像、barrier 与中间资源保活已接入并通过离线验证；数值回退在第 3 步补齐。
+- [x] 3：GPU 数值回退及真实异步队列源码的受控生命周期回归已实现并通过离线验证；实际 Vulkan/GPU 和 FFR 运行待验证。
 
 ## 1A — 格式转换 helper
 
@@ -120,3 +120,26 @@
 - GCC 13.2 C++23 compiled vk_compute_pass.cpp, vk_texture_cache.cpp, vk_rasterizer.cpp and the explicit DMA mirror TextureCache template instantiation into object files. Shader headers were generated outside the repository. Catch2 CPU/staging regressions passed (6 cases, 33,575,223 assertions).
 - Ordinary asynchronous image readback remains on its original entry point. Only the DMA-specific staging mirror path invokes DownloadMemoryDma. No memory configuration, ATOM_cas or workflow change was made.
 - Unverified: actual device compute/copy ordering, driver cache behavior, allocation/recycling under GPU pressure, numerical-format GPU fallbacks and FFR runtime. No FFR hang-resolution claim is made. Do not synchronize other branches until the requested remaining stages have passed.
+
+## Stage 3 — numerical fallbacks and asynchronous ownership (2026-10-29)
+
+- The DMA kernel now converts all nine explicit guest/host pairs: two D24/S8 guest byte orders or D32F/S8/X24, against actual Vulkan D24/S8, D32F/S8 or D16/S8 aspect storage. D16/S8 is a host format only; there is no invented guest PixelFormat. Unknown formats, MSAA, unsupported image types and invalid layout/ranges are rejected. The planner validates each mip's dimensions and array-layer bounds independently.
+- Conversions use uint32 arithmetic, exact 48-bit product/division and the CPU helper's rounding policy. UNORM-to-UNORM and float-to-UNORM round to nearest with halves upward; UNORM-to-float produces correctly rounded binary32. Float-to-UNORM clamps negative/NaN to zero and values >=1 to maximum. Native float-to-float preserves the bit pattern. D24 X bits are ignored; guest X24 and untouched bytes come from the GPU/guest baseline.
+- D24 -> D32F -> D24 is exact under this reference policy. D24 -> D16 is intentionally lossy (maximum reconstructed D24 error 128). D32F -> UNORM24/16 clamps to [0,1] and quantizes; it cannot preserve out-of-range values, NaNs or the complete float precision/range. UNORM16->24 uses numerical rescaling, not bit shifting. Native D32/S8 is preferred; its missing-format alternatives now prefer D24/S8 before D16/S8, with the complete requested Vulkan feature mask checked for each candidate.
+- Pending asynchronous image downloads snapshot guest address, ImageInfo and byte count at enqueue time. DeleteImage cancels obsolete writes and moves native image ownership into a reserved owner before erasing the slot. Destruction requires both queue-consumer release and the deletion GPU tick (which may be later than the readback fence), plus the existing view destruction grace period. Reusing an ImageId cannot redirect an old download to its replacement.
+- Asynchronous depth/stencil completion seeds from current guest data after its fence, then runs the same CPU pack operation as synchronous readback. A production completion guard rejects an unsignaled scheduler tick. Tracked CPU writes and unmaps advance an image epoch; an older GPU snapshot is skipped even if a subsequent upload has cleared CpuModified. This covers existing texture-cache invalidation hooks, not arbitrary untracked physical/NCE producers.
+- Intermediate plane ownership survives recording, GPU execution and CPU consumption. Only the recording thread returns deferred buffers to the pool; fence-thread callbacks drop shared references. Pool reuse still checks the GPU retirement tick. Exception paths retain paired batch queues, release uncommitted staging, roll back partial retirement publication and avoid replaying writes that already completed. Synchronous dirty state is cleared only after checked completion and guest publication.
+
+### Offline acceptance
+
+- The real GLSL kernel compiles to SPIR-V 1.3 and passes spirv-val for Vulkan 1.1. tools/depth_stencil_dma/check_shader.py executes the extracted shader arithmetic and actual host dispatch-validation prefix against the production CPU helper: 288 native/fallback layout cases per optimization level; odd offsets/pitches, array layers, partial baselines, perturbed D24 X bits, descriptor rejection and near-UINT_MAX tail guards.
+- --full-depth24 checks every one of 16,777,216 D24 values and all 65,536 D16 values against independent numerical references. The default optimized/debug runs also check 524,288 deterministic float bit patterns plus NaN, infinity and rounding boundaries.
+- tools/depth_stencil_dma/check_async_queue.py compiles the actual CommitAsyncFlushes, PopAsyncFlushes, WriteMemory, synchronous completion, deletion ownership hook, retirement and staging-pool selection source against a controlled backend and real SlotVector/CPU packing. It tests pre/post-record cancellation, deletion and slot reuse, reverse mixed DMA/image offsets, empty batches, CPU overwrite epochs, deletion ticks later than readback completion, allocator thread ownership, buffer reuse, allocation/record/publication failure, partial consumer failure/retry and retirement rollback. Fourteen counterfactual negative controls must fail. This is source-path execution, not merely a separate lifetime model, but it does not execute the complete HLE deletion routine or a Vulkan driver.
+- tools/depth_stencil_dma/check_format_selection.py executes the production fallback selector with controlled format capabilities, testing native preference, fallback order and missing transfer-feature rejection. Capability fixtures do not assert that every test combination exists on a real device.
+- Catch2 CPU/staging tests pass: six cases, 33,575,223 assertions. Actual compute-pass, texture-cache, rasterizer and device-selector translation units, plus explicit synchronous/asynchronous/deletion/bind/DMA TextureCache template paths, compile as Windows C++23 object files. No Android APK build or workflow is used.
+
+### Remaining runtime limits
+
+- Real device shader execution, compute/copy cache visibility, Vulkan validation, memory pressure and renderer teardown remain unverified. These controlled tests do not establish that the FFR hang is fixed.
+- Legacy cross-format image-to-image ReinterpretImage is a separate existing path; its combined depth/stencil buffer copies and packed-size assumptions are not converted by this change. This stage covers regular staging and buffer/image DMA, not that reinterpretation path. No support or correctness claim is made for depth/stencil reinterpretation, MSAA or 3D conversions.
+- PR #375 retains its existing shared native-image/view ownership WIP. Its native VkImage accesses must retain the extra shared_ptr dereference when applying these commits; unrelated WIP is not replaced.

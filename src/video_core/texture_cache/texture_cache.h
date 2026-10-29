@@ -601,6 +601,7 @@ FramebufferId TextureCache<P>::GetFramebufferId(const RenderTargets& key) {
 template <class P>
 void TextureCache<P>::WriteMemory(DAddr cpu_addr, size_t size) {
     ForEachImageInRegion(cpu_addr, size, [this](ImageId image_id, Image& image) {
+        ++image.cpu_write_epoch;
         if (True(image.flags & ImageFlagBits::CpuModified)) {
             return;
         }
@@ -618,7 +619,6 @@ void TextureCache<P>::DownloadMemory(DAddr cpu_addr, size_t size) {
         if (!image.IsSafeDownload()) {
             return;
         }
-        image.flags &= ~ImageFlagBits::GpuModified;
         images.push_back(image_id);
     });
     if (images.empty()) {
@@ -636,6 +636,7 @@ void TextureCache<P>::DownloadMemory(DAddr cpu_addr, size_t size) {
         complete();
         SwizzleImage(*gpu_memory, image.gpu_addr, image.info, copies, map.mapped_span,
                      swizzle_data_buffer);
+        image.flags &= ~ImageFlagBits::GpuModified;
     }
 }
 
@@ -686,6 +687,7 @@ void TextureCache<P>::UnmapGPUMemory(size_t as_id, GPUVAddr gpu_addr, size_t siz
                             [&](ImageId id, Image&) { deleted_images.push_back(id); });
     for (const ImageId id : deleted_images) {
         Image& image = slot_images[id];
+        ++image.cpu_write_epoch;
         if (False(image.flags & ImageFlagBits::CpuModified)) {
             image.flags |= ImageFlagBits::CpuModified;
             if (True(image.flags & ImageFlagBits::Tracked)) {
@@ -875,23 +877,37 @@ bool TextureCache<P>::ShouldWaitAsyncFlushes() const noexcept {
 
 template <class P>
 void TextureCache<P>::CommitAsyncFlushes() {
+    // Publish both sides of the fence batch atomically with respect to allocation failure.
+    const auto publish = [&] {
+        if constexpr (IMPLEMENTS_ASYNC_DOWNLOADS) {
+            async_buffers.emplace_back(std::move(uncommitted_async_buffers));
+            try {
+                committed_downloads.emplace_back(std::move(uncommitted_downloads));
+            } catch (...) {
+                uncommitted_async_buffers = std::move(async_buffers.back());
+                async_buffers.pop_back();
+                throw;
+            }
+            uncommitted_async_buffers.clear();
+        } else {
+            committed_downloads.emplace_back(std::move(uncommitted_downloads));
+        }
+        uncommitted_downloads.clear();
+    };
     // This is intentionally passing the value by copy
     if constexpr (IMPLEMENTS_ASYNC_DOWNLOADS) {
         auto& download_ids = uncommitted_downloads;
         if (download_ids.empty()) {
-            committed_downloads.emplace_back(std::move(uncommitted_downloads));
-            uncommitted_downloads.clear();
-            async_buffers.emplace_back(std::move(uncommitted_async_buffers));
-            uncommitted_async_buffers.clear();
+            publish();
             return;
         }
         size_t total_size_bytes = 0;
         size_t last_async_buffer_id = uncommitted_async_buffers.size();
         bool any_none_dma = false;
         for (PendingDownload& download_info : download_ids) {
-            if (download_info.is_swizzle) {
-                total_size_bytes +=
-                    Common::AlignUp(slot_images[download_info.object_id].unswizzled_size_bytes, 64);
+            if (download_info.is_swizzle && !download_info.canceled) {
+                total_size_bytes = ImageSize::Add(total_size_bytes,
+                                                  Common::AlignUp(download_info.image_bytes, 64));
                 any_none_dma = true;
                 download_info.async_buffer_id = last_async_buffer_id;
             }
@@ -899,22 +915,43 @@ void TextureCache<P>::CommitAsyncFlushes() {
 
         if (any_none_dma) {
             auto download_map = runtime.DownloadStagingBuffer(total_size_bytes, true);
-            for (const PendingDownload& download_info : download_ids) {
-                if (download_info.is_swizzle) {
-                    Image& image = slot_images[download_info.object_id];
-                    const auto copies = FullDownloadCopies(image.info);
-                    image.DownloadMemory(download_map, copies);
-                    download_map.offset += Common::AlignUp(image.unswizzled_size_bytes, 64);
+            try {
+                for (PendingDownload& download_info : download_ids) {
+                    if (download_info.is_swizzle && !download_info.canceled) {
+                        Image& image = slot_images[download_info.object_id];
+                        const auto copies = FullDownloadCopies(image.info);
+                        download_info.recorded_cpu_epoch = image.cpu_write_epoch;
+                        if constexpr (requires { image.NeedsSynchronousDownloadBaseline(); }) {
+                            if (image.NeedsSynchronousDownloadBaseline()) {
+                                // Record now; CPU conversion is invoked only after the async fence.
+                                download_info.complete =
+                                    image.PrepareStagingReadback(download_map, copies);
+                            } else {
+                                image.DownloadMemory(download_map, copies);
+                            }
+                        } else {
+                            image.DownloadMemory(download_map, copies);
+                        }
+                        download_info.recorded = true;
+                        download_map.offset += Common::AlignUp(download_info.image_bytes, 64);
+                    }
                 }
+                uncommitted_async_buffers.emplace_back(download_map);
+            } catch (...) {
+                for (auto& download : download_ids) {
+                    if (download.is_swizzle && !download.canceled &&
+                        download.async_buffer_id == last_async_buffer_id) {
+                        download.complete = {};
+                        download.recorded = false;
+                    }
+                }
+                runtime.FreeDeferredStagingBuffer(download_map);
+                throw;
             }
-            uncommitted_async_buffers.emplace_back(download_map);
         }
 
-        async_buffers.emplace_back(std::move(uncommitted_async_buffers));
-        uncommitted_async_buffers.clear();
     }
-    committed_downloads.emplace_back(std::move(uncommitted_downloads));
-    uncommitted_downloads.clear();
+    publish();
 }
 
 template <class P>
@@ -923,35 +960,79 @@ void TextureCache<P>::PopAsyncFlushes() {
         return;
     }
     if constexpr (IMPLEMENTS_ASYNC_DOWNLOADS) {
-        const auto& download_ids = committed_downloads.front();
+        auto& download_ids = committed_downloads.front();
         if (download_ids.empty()) {
             committed_downloads.pop_front();
             async_buffers.pop_front();
             return;
         }
-        auto download_map = std::move(async_buffers.front());
-        for (size_t i = download_ids.size(); i > 0; i--) {
-            auto& download_info = download_ids[i - 1];
-            auto& download_buffer = download_map[download_info.async_buffer_id];
-            if (download_info.is_swizzle) {
-                const ImageBase& image = slot_images[download_info.object_id];
-                const auto copies = FullDownloadCopies(image.info);
-                download_buffer.offset -= Common::AlignUp(image.unswizzled_size_bytes, 64);
-                std::span<u8> download_span =
-                    download_buffer.mapped_span.subspan(download_buffer.offset);
-                SwizzleImage(*gpu_memory, image.gpu_addr, image.info, copies, download_span,
-                             swizzle_data_buffer);
-            } else {
-                const BufferDownload& buffer_info = slot_buffer_downloads[download_info.object_id];
-                std::span<u8> download_span =
-                    download_buffer.mapped_span.subspan(download_buffer.offset);
-                gpu_memory->WriteBlockUnsafe(buffer_info.address, download_span.data(),
-                                             buffer_info.size);
-                slot_buffer_downloads.erase(download_info.object_id);
+        auto& download_map = async_buffers.front();
+        std::vector<size_t> original_offsets;
+        original_offsets.reserve(download_map.size());
+        for (const auto& buffer : download_map)
+            original_offsets.push_back(buffer.offset);
+        const size_t original_death_count = async_buffers_death_ring.size();
+        try {
+            for (size_t i = download_ids.size(); i > 0; i--) {
+                auto& download_info = download_ids[i - 1];
+                const bool cpu_overwrite = download_info.is_swizzle && !download_info.canceled &&
+                                           (True(slot_images[download_info.object_id].flags &
+                                                 ImageFlagBits::CpuModified) ||
+                                            slot_images[download_info.object_id].cpu_write_epoch !=
+                                                download_info.recorded_cpu_epoch);
+                if (download_info.canceled || cpu_overwrite) {
+                    // The reverse batch cursor still includes copies recorded before deletion.
+                    // Never publish an older GPU snapshot over a later tracked CPU write.
+                    if (download_info.recorded) {
+                        download_map[download_info.async_buffer_id].offset -=
+                            Common::AlignUp(download_info.image_bytes, 64);
+                    }
+                    download_info.complete = {};
+                    download_info.canceled = true;
+                    continue;
+                }
+                auto& download_buffer = download_map[download_info.async_buffer_id];
+                if (download_info.is_swizzle) {
+                    const auto& info = download_info.image_info.value();
+                    const auto copies = FullDownloadCopies(info);
+                    download_buffer.offset -= Common::AlignUp(download_info.image_bytes, 64);
+                    std::span<u8> download_span =
+                        download_buffer.mapped_span.subspan(download_buffer.offset);
+                    if (download_info.complete) {
+                        // Read the guest baseline at consumption time, not before a long GPU wait.
+                        Tegra::Memory::GpuGuestMemory<u8,
+                                                      Tegra::Memory::GuestMemoryFlags::UnsafeRead>
+                            guest(*gpu_memory, download_info.image_address,
+                                  CalculateGuestSizeInBytes(info), &swizzle_data_buffer);
+                        (void)UnswizzleImage(*gpu_memory, download_info.image_address, info, guest,
+                                             download_span);
+                        download_info.complete();
+                    }
+                    SwizzleImage(*gpu_memory, download_info.image_address, info, copies,
+                                 download_span, swizzle_data_buffer);
+                } else {
+                    const BufferDownload& buffer_info =
+                        slot_buffer_downloads[download_info.object_id];
+                    std::span<u8> download_span =
+                        download_buffer.mapped_span.subspan(download_buffer.offset);
+                    gpu_memory->WriteBlockUnsafe(buffer_info.address, download_span.data(),
+                                                 buffer_info.size);
+                    slot_buffer_downloads.erase(download_info.object_id);
+                }
+                // Already published entries are not replayed if a later entry/queue allocation
+                // fails.
+                download_info.complete = {};
+                download_info.canceled = true;
             }
-        }
-        for (auto& download_buffer : download_map) {
-            async_buffers_death_ring.emplace_back(download_buffer);
+            for (auto& download_buffer : download_map) {
+                async_buffers_death_ring.emplace_back(download_buffer);
+            }
+        } catch (...) {
+            for (size_t index = 0; index < download_map.size(); ++index)
+                download_map[index].offset = original_offsets[index];
+            while (async_buffers_death_ring.size() > original_death_count)
+                async_buffers_death_ring.pop_back();
+            throw;
         }
         committed_downloads.pop_front();
         async_buffers.pop_front();
@@ -1107,12 +1188,25 @@ void TextureCache<P>::DownloadImageIntoBuffer(typename TextureCache<P>::Image* i
                                               std::span<const VideoCommon::BufferImageCopy> copies,
                                               GPUVAddr address, size_t size) {
     if constexpr (IMPLEMENTS_ASYNC_DOWNLOADS) {
-        const BufferDownload new_buffer_download{address, size};
-        auto slot = slot_buffer_downloads.insert(new_buffer_download);
-        const PendingDownload new_download{false, uncommitted_async_buffers.size(), slot};
-        uncommitted_downloads.emplace_back(new_download);
+        // Reserve staging before publishing a pending guest write. Allocation failure
+        // must not leave an object_id referring to a nonexistent async buffer.
         auto download_map = runtime.DownloadStagingBuffer(size, true);
-        uncommitted_async_buffers.emplace_back(download_map);
+        const size_t async_index = uncommitted_async_buffers.size();
+        Common::SlotId slot{};
+        bool added_buffer = false;
+        try {
+            slot = slot_buffer_downloads.insert(BufferDownload{address, size});
+            uncommitted_async_buffers.emplace_back(download_map);
+            added_buffer = true;
+            uncommitted_downloads.emplace_back(PendingDownload{false, async_index, slot});
+        } catch (...) {
+            if (added_buffer)
+                uncommitted_async_buffers.pop_back();
+            if (slot)
+                slot_buffer_downloads.erase(slot);
+            runtime.FreeDeferredStagingBuffer(download_map);
+            throw;
+        }
         std::array buffers{
             buffer,
             download_map.buffer,
@@ -1161,15 +1255,19 @@ template <typename StagingBuffer>
 std::function<void()> TextureCache<P>::DownloadImageMemorySynchronous(
     Image& image, StagingBuffer& staging, std::span<const BufferImageCopy> copies) {
     if constexpr (requires { image.NeedsSynchronousDownloadBaseline(); }) {
-        if (image.NeedsSynchronousDownloadBaseline()) {
-            // Preserve guest padding in the eventual full-mip swizzle. The Vulkan X bits
-            // are undefined, and a fresh staging allocation is not a guest baseline.
+        const bool baseline = image.NeedsSynchronousDownloadBaseline();
+        auto complete = image.PrepareStagingReadback(staging, copies);
+        if (!baseline)
+            return complete;
+        return [this, info = image.info, address = image.gpu_addr,
+                destination = staging.mapped_span.subspan(static_cast<size_t>(staging.offset)),
+                complete = std::move(complete)] {
+            // Seed after GPU completion so later guest padding writes are preserved too.
             Tegra::Memory::GpuGuestMemory<u8, Tegra::Memory::GuestMemoryFlags::UnsafeRead> guest(
-                *gpu_memory, image.gpu_addr, image.guest_size_bytes, &swizzle_data_buffer);
-            (void)UnswizzleImage(*gpu_memory, image.gpu_addr, image.info, guest,
-                                 staging.mapped_span.subspan(static_cast<size_t>(staging.offset)));
-        }
-        return image.DownloadMemorySynchronous(staging, copies);
+                *gpu_memory, address, CalculateGuestSizeInBytes(info), &swizzle_data_buffer);
+            (void)UnswizzleImage(*gpu_memory, address, info, guest, destination);
+            complete();
+        };
     } else {
         image.DownloadMemory(staging, copies);
         return [] {};
@@ -2595,7 +2693,28 @@ void TextureCache<P>::DeleteImage(ImageId image_id, bool immediate_delete) {
         }
         slot_image_views.erase(image_view_id);
     }
-    if (!immediate_delete) {
+    std::shared_ptr<Image> pending_owner;
+    const auto cancel_pending = [&](auto& downloads) {
+        for (auto& pending : downloads) {
+            if (pending.is_swizzle && !pending.canceled && pending.object_id == image_id) {
+                if (!pending_owner) {
+                    static_assert(std::is_nothrow_move_assignable_v<Image>);
+                    pending_owner = pending.retired_image;
+                    assert(pending_owner);
+                    if constexpr (requires { runtime.RetirePendingReadbackImage(pending_owner); }) {
+                        runtime.RetirePendingReadbackImage(pending_owner);
+                    }
+                    *pending_owner = std::move(slot_images[image_id]);
+                }
+                pending.canceled = true;
+                pending.retired_image = pending_owner;
+            }
+        }
+    };
+    cancel_pending(uncommitted_downloads);
+    for (auto& downloads : committed_downloads)
+        cancel_pending(downloads);
+    if (!pending_owner && !immediate_delete) {
         sentenced_images.Push(std::move(slot_images[image_id]));
     }
     slot_images.erase(image_id);
@@ -2841,8 +2960,18 @@ void TextureCache<P>::BindRenderTarget(ImageViewId* old_id, ImageViewId new_id) 
     if (new_id) {
         const ImageViewBase& old_view = slot_image_views[new_id];
         if (True(old_view.flags & ImageViewFlagBits::PreemtiveDownload)) {
-            const PendingDownload new_download{true, 0, old_view.image_id};
-            uncommitted_downloads.emplace_back(new_download);
+            PendingDownload new_download{true, 0, old_view.image_id};
+            const auto& image = slot_images[old_view.image_id];
+            // Reserve ownership before enqueue. DeleteImage must remain allocation-free.
+            if constexpr (requires { runtime.ReservePendingReadbackImage(); }) {
+                new_download.retired_image = runtime.ReservePendingReadbackImage();
+            } else {
+                new_download.retired_image = std::make_shared<Image>(NullImageParams{});
+            }
+            new_download.image_info = image.info;
+            new_download.image_address = image.gpu_addr;
+            new_download.image_bytes = image.unswizzled_size_bytes;
+            uncommitted_downloads.emplace_back(std::move(new_download));
         }
     }
     *old_id = new_id;

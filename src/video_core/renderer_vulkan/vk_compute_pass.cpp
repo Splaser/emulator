@@ -309,19 +309,24 @@ DepthStencilDmaPass::DepthStencilDmaPass(const Device& device_, Scheduler& sched
                                          DescriptorPool& pool, ComputePassDescriptorQueue& queue_)
     : ComputePass(device_, pool, INPUT_OUTPUT_DESCRIPTOR_SET_BINDINGS,
                   INPUT_OUTPUT_DESCRIPTOR_UPDATE_TEMPLATE, INPUT_OUTPUT_BANK_INFO,
-                  COMPUTE_PUSH_CONSTANT_RANGE<48>, VULKAN_DEPTH_STENCIL_DMA_COMP_SPV),
+                  COMPUTE_PUSH_CONSTANT_RANGE<52>, VULKAN_DEPTH_STENCIL_DMA_COMP_SPV),
       scheduler{scheduler_}, queue{queue_} {}
 
 void DepthStencilDmaPass::Run(VkBuffer packed, u32 packed_size, VkBuffer planes, u32 planes_size,
-                              std::array<u32, 12> parameters) {
-    if (!packed_size || !planes_size || packed_size > device.GetMaxStorageBufferRange() ||
+                              std::array<u32, 13> parameters) {
+    if (!packed_size || !planes_size || (packed_size & 3u) || (planes_size & 3u) ||
+        packed_size > device.GetMaxStorageBufferRange() ||
         planes_size > device.GetMaxStorageBufferRange() || (parameters[10] & 3) ||
         (parameters[11] & 3) || parameters[10] >= parameters[11]) {
         throw std::invalid_argument("Invalid depth/stencil DMA dispatch range");
     }
     const auto& p = parameters;
+    if (p[12] > 2)
+        throw std::invalid_argument("Unsupported DMA host depth format");
+    const u64 depth_bytes = p[12] == 2 ? 2 : 4;
     const u64 area = u64(p[0]) * p[1];
-    if (!area || area > planes_size / 4 || !p[2] || p[2] > (planes_size / 4) / area) {
+    if (!area || area > planes_size / depth_bytes || !p[2] ||
+        p[2] > (planes_size / depth_bytes) / area) {
         throw std::invalid_argument("Invalid depth/stencil DMA pixel count");
     }
     const u64 count = area * p[2];
@@ -329,8 +334,11 @@ void DepthStencilDmaPass::Run(VkBuffer packed, u32 packed_size, VkBuffer planes,
     if (!p[0] || !p[1] || !p[2] || p[8] > 2 || p[9] > 1 || p[3] < u64(p[0]) * bpp ||
         p[4] < u64(p[1] - 1) * p[3] + u64(p[0]) * bpp ||
         u64(p[5]) + u64(p[2] - 1) * p[4] + u64(p[1] - 1) * p[3] + u64(p[0]) * bpp > packed_size ||
-        u64(p[6]) + count * 4 > planes_size || u64(p[7]) + count > planes_size ||
-        p[11] > (p[9] ? packed_size : planes_size)) {
+        (p[6] & 3u) || (p[7] & 3u) || u64(p[7]) < u64(p[6]) + count * depth_bytes ||
+        u64(p[6]) + count * depth_bytes > planes_size || u64(p[7]) + count > planes_size ||
+        p[11] > (p[9] ? packed_size : planes_size) ||
+        (p[9] ? (p[10] != 0 || p[11] != packed_size)
+              : (p[10] != p[6] || u64(p[11]) < u64(p[7]) + count))) {
         throw std::invalid_argument("Invalid depth/stencil DMA descriptor bounds");
     }
     queue.Acquire();
