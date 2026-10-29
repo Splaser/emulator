@@ -397,8 +397,8 @@ with tempfile.TemporaryDirectory(prefix='async-readback-') as directory:
     run_case('orphan-async-batch-on-publication-failure',code.replace('async_buffers.pop_back();','/* no rollback */;'),False)
     run_case('orphan-staging-on-record-failure',code.replace('runtime.FreeDeferredStagingBuffer(download_map);','/* no release */;'),False)
 
-    run_case('consume-unsignaled-readback',code.replace('if (!scheduler->IsFree(tick))',
-        'if (false && !scheduler->IsFree(tick))'),False)
+    run_case('consume-unsignaled-readback',code.replace('if (!completion_scheduler->IsFree(tick))',
+        'if (false && !completion_scheduler->IsFree(tick))'),False)
 
     run_case('clear-dirty-before-checked-readback',code.replace('images.push_back(image_id);',
         'image.flags &= ~ImageFlagBits::GpuModified; images.push_back(image_id);'),False)

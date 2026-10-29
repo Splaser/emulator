@@ -1130,12 +1130,12 @@ std::shared_ptr<Image> TextureCacheRuntime::ReservePendingReadbackImage() {
 }
 
 void TextureCacheRuntime::RetirePendingReadbackImage(const std::shared_ptr<Image>& owner) {
-    const auto entry = std::ranges::find_if(
+    const auto pending_it = std::ranges::find_if(
         pending_readback_images, [&](const auto& entry) { return entry.owner == owner; });
-    assert(entry != pending_readback_images.end());
-    entry->retired = true;
-    entry->tick = scheduler.CurrentTick();
-    entry->frame = frame_count;
+    assert(pending_it != pending_readback_images.end());
+    pending_it->retired = true;
+    pending_it->tick = scheduler.CurrentTick();
+    pending_it->frame = frame_count;
 }
 
 void TextureCacheRuntime::Finish() {
@@ -2014,10 +2014,10 @@ void Image::UploadMemoryDma(VkBuffer buffer, size_t offset, size_t size,
     }
     scheduler->RequestOutsideRenderPassOperationContext();
     const bool was_initialized = std::exchange(initialized, true);
-    scheduler->Record([buffer = planes.buffer, image = *original_image, aspects = aspect_mask,
+    scheduler->Record([plane_buffer = planes.buffer, image = *original_image, aspects = aspect_mask,
                        was_initialized,
                        regions = std::move(plan.regions)](vk::CommandBuffer cmdbuf) {
-        CopyBufferToImage(cmdbuf, buffer, image, aspects, was_initialized, regions);
+        CopyBufferToImage(cmdbuf, plane_buffer, image, aspects, was_initialized, regions);
     });
     if (scaled) {
         ScaleUp();
@@ -2177,9 +2177,9 @@ std::function<void()> Image::PrepareStagingReadback(const StagingBufferRef& map,
     if (rescaled) {
         ScaleUp(true);
     }
-    return [planes, destination, guest, host, transfers = plan.transfers, scheduler = scheduler,
-            tick = scheduler->CurrentTick()] {
-        if (!scheduler->IsFree(tick)) {
+    return [planes, destination, guest, host, transfers = plan.transfers,
+            completion_scheduler = scheduler, tick = scheduler->CurrentTick()] {
+        if (!completion_scheduler->IsFree(tick)) {
             throw std::logic_error("Staging readback consumed before GPU completion");
         }
         const auto source = planes->mapped_span.subspan(static_cast<size_t>(planes->offset));
