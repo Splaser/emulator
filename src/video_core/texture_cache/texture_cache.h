@@ -1256,12 +1256,12 @@ std::function<void()> TextureCache<P>::DownloadImageMemorySynchronous(
     Image& image, StagingBuffer& staging, std::span<const BufferImageCopy> copies) {
     if constexpr (requires { image.NeedsSynchronousDownloadBaseline(); }) {
         const bool baseline = image.NeedsSynchronousDownloadBaseline();
-        auto complete = image.PrepareStagingReadback(staging, copies);
+        auto pack_after_completion = image.PrepareStagingReadback(staging, copies);
         if (!baseline)
-            return complete;
+            return pack_after_completion;
         return [this, info = image.info, address = image.gpu_addr,
                 destination = staging.mapped_span.subspan(static_cast<size_t>(staging.offset)),
-                complete = std::move(complete)] {
+                complete = std::move(pack_after_completion)] {
             // Seed after GPU completion so later guest padding writes are preserved too.
             Tegra::Memory::GpuGuestMemory<u8, Tegra::Memory::GuestMemoryFlags::UnsafeRead> guest(
                 *gpu_memory, address, CalculateGuestSizeInBytes(info), &swizzle_data_buffer);
