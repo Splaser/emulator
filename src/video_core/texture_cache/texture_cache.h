@@ -3030,18 +3030,85 @@ bool TextureCache<P>::IsFullClear(ImageViewId id) {
     const ImageBase& image = slot_images[image_view.image_id];
     const Extent3D size = image_view.size;
     const auto& regs = maxwell3d->regs;
-    const auto& scissor = regs.scissor_test[0];
-    if (image.info.resources.levels > 1 || image.info.resources.layers > 1) {
-        // Images with multiple resources can't be cleared in a single call
+    if (is_rescaling || image.info.resources.levels > 1 || image.info.resources.layers > 1 ||
+        image.info.size.depth != 1 || regs.clear_surface.layer != 0) {
+        // Discarding contents affects the whole image, not just the cleared subresource.
+        // Rescaling can also clamp image dimensions differently from the clear rectangle.
         return false;
     }
-    if (regs.clear_control.use_scissor == 0) {
-        // If scissor testing is disabled, the clear is always full
+
+    const auto& clear = regs.clear_surface;
+    const SurfaceType type = GetFormatType(image.info.format);
+    switch (type) {
+    case SurfaceType::ColorTexture: {
+        const size_t target = clear.RT;
+        if (target >= render_targets.color_buffer_ids.size() ||
+            render_targets.color_buffer_ids[target] != id ||
+            !(clear.R && clear.G && clear.B && clear.A)) {
+            return false;
+        }
+        break;
+    }
+    case SurfaceType::Depth:
+        if (!clear.Z) {
+            return false;
+        }
+        break;
+    case SurfaceType::Stencil:
+        if (!clear.S) {
+            return false;
+        }
+        break;
+    case SurfaceType::DepthStencil:
+        if (!clear.Z || !clear.S) {
+            return false;
+        }
+        break;
+    default:
+        return false;
+    }
+    if (type != SurfaceType::ColorTexture && render_targets.depth_buffer_id != id) {
+        return false;
+    }
+    if ((type == SurfaceType::Stencil || type == SurfaceType::DepthStencil) &&
+        regs.clear_control.respect_stencil_mask &&
+        static_cast<u8>(regs.stencil_front_mask) != 0xFF) {
+        return false;
+    }
+
+    // These windows can reduce the clear even when scissor 0 is disabled. Keep their
+    // contents until the actual clear rectangle has been resolved by the renderer.
+    if (regs.clear_control.use_clear_rect || regs.clear_control.use_viewport_clip0) {
+        return false;
+    }
+    if (regs.surface_clip.width < size.width || regs.surface_clip.height < size.height) {
+        return false;
+    }
+    // The framebuffer render area is also limited by every bound attachment.
+    const auto covers_image = [&](ImageViewId attachment) {
+        if (!attachment) {
+            return true;
+        }
+        const auto& attachment_size = slot_image_views[attachment].size;
+        return attachment_size.width >= size.width && attachment_size.height >= size.height;
+    };
+    if (!std::ranges::all_of(render_targets.color_buffer_ids, covers_image) ||
+        !covers_image(render_targets.depth_buffer_id)) {
+        return false;
+    }
+    const auto& scissor = regs.scissor_test[0];
+    if (!regs.clear_control.use_scissor || !scissor.enable) {
         return true;
     }
-    // Make sure the clear covers all texels in the subresource
-    return scissor.min_x == 0 && scissor.min_y == 0 && scissor.max_x >= size.width &&
-           scissor.max_y >= size.height;
+    if (scissor.min_x != 0 || scissor.max_x < size.width) {
+        return false;
+    }
+    const bool lower_left =
+        regs.window_origin.mode != Tegra::Engines::Maxwell3D::Regs::WindowOrigin::Mode::UpperLeft;
+    const s64 clip_height = regs.surface_clip.height;
+    const s64 min_y = lower_left ? clip_height - scissor.max_y : scissor.min_y.Value();
+    const s64 max_y = lower_left ? clip_height - scissor.min_y : scissor.max_y.Value();
+    return min_y <= 0 && max_y >= size.height;
 }
 
 template <class P>
