@@ -2094,12 +2094,23 @@ void Image::UploadMemory(const StagingBufferRef& map, std::span<const BufferImag
         UploadMemory(map.buffer, map.offset, copies);
         return;
     }
+    UploadDepthStencil(map.mapped_span, copies);
+}
+
+void Image::UploadDepthStencil(std::span<const u8> packed,
+                              std::span<const BufferImageCopy> copies) {
+    if (!NeedsSynchronousDownloadBaseline()) {
+        throw std::invalid_argument("CPU depth/stencil upload requires a combined format");
+    }
+    if (copies.empty()) {
+        return;
+    }
     const auto guest = GuestDepthStencilFormat(info.format);
     const auto host = HostDepthStencilFormat(image_format);
-    auto plan = PlanStagingDepthStencilCopies(info, guest, host, copies, map.mapped_span.size());
+    auto plan = PlanStagingDepthStencilCopies(info, guest, host, copies, packed.size());
     const auto planes = runtime->UploadStagingBuffer(plan.size);
     for (const auto& transfer : plan.transfers) {
-        if (!DS::UnpackTransfer(guest, host, transfer, map.mapped_span, planes.mapped_span)) {
+        if (!DS::UnpackTransfer(guest, host, transfer, packed, planes.mapped_span)) {
             throw std::invalid_argument("Invalid staging depth/stencil unpack");
         }
     }
