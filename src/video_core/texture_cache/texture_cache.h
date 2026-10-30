@@ -1241,6 +1241,25 @@ void TextureCache<P>::RefreshContents(Image& image, ImageId image_id) {
         QueueAsyncDecode(image, image_id);
         return;
     }
+    if constexpr (requires {
+                      image.UploadDepthStencil(std::span<const u8>{},
+                                               std::span<const BufferImageCopy>{});
+                  }) {
+        if (GetFormatType(image.info.format) == SurfaceType::DepthStencil) {
+            // Upload mappings may be write-combined/uncached. Never write the packed
+            // data there only to read it back pixel by pixel during CPU conversion.
+            unswizzle_data_buffer.resize_destructive(image.unswizzled_size_bytes);
+            Tegra::Memory::GpuGuestMemory<u8, Tegra::Memory::GuestMemoryFlags::UnsafeRead> guest(
+                *gpu_memory, image.gpu_addr, image.guest_size_bytes, &swizzle_data_buffer);
+            const auto copies = UnswizzleImage(*gpu_memory, image.gpu_addr, image.info, guest,
+                                               unswizzle_data_buffer);
+            image.UploadDepthStencil(
+                std::span<const u8>{unswizzle_data_buffer.data(), image.unswizzled_size_bytes},
+                copies);
+            runtime.InsertUploadMemoryBarrier();
+            return;
+        }
+    }
     auto staging = runtime.UploadStagingBuffer(MapSizeBytes(image));
     UploadImageContents(image, staging);
     runtime.InsertUploadMemoryBarrier();

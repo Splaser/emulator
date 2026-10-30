@@ -203,6 +203,11 @@ public:
     void UploadMemory(const StagingBufferRef& map,
                       std::span<const VideoCommon::BufferImageCopy> copies);
 
+    // Consume cached CPU guest-layout bytes synchronously. Only the converted
+    // aspect planes are placed in upload memory and retained for GPU execution.
+    void UploadDepthStencil(std::span<const u8> packed,
+                           std::span<const VideoCommon::BufferImageCopy> copies);
+
     void DownloadMemory(VkBuffer buffer, size_t offset,
                         std::span<const VideoCommon::BufferImageCopy> copies);
 
