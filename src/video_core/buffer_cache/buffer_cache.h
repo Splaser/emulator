@@ -1986,8 +1986,14 @@ bool BufferCache<P>::IsRegionCpuModified(DAddr addr, size_t size) {
 template <class P>
 void BufferCache<P>::ResolveCachedBinding(Binding& binding) {
     ResolveScatter(binding.device_addr, binding.size);
-    // A scatter may grow a buffer and clear this cached id through DeleteBuffer.
-    if (binding.buffer_id == NULL_BUFFER_ID && binding.device_addr && binding.size) {
+    if (!binding.device_addr || !binding.size) {
+        return;
+    }
+    // DeleteBuffer clears bindings to the invalid id, not the null-buffer slot.
+    // Slot ids have no generation: another channel can also retain an id that
+    // has since been reused for a buffer covering a different address range.
+    if (binding.buffer_id == NULL_BUFFER_ID || !slot_buffers.contains(binding.buffer_id) ||
+        !slot_buffers[binding.buffer_id].IsInBounds(binding.device_addr, binding.size)) {
         binding.buffer_id = FindBuffer(binding.device_addr, binding.size);
     }
 }
