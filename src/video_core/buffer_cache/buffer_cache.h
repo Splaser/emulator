@@ -831,7 +831,22 @@ bool BufferCache<P>::IsRegionCpuModified(DAddr addr, size_t size) {
 }
 
 template <class P>
+void BufferCache<P>::ResolveCachedBinding(Binding& binding) {
+    if (!binding.device_addr || !binding.size) {
+        return;
+    }
+    // DeleteBuffer clears bindings to the invalid id, not the null-buffer slot.
+    // Slot ids have no generation: another channel can also retain an id that
+    // has since been reused for a buffer covering a different address range.
+    if (binding.buffer_id == NULL_BUFFER_ID || !slot_buffers.contains(binding.buffer_id) ||
+        !slot_buffers[binding.buffer_id].IsInBounds(binding.device_addr, binding.size)) {
+        binding.buffer_id = FindBuffer(binding.device_addr, binding.size);
+    }
+}
+
+template <class P>
 void BufferCache<P>::BindHostIndexBuffer() {
+    ResolveCachedBinding(channel_state->index_buffer);
     Buffer& buffer = slot_buffers[channel_state->index_buffer.buffer_id];
     TouchBuffer(buffer, channel_state->index_buffer.buffer_id);
     const u32 offset = buffer.Offset(channel_state->index_buffer.device_addr);
@@ -897,7 +912,8 @@ void BufferCache<P>::BindHostVertexBuffers() {
     auto& flags = maxwell3d->dirty.flags;
     // Most of the vertex streams are off in any one draw, and those have nothing to upload
     ForEachEnabledBit(channel_state->enabled_vertex_buffers, [&](u32 index) {
-        const Binding& binding = channel_state->vertex_buffers[index];
+        Binding& binding = channel_state->vertex_buffers[index];
+        ResolveCachedBinding(binding);
         Buffer& buffer = slot_buffers[binding.buffer_id];
         TouchBuffer(buffer, binding.buffer_id);
         SynchronizeBuffer(buffer, binding.device_addr, binding.size);
@@ -918,7 +934,8 @@ void BufferCache<P>::BindHostVertexBuffers() {
         for (u32 index = host_bindings.min_index; index < host_bindings.max_index; index++) {
             flags[Dirty::VertexBuffer0 + index] = false;
 
-            const Binding& binding = channel_state->vertex_buffers[index];
+            Binding& binding = channel_state->vertex_buffers[index];
+            ResolveCachedBinding(binding);
             Buffer& buffer = slot_buffers[binding.buffer_id];
 
             const u32 stride = maxwell3d->regs.vertex_streams[index].stride;
@@ -966,7 +983,8 @@ void BufferCache<P>::BindHostVertexBuffers() {
 
 template <class P>
 void BufferCache<P>::BindHostDrawIndirectBuffers() {
-    const auto bind_buffer = [this](const Binding& binding) {
+    const auto bind_buffer = [this](Binding& binding) {
+        ResolveCachedBinding(binding);
         Buffer& buffer = slot_buffers[binding.buffer_id];
         TouchBuffer(buffer, binding.buffer_id);
         SynchronizeBuffer(buffer, binding.device_addr, binding.size);
@@ -996,10 +1014,11 @@ void BufferCache<P>::BindHostGraphicsUniformBuffers(size_t stage) {
 template <class P>
 void BufferCache<P>::BindHostGraphicsUniformBuffer(size_t stage, u32 index, u32 binding_index,
                                                    bool needs_bind) {
-    const Binding& binding = channel_state->uniform_buffers[stage][index];
+    Binding& binding = channel_state->uniform_buffers[stage][index];
     const DAddr device_addr = binding.device_addr;
     const u32 shader_size = (*channel_state->uniform_buffer_sizes)[stage][index];
     const u32 size = std::min(binding.size, shader_size);
+    ResolveCachedBinding(binding);
     Buffer& buffer = slot_buffers[binding.buffer_id];
     TouchBuffer(buffer, binding.buffer_id);
     if (binding.buffer_id != NULL_BUFFER_ID && shader_size > binding.size &&
@@ -1108,7 +1127,8 @@ template <class P>
 void BufferCache<P>::BindHostGraphicsStorageBuffers(size_t stage) {
     u32 binding_index = 0;
     ForEachEnabledBit(channel_state->enabled_storage_buffers[stage], [&](u32 index) {
-        const Binding& binding = channel_state->storage_buffers[stage][index];
+        Binding& binding = channel_state->storage_buffers[stage][index];
+        ResolveCachedBinding(binding);
         Buffer& buffer = slot_buffers[binding.buffer_id];
         TouchBuffer(buffer, binding.buffer_id);
         const u32 size = binding.size;
@@ -1134,7 +1154,8 @@ void BufferCache<P>::BindHostGraphicsStorageBuffers(size_t stage) {
 template <class P>
 void BufferCache<P>::BindHostGraphicsTextureBuffers(size_t stage) {
     ForEachEnabledBit(channel_state->enabled_texture_buffers[stage], [&](u32 index) {
-        const TextureBufferBinding& binding = channel_state->texture_buffers[stage][index];
+        TextureBufferBinding& binding = channel_state->texture_buffers[stage][index];
+        ResolveCachedBinding(binding);
         Buffer& buffer = slot_buffers[binding.buffer_id];
         const u32 size = binding.size;
         SynchronizeBuffer(buffer, binding.device_addr, size);
@@ -1166,11 +1187,12 @@ void BufferCache<P>::BindHostTransformFeedbackBuffers() {
     }
     HostBindings<typename P::Buffer> host_bindings;
     for (u32 index = 0; index < NUM_TRANSFORM_FEEDBACK_BUFFERS; ++index) {
-        const Binding& binding = channel_state->transform_feedback_buffers[index];
+        Binding& binding = channel_state->transform_feedback_buffers[index];
         if (maxwell3d->regs.transform_feedback.controls[index].varying_count == 0 &&
             maxwell3d->regs.transform_feedback.controls[index].stride == 0) {
             break;
         }
+        ResolveCachedBinding(binding);
         Buffer& buffer = slot_buffers[binding.buffer_id];
         TouchBuffer(buffer, binding.buffer_id);
         const u32 size = binding.size;
@@ -1214,7 +1236,8 @@ void BufferCache<P>::BindHostComputeUniformBuffers() {
     }
     u32 binding_index = 0;
     ForEachEnabledBit(channel_state->enabled_compute_uniform_buffer_mask, [&](u32 index) {
-        const Binding& binding = channel_state->compute_uniform_buffers[index];
+        Binding& binding = channel_state->compute_uniform_buffers[index];
+        ResolveCachedBinding(binding);
         Buffer& buffer = slot_buffers[binding.buffer_id];
         TouchBuffer(buffer, binding.buffer_id);
         const u32 size =
@@ -1244,7 +1267,8 @@ template <class P>
 void BufferCache<P>::BindHostComputeStorageBuffers() {
     u32 binding_index = 0;
     ForEachEnabledBit(channel_state->enabled_compute_storage_buffers, [&](u32 index) {
-        const Binding& binding = channel_state->compute_storage_buffers[index];
+        Binding& binding = channel_state->compute_storage_buffers[index];
+        ResolveCachedBinding(binding);
         Buffer& buffer = slot_buffers[binding.buffer_id];
         TouchBuffer(buffer, binding.buffer_id);
         const u32 size = binding.size;
@@ -1271,7 +1295,8 @@ void BufferCache<P>::BindHostComputeStorageBuffers() {
 template <class P>
 void BufferCache<P>::BindHostComputeTextureBuffers() {
     ForEachEnabledBit(channel_state->enabled_compute_texture_buffers, [&](u32 index) {
-        const TextureBufferBinding& binding = channel_state->compute_texture_buffers[index];
+        TextureBufferBinding& binding = channel_state->compute_texture_buffers[index];
+        ResolveCachedBinding(binding);
         Buffer& buffer = slot_buffers[binding.buffer_id];
         const u32 size = binding.size;
         SynchronizeBuffer(buffer, binding.device_addr, size);

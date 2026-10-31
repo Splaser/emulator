@@ -412,6 +412,8 @@ public:
         };
     }
 
+    void ResolveCachedBinding(Binding& binding);
+
     void BindHostIndexBuffer();
 
     void BindHostVertexBuffers();
