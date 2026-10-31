@@ -1935,10 +1935,11 @@ void BufferCache<P>::MappedUploadMemory([[maybe_unused]] Buffer& buffer,
         }
         const bool can_reorder = runtime.CanReorderUpload(buffer, copies);
         runtime.CopyBuffer(buffer, upload_staging.buffer, copies, true, can_reorder);
-        // The GPU copy writes these ranges: a later direct write must wait for it.
-        const u64 tick = runtime.CurrentTick();
+        // Track the copy as a use as well as a page write. A pooled staging source can
+        // put it in the main command buffer; a later overlapping stream upload must
+        // not be reordered ahead of that write into the upload command buffer.
         for (const BufferCopy& copy : copies) {
-            Uma::StampPages(buffer.page_gpu_tick, copy.dst_offset, copy.size, tick);
+            MarkGpuUse(buffer, copy.dst_offset, copy.size);
         }
     }
 }
@@ -1982,8 +1983,7 @@ void BufferCache<P>::InlineMemoryImplementation(DAddr dest_address, size_t copy_
         std::memcpy(src_pointer, inlined_buffer.data(), copy_size);
         const bool can_reorder = runtime.CanReorderUpload(buffer, copies);
         runtime.CopyBuffer(buffer, upload_staging.buffer, copies, true, can_reorder);
-        Uma::StampPages(buffer.page_gpu_tick, buffer.Offset(dest_address), copy_size,
-                        runtime.CurrentTick());
+        MarkGpuUse(buffer, buffer.Offset(dest_address), copy_size);
     } else {
         buffer.ImmediateUpload(buffer.Offset(dest_address), inlined_buffer.first(copy_size));
     }
