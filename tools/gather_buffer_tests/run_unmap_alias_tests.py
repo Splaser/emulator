@@ -49,7 +49,7 @@ head = head.replace('void Subtract(u64, u64) {}', '''void Subtract(u64 d,u64 n) 
     ranges=std::move(keep);
 }''')
 head = head.replace('u64 CpuAddr() const { return base; }',
-    'void ImmediateDownload(u64,std::span<u8>); u64 CpuAddr() const { return base; } bool IsInBounds(u64 d,u64 n) const { return d>=base && d+n<=base+SizeBytes(); }')
+    'void ImmediateDownload(u64,std::span<u8>); u64 CpuAddr() const { return base; }')
 head = head.replace('int copies = 0;', '''int copies = 0, off_thread_copies = 0, downloads = 0;
     std::function<bool()> on_gpu=[] { return false; };
     struct Download {
