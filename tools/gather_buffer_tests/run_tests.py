@@ -151,6 +151,10 @@ struct FakeBuffer {
         return u32(d - base);
     }
     u64 CpuAddr() const { return base; }
+    bool IsInBounds(u64 address, u64 size) const {
+        return address >= base && address - base <= SizeBytes() &&
+               size <= SizeBytes() - (address - base);
+    }
     void IncreaseStreamScore(int) {}
     int StreamScore() const { return 0; }
     void MarkUsage(u64, u64, u64) {}
@@ -318,7 +322,11 @@ struct BufferCache {
     Channel channel;
     Channel* channel_state = &channel;
     RangeSet gpu_modified_ranges, uncommitted_gpu_modified_ranges;
-    std::deque<Buffer> slot_buffers{Buffer{}};
+    struct Slots : std::deque<Buffer> {
+        using std::deque<Buffer>::deque;
+        bool contains(BufferId id) const { return id < this->size(); }
+    };
+    Slots slot_buffers{Buffer{}};
     std::map<u64, BufferId> ids;
     std::map<u64, u8> ram;
     struct Ring {
