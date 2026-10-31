@@ -369,7 +369,9 @@ public:
     std::vector<ControlledRegistrationPtr> controlled_registrations;
     Common::RangeSet<DAddr> uncommitted_gpu_modified_ranges;
     std::deque<Common::RangeSet<DAddr>> committed_gpu_modified_ranges;
-    std::deque<std::vector<BufferCopy>> pending_downloads;
+    // Controlled exclusion must also retain copies whose valid byte ranges were cancelled.
+    struct PendingDownload { std::vector<BufferCopy> copies; };
+    std::deque<PendingDownload> pending_downloads;
     BufferCache(Cpu& cpu,Runtime& runtime_):runtime{runtime_},device_tracker{cpu},memory_tracker{device_tracker},
         device_memory{cpu.system.device.buffer} {(void)slot_buffers.insert(runtime,0,C);}
     bool IsRegionPageTableAddressable(u64 address,u64 size) const {return size && address<1ULL<<39 && size<=(1ULL<<39)-address;}
@@ -379,7 +381,7 @@ public:
     void SetPageBufferId(u64 page,BufferId id) {page_table[page]=id;}
     bool IsRegionRegistered(u64 address,u64 size) const {return size && bool(GetPageBufferId(address/C)) && bool(GetPageBufferId((address+size-1)/C));}
     void NotifyGatherWrite(u64,u64) {}
-    struct Ranges {void Subtract(u64,u64) {}} gpu_modified_ranges; // Exact range container collaborator.
+    Common::RangeSet<DAddr> gpu_modified_ranges;
     void ClearDownload(u64,u64) {} // Pending async download container collaborator.
     void CheckControlledSynchronization(DAddr,u64);
     bool ControlledReadbacksIdle(const ControlledRegistrationPtr&);
@@ -1028,8 +1030,8 @@ void readback_exclusion() {
         if(mode==0) s->cache->uncommitted_gpu_modified_ranges.Add(alias,1);
         if(mode==1) {s->cache->committed_gpu_modified_ranges.emplace_back();
             s->cache->committed_gpu_modified_ranges.back().Add(alias,1);}
-        if(mode==2) s->cache->pending_downloads.push_back({BufferCopy{alias,0,1}});
-        if(mode==3) s->cache->pending_downloads.push_back({BufferCopy{ALIAS+C,0,1}});
+        if(mode==2) s->cache->pending_downloads.push_back({{BufferCopy{alias,0,1}}});
+        if(mode==3) s->cache->pending_downloads.push_back({{BufferCopy{ALIAS+C,0,1}}});
         std::unique_lock mapping{s->cache->device_memory.mapping_guard,std::defer_lock};
         if(mode==4) mapping.lock();
         auto tx=s->cache->BeginControlledCpuWriteRequest(op,request);

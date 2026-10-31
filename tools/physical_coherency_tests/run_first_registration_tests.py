@@ -166,6 +166,7 @@ prefix = r'''
 #include <stdexcept>
 #include <vector>
 #include <boost/container/small_vector.hpp>
+#include "common/range_sets.inc"
 #include "video_core/buffer_cache/memory_tracker_base.h"
 using DAddr=u64;
 constexpr u64 DEVICE_PAGESIZE=4096, C=65536, A=65536, ALIAS=3*C, B=0x80000000;
@@ -216,6 +217,7 @@ template<class P> struct BufferCache {
     using Buffer=FakeBuffer;
     DeviceTracker device_tracker;
     VideoCommon::MemoryTrackerBase<DeviceTracker> memory_tracker;
+    Common::RangeSet<DAddr> gpu_modified_ranges;
     struct DeviceMemory {
         Common::HostMemory& backing;
         template<class T> T* GetPointer(u64 address) {
