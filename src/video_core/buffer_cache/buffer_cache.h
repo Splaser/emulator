@@ -2153,7 +2153,7 @@ void BufferCache<P>::BindHostGraphicsUniformBuffer(size_t stage, u32 index, u32 
     TouchBuffer(buffer, binding.buffer_id);
     if (binding.buffer_id != NULL_BUFFER_ID && shader_size > binding.size &&
         runtime.NeedsPaddedUniformBuffer(binding.size) &&
-        !memory_tracker.IsRegionGpuModified(device_addr, size)) {
+        !IsRegionGpuModified(device_addr, size)) {
         const std::span<u8> span =
             runtime.BindMappedUniformBuffer(stage, binding_index, shader_size);
         device_memory.ReadBlockUnsafe(device_addr, span.data(), size,
@@ -2166,9 +2166,11 @@ void BufferCache<P>::BindHostGraphicsUniformBuffer(size_t stage, u32 index, u32 
     // copy cannot run inside a render pass: the pass would end before the draw and start again
     // after it, which on a tiled GPU stores and reloads every attachment. Galaxy's gameplay did
     // this on every draw. The cached copy stays marked as modified for its other users.
+    // A neighboring CPU write can hide the coarse GPU page bit; guest-memory streaming
+    // must check precise GPU ownership just like the cached upload path.
     const bool use_fast_buffer =
         binding.buffer_id != NULL_BUFFER_ID &&
-        !memory_tracker.IsRegionGpuModified(device_addr, size) &&
+        !IsRegionGpuModified(device_addr, size) &&
         (size <= channel_state->uniform_buffer_skip_cache_size ||
          UploadNeedsOrderedCopy(buffer, device_addr, size));
     if (use_fast_buffer) {
