@@ -1064,6 +1064,9 @@ void BufferCache<P>::DownloadMemory(DAddr device_addr, u64 size) {
 template <class P>
 void BufferCache<P>::ClearDownload(DAddr device_addr, u64 size) {
     async_downloads.DeleteAll(device_addr, size);
+    for (auto& download : pending_downloads) {
+        download.valid_ranges.Subtract(device_addr, size);
+    }
     uncommitted_gpu_modified_ranges.Subtract(device_addr, size);
     for (auto& interval_set : committed_gpu_modified_ranges) {
         interval_set.Subtract(device_addr, size);
@@ -1819,7 +1822,7 @@ void BufferCache<P>::CommitAsyncFlushesHigh() {
         return;
     }
     auto download_staging = runtime.DownloadStagingBuffer(total_size_bytes, true);
-    boost::container::small_vector<BufferCopy, 4> normalized_copies;
+    PendingDownload pending_download;
     runtime.PreCopyBarrier();
     boost::container::small_vector<BufferCopy, 16> batch;
     BufferId batch_id{};
@@ -1836,17 +1839,18 @@ void BufferCache<P>::CommitAsyncFlushesHigh() {
         second_copy.src_offset = static_cast<size_t>(buffer.CpuAddr()) + copy.src_offset;
         const DAddr orig_device_addr = static_cast<DAddr>(second_copy.src_offset);
         async_downloads.Add(orig_device_addr, copy.size);
+        pending_download.valid_ranges.Add(orig_device_addr, copy.size);
         MarkGpuUse(buffer, copy.src_offset, copy.size);
         if (buffer_id != batch_id) {
             flush_batch();
             batch_id = buffer_id;
         }
         batch.push_back(copy);
-        normalized_copies.push_back(second_copy);
+        pending_download.copies.push_back(second_copy);
     }
     flush_batch();
     runtime.PostCopyBarrier();
-    pending_downloads.emplace_back(std::move(normalized_copies));
+    pending_downloads.emplace_back(std::move(pending_download));
     async_buffers.emplace_back(download_staging);
 }
 
@@ -1872,21 +1876,27 @@ void BufferCache<P>::PopAsyncBuffers() {
     auto& downloads = pending_downloads.front();
     // Validate every destination before any copyback or queue/range retirement. Otherwise
     // a later conflicting copy could reject after an earlier one has already written.
-    for (const auto& copy : downloads)
+    for (const auto& copy : downloads.copies)
         CheckControlledSynchronization(static_cast<DAddr>(copy.src_offset), copy.size);
     auto& async_buffer = async_buffers.front();
     u8* base = async_buffer->mapped_span.data();
     const size_t base_offset = async_buffer->offset;
-    for (const auto& copy : downloads) {
+    for (const auto& copy : downloads.copies) {
         const DAddr device_addr = static_cast<DAddr>(copy.src_offset);
         const u64 dst_offset = copy.dst_offset - base_offset;
         const u8* read_mapped_memory = base + dst_offset;
-        async_downloads.ForEachInRange(device_addr, copy.size, [&](DAddr start, DAddr end, s32) {
-            WriteBackDownload(start, &read_mapped_memory[start - device_addr], end - start);
-        });
-        async_downloads.Subtract(device_addr, copy.size, [&](DAddr start, DAddr end) {
-            gpu_modified_ranges.Subtract(start, end - start);
-        });
+        downloads.valid_ranges.ForEachInRange(
+            device_addr, copy.size, [&](DAddr valid_start, DAddr valid_end) {
+                async_downloads.ForEachInRange(
+                    valid_start, valid_end - valid_start, [&](DAddr start, DAddr end, s32) {
+                        WriteBackDownload(start, &read_mapped_memory[start - device_addr],
+                                          end - start);
+                    });
+                async_downloads.Subtract(valid_start, valid_end - valid_start,
+                                        [&](DAddr start, DAddr end) {
+                                            gpu_modified_ranges.Subtract(start, end - start);
+                                        });
+            });
     }
     async_buffers_death_ring.emplace_back(*async_buffer);
     async_buffers.pop_front();
@@ -2771,6 +2781,7 @@ void BufferCache<P>::UpdateComputeTextureBuffers() {
 
 template <class P>
 void BufferCache<P>::MarkWrittenBuffer(BufferId buffer_id, DAddr device_addr, u32 size) {
+    ClearDownload(device_addr, size);
     NotifyGatherWrite(device_addr, size, 2); // the write happens after this bind
     memory_tracker.MarkRegionAsGpuModified(device_addr, size);
     gpu_modified_ranges.Add(device_addr, size);
@@ -3054,7 +3065,7 @@ bool BufferCache<P>::ControlledReadbacksIdle(const ControlledRegistrationPtr& op
                     // pending_downloads also retains copies invalidated in async_downloads;
                     // conservatively require their queued native/callback identity to retire.
                     for (const auto& batch : pending_downloads) {
-                        for (const auto& copy : batch) {
+                        for (const auto& copy : batch.copies) {
                             const DAddr start = static_cast<DAddr>(copy.src_offset);
                             if (start <= address ? address - start < copy.size
                                                  : start - address < DEVICE_PAGESIZE)
@@ -4098,6 +4109,7 @@ void BufferCache<P>::FlushGatherWrites() {
         // Bookkeeping now, so downloads and DMA see the range as GPU-modified (they write back
         // first through ResolveScatter)
         for (const GatherChunk& chunk : entry.chunks) {
+            ClearDownload(chunk.device_addr, chunk.size);
             NotifyGatherWrite(chunk.device_addr, chunk.size, 1, gpu_addr);
             memory_tracker.MarkRegionAsGpuModified(chunk.device_addr, chunk.size);
             gpu_modified_ranges.Add(chunk.device_addr, chunk.size);
@@ -4160,6 +4172,7 @@ void BufferCache<P>::ScatterGatherEntry(GPUVAddr gpu_addr, GatherEntry& entry) {
             runtime.CopyBuffer(dst, scratch, copies, true);
         }
         // Same bookkeeping as MarkWrittenBuffer, without dirtying this gather's own chunks
+        ClearDownload(chunk.device_addr, chunk.size);
         NotifyGatherWrite(chunk.device_addr, chunk.size, 1, gpu_addr);
         memory_tracker.MarkRegionAsGpuModified(chunk.device_addr, chunk.size);
         gpu_modified_ranges.Add(chunk.device_addr, chunk.size);

@@ -123,3 +123,15 @@ cause and the existing fallback, not the patched APK or an FPS improvement.
 
 These checks do not exercise Vulkan drivers, real GPU command scheduling, Android builds
 or game rendering. Device testing is still needed for correctness and performance.
+
+`run_readback_generation_tests.py --negative-controls` compiles the production
+readback batch structure and cache write/cancellation/retirement methods with the
+real page tracker and interval sets. Distinct host-owned byte snapshots stand in
+for already-completed staging copies; no Vulkan completion is simulated. It checks
+later GPU writes, partial CPU cancellation followed by another queued readback,
+overlapping snapshots, page boundaries, nonzero staging offsets and empty batches.
+The earlier snapshot must neither copy stale bytes into guest backing nor retire
+ownership belonging to a later write. Removing GPU-write invalidation and using
+only the global address mask are independent negative controls. The saved
+`caec6a7ec` methods fail all three overwrite/requeue witnesses while the unaffected
+controls pass. This proves a cache bookkeeping defect, not the cause of the FFR hang.

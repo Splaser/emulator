@@ -34,6 +34,13 @@ enum class ObtainBufferSynchronize { NoSynchronize, FullSynchronize };
 enum class ObtainBufferOperation { None, MarkAsWritten, DiscardWrite };
 namespace Uma { void StampPages(std::vector<u64>&, u64, u64, u64) {} }
 struct AsyncBuffer { std::span<u8> mapped_span; size_t offset{}; };
+struct PendingDownload {
+    std::vector<BufferCopy> copies;
+    Common::RangeSet<DAddr> valid_ranges;
+    // Keep saved pre-fix methods compilable for negative controls.
+    auto begin() { return copies.begin(); }
+    auto end() { return copies.end(); }
+};
 template <class P> struct BufferCache {
     using Buffer = typename P::Buffer;
     DeviceTracker device_tracker;
@@ -41,7 +48,7 @@ template <class P> struct BufferCache {
     Common::RangeSet<DAddr> gpu_modified_ranges, uncommitted_gpu_modified_ranges;
     std::deque<Common::RangeSet<DAddr>> committed_gpu_modified_ranges;
     Common::OverlapRangeSet<DAddr> async_downloads;
-    std::deque<std::vector<BufferCopy>> pending_downloads;
+    std::deque<PendingDownload> pending_downloads;
     std::deque<std::optional<AsyncBuffer>> async_buffers;
     std::vector<AsyncBuffer> async_buffers_death_ring;
     Buffer buffer;
@@ -99,7 +106,10 @@ template <class P> struct BufferCache {
         // CommitAsyncFlushesHigh queries the real GPU tracker without clearing it.
         memory_tracker.ForEachDownloadRange(BASE + start, size, false, [](u64, u64) {});
         committed_gpu_modified_ranges.emplace_back(std::move(uncommitted_gpu_modified_ranges));
-        pending_downloads.push_back({BufferCopy{BASE + start, start, size}});
+        PendingDownload download;
+        download.copies.push_back(BufferCopy{BASE + start, start, size});
+        download.valid_ranges.Add(BASE + start, size);
+        pending_downloads.push_back(std::move(download));
         async_downloads.Add(BASE + start, size);
         async_buffers.push_back(AsyncBuffer{readback});
     }
